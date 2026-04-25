@@ -5,18 +5,21 @@ import Link from 'next/link'
 import { getProjects } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import ProjectCard from './ProjectCard'
+import { useAuth } from '@/lib/auth-context'
 
 export default function ProjectsList() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
+  const { user } = useAuth()
 
   useEffect(() => {
-    getProjects()
+    if (user === undefined) return
+    getProjects(user?.id)
       .then(setProjects)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [user])
 
   if (loading) {
     return (

@@ -1,0 +1,142 @@
+I need you to redesign the frontend of this application following a dark node-based visual style inspired by ComfyUI. Here are the exact requirements:
+
+## Visual Style
+- **Background**: Pure black (#000000) or very dark (#0a0a0a). No gradients, no textures.
+- **Nodes**: Rounded dark cards (#111111 or #1a1a1a) with subtle colored borders that glow on hover.
+- **Connectors**: Bezier curves with colored strokes matching the port colors. Active connections show a slow animated pulse.
+- **Ports**: Small colored circles on left (inputs) and right (outputs) of each node.
+- **Typography**: Light gray (#cccccc) on dark. Labels small and minimal.
+- **Accent colors per node category**:
+  - GDD: purple (#7c3aed)
+  - Sprites: blue (#2563eb)
+  - Levels: teal (#0d9488)
+  - Code: green (#16a34a)
+  - Audio: amber (#d97706)
+  - Export: red (#dc2626)
+  - Approval Gate: orange (#ea580c)
+  - Playtesting / Review: gray (#6b7280)
+
+---
+
+## Human-in-the-Loop Architecture
+
+Every major AI generation step is followed by an **Approval Gate node** before the output flows downstream. This ensures a human reviews and approves each artifact before it continues through the pipeline.
+
+### Approval Gate Node — Shared Behavior
+- **Visual**: Distinct hexagonal or shield-shaped node (not a rounded rect) to differentiate it visually from AI nodes. Border color: orange (#ea580c).
+- **States**:
+  - `Pending` → pulsing orange border, shows a preview of the artifact to review
+  - `Approved` → solid green border, connection unlocks and data flows forward
+  - `Rejected` → solid red border, sends feedback back to the source node for regeneration
+  - `Editing` → yellow border, human is modifying the output directly before approving
+- **Inputs**: AI-generated artifact + optional feedback text
+- **Outputs**: Approved artifact, Feedback (on rejection), Edit Delta (on manual edits)
+- **UI inside the node**:
+  - Preview panel (text, image, or code depending on artifact type)
+  - Approve button (green) / Reject button (red) / Edit & Approve button (yellow)
+  - Optional: short feedback textarea shown when rejecting
+- **Behavior**: Pipeline is **paused** at every Approval Gate until a human action is taken. No downstream node executes until approval is granted.
+
+---
+
+## Full Node Pipeline (left to right)
+
+### 1. GDD Node (purple)
+- Inputs: "Game Idea" (text prompt), "Genre Hint" (optional)
+- Outputs: "GDD Draft"
+- AI generates a full Game Design Document
+
+### 2. GDD Approval Gate (orange)
+- Preview: rendered markdown of the GDD
+- Human can approve, reject with notes, or directly edit the document
+- Output: "Approved GDD" → flows to Sprites, Levels, Code, and Audio nodes
+
+### 3. Sprites Node (blue)
+- Inputs: "Approved GDD", "Art Style" (selector: pixel art / cartoon / realistic)
+- Outputs: "Sprite Sheet Draft"
+- AI generates all visual assets
+
+### 4. Sprites Approval Gate (orange)
+- Preview: image grid of generated sprites
+- Human can approve, reject (triggers regeneration with feedback), or swap individual sprites
+- Output: "Approved Sprite Sheet"
+
+### 5. Levels Node (teal)
+- Inputs: "Approved GDD" (level suggestions section), "Approved Sprite Sheet"
+- Outputs: "Level Layouts Draft"
+- AI expands level ideas into full tilemap layouts
+
+### 6. Levels Approval Gate (orange)
+- Preview: top-down visual representation of each level layout
+- Human can approve, reject specific levels, or manually adjust layout data
+- Output: "Approved Level Layouts"
+
+### 7. Code Node (green)
+- Inputs: "Approved GDD", "Approved Level Layouts", "Approved Sprite Sheet"
+- Outputs: "Source Code Draft"
+- AI generates game code (target engine selectable: Godot / Phaser / Unity)
+
+### 8. Code Approval Gate (orange)
+- Preview: syntax-highlighted code viewer with file tree
+- Human can approve, reject with comments, or edit specific files inline
+- Output: "Approved Source Code"
+
+### 9. Audio Node (amber)
+- Inputs: "Approved GDD" (genre + mood), "Approved Source Code" (game events list)
+- Outputs: "Music Tracks Draft", "SFX Pack Draft"
+- AI generates background music and sound effects
+
+### 10. Audio Approval Gate (orange)
+- Preview: inline audio player for each track and SFX
+- Human can approve individual tracks, reject and regenerate specific ones, or adjust mood/tempo parameters
+- Output: "Approved Music Tracks", "Approved SFX Pack"
+
+### 11. Playtesting Node (gray)
+- Inputs: "Approved Source Code", "Approved Level Layouts"
+- Outputs: "Bug Report", "Balance Suggestions"
+- Automated AI playtesting simulation
+
+### 12. Playtesting Review Gate (orange)
+- Preview: list of bugs and balance issues with severity ratings
+- Human marks which bugs to fix, which suggestions to accept, and sets priorities
+- Output: "Confirmed Bug List", "Accepted Suggestions"
+- Can loop back to Code Node or Levels Node for fixes
+
+### 13. Review & Iteration Node (gray)
+- Inputs: "Confirmed Bug List", "Accepted Suggestions", "Approved GDD"
+- Outputs: "Updated GDD", "Patch Notes"
+- AI consolidates all feedback and proposes a revised iteration plan
+
+### 14. Export Node (red)
+- Inputs: All approved artifacts
+- Outputs: "Build (.zip)", "Itch.io Package", "Web Build"
+- Only executes when ALL upstream gates are in Approved state
+
+---
+
+## Pipeline State Management
+
+- Maintain a global pipeline state object tracking each node's status: `idle | running | awaiting_approval | approved | rejected | error`
+- The top bar should show an overall pipeline progress indicator with per-step status dots
+- **Export Node is locked** until every Approval Gate is in `approved` state — show a padlock icon and tooltip explaining which gates are still pending
+- Rejected nodes highlight the upstream AI node in red to signal it needs to regenerate
+- Support **partial re-runs**: if a gate is rejected and the AI node regenerates, only downstream nodes from that point reset — upstream approved nodes keep their state
+
+---
+
+## Canvas & Interaction
+
+- Infinite canvas with pan and zoom
+- Nodes are draggable and auto-snap to a grid
+- Bezier connectors with port-colored strokes; active data flow shows animated dash pulse
+- Collapsible nodes (click header to minimize)
+- Minimap in bottom-right corner
+- Left sidebar with node palette (drag to canvas to add)
+- Top bar: "GameForge AI" title left, action buttons right (Run Pipeline / Pause / Reset / Save State)
+- Status bar at bottom: current pipeline phase + last human action timestamp
+
+---
+
+## Tech Stack
+
+Audit the current project structure first. If flexible, prefer React Flow or Svelte Flow for the node canvas. If neither is available, implement with HTML5 Canvas + custom drag logic. Start with: (1) visual theme, (2) canvas system, (3) AI nodes, (4) Approval Gate nodes and their state logic.

@@ -1,4 +1,4 @@
-import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult } from './types'
+import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline } from './types'
 
 export type { ScriptFile, CodeGenerationResult }
 
@@ -156,14 +156,45 @@ export async function exportProject(project_id: string, target_engine: string) {
 }
 
 // Projects
-export async function getProjects(): Promise<Project[]> {
-  const data = await request<{ success: boolean; projects: Project[] }>('/api/projects')
+export async function getProjects(auth_user_id?: string): Promise<Project[]> {
+  const qs = auth_user_id ? `?auth_user_id=${encodeURIComponent(auth_user_id)}` : ''
+  const data = await request<{ success: boolean; projects: Project[] }>(`/api/projects${qs}`)
   return data.projects || []
 }
 
 export async function getProject(id: string): Promise<Project> {
   const data = await request<{ success: boolean; project: Project }>(`/api/projects/${id}`)
   return data.project
+}
+
+// Members
+export async function searchMembers(q: string): Promise<Member[]> {
+  const data = await request<{ success: boolean; members: Member[] }>(`/api/members/search?q=${encodeURIComponent(q)}`)
+  return data.members || []
+}
+
+export async function getMemberByAuth(auth_user_id: string): Promise<Member | null> {
+  try {
+    const data = await request<{ success: boolean; member: Member }>(`/api/members/by-auth/${auth_user_id}`)
+    return data.member
+  } catch { return null }
+}
+
+export async function getProjectMembers(project_id: string): Promise<ProjectMember[]> {
+  const data = await request<{ success: boolean; members: ProjectMember[] }>(`/api/projects/${project_id}/members`)
+  return data.members || []
+}
+
+export async function addProjectMember(project_id: string, member_id: string, project_role: string, discipline: Discipline): Promise<ProjectMember> {
+  const data = await request<{ success: boolean; member: ProjectMember }>(`/api/projects/${project_id}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ member_id, project_role, discipline }),
+  })
+  return data.member
+}
+
+export async function removeProjectMember(project_id: string, member_id: string): Promise<void> {
+  await request(`/api/projects/${project_id}/members/${member_id}`, { method: 'DELETE' })
 }
 
 // Assets

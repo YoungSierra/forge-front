@@ -1,0 +1,663 @@
+# FORGE FRONTEND — CLAUDE CODE BUILD INSTRUCTIONS
+# Stack: Next.js 14 + Tailwind CSS + shadcn/ui
+# Read this entire file before writing any code.
+# Do not skip any section.
+
+## ─────────────────────────────────────────────
+## 1. PROJECT CONTEXT
+## ─────────────────────────────────────────────
+
+You are building the frontend for FORGE — an AI-powered game prototype
+generator. The UI is a 6-step wizard where each step generates content
+via AI, shows it for human review, and only saves to the database when
+the user approves.
+
+The backend runs at http://localhost:8000
+This frontend runs at http://localhost:3000
+
+Design philosophy:
+- Dark theme, professional, game-dev aesthetic
+- Clean and organized — like a Figma workspace
+- Each step feels like a document/canvas being filled in
+- Clear visual distinction between AI-generated and approved content
+- Progress is always visible
+
+## ─────────────────────────────────────────────
+## 2. TECH STACK
+## ─────────────────────────────────────────────
+
+- Next.js 14 (App Router)
+- Tailwind CSS
+- shadcn/ui components
+- No authentication — single user experience for now
+- No state management library — use React useState/useReducer + Context
+
+## ─────────────────────────────────────────────
+## 3. FOLDER STRUCTURE
+## ─────────────────────────────────────────────
+
+forge-front/
+├── app/
+│   ├── layout.tsx
+│   ├── page.tsx                    ← projects list (home)
+│   ├── globals.css
+│   ├── new/
+│   │   └── page.tsx                ← new project wizard
+│   └── projects/
+│       └── [id]/
+│           ├── page.tsx            ← project detail / wizard continuation
+│           └── export/
+│               └── page.tsx        ← step 6 export view
+├── components/
+│   ├── layout/
+│   │   ├── Header.tsx
+│   │   └── WizardProgress.tsx
+│   ├── wizard/
+│   │   ├── Step1Concept.tsx
+│   │   ├── Step2Sprites.tsx
+│   │   ├── Step3Levels.tsx
+│   │   ├── Step4Code.tsx
+│   │   ├── Step5Audio.tsx
+│   │   └── Step6Export.tsx
+│   ├── gdd/
+│   │   ├── GDDCanvas.tsx           ← the Figma-like GDD view
+│   │   ├── MechanicsSection.tsx
+│   │   ├── LevelsSection.tsx
+│   │   ├── CharactersSection.tsx
+│   │   └── DirectionSection.tsx
+│   ├── shared/
+│   │   ├── AssetCard.tsx
+│   │   ├── ApprovalBar.tsx
+│   │   ├── GeneratingOverlay.tsx
+│   │   ├── StepBadge.tsx
+│   │   └── CodeViewer.tsx
+│   └── projects/
+│       ├── ProjectCard.tsx
+│       └── ProjectsList.tsx
+├── lib/
+│   ├── api.ts                      ← all fetch calls to backend
+│   ├── types.ts                    ← TypeScript types
+│   └── utils.ts                    ← helpers
+└── public/
+    └── placeholder.png
+
+## ─────────────────────────────────────────────
+## 4. TYPESCRIPT TYPES (lib/types.ts)
+## ─────────────────────────────────────────────
+
+Define these types:
+
+type WizardStep = 1 | 2 | 3 | 4 | 5 | 6
+
+type StepStatus =
+  | 'locked'       // not available yet
+  | 'active'       // available to work on
+  | 'generating'   // AI is processing
+  | 'review'       // ready for human review
+  | 'approved'     // completed and approved
+  | 'invalidated'  // parent step was modified
+
+type GDDMechanic = {
+  name: string
+  description: string
+  type: 'core' | 'secondary' | 'progression'
+}
+
+type GDDLevel = {
+  name: string
+  description: string
+  order: number
+  difficulty: 'easy' | 'medium' | 'hard' | 'boss'
+  environment: string
+  background_prompt: string
+}
+
+type GDDCharacter = {
+  name: string
+  role: 'hero' | 'enemy' | 'npc' | 'boss'
+  description: string
+  abilities: string[]
+  sprite_prompt: string
+}
+
+type GDD = {
+  project: {
+    name: string
+    description: string
+    genre: string
+    elevator_pitch: string
+    core_loop: string
+    tone: string
+  }
+  mechanics: GDDMechanic[]
+  levels: GDDLevel[]
+  characters: GDDCharacter[]
+  art_direction: {
+    style: string
+    palette: string
+    resolution: string
+    references: string[]
+  }
+  audio_direction: {
+    music_mood: string
+    music_style: string
+    sfx_notes: string
+  }
+  development: {
+    estimated_scope: string
+    core_features: string[]
+    out_of_scope: string[]
+    suggested_engine: string
+  }
+}
+
+type SpritePreview = {
+  character_name: string
+  character_role: string
+  sprite_prompt: string
+  preview_url: string
+  placeholder: boolean
+  approved?: boolean
+}
+
+type Project = {
+  id: string
+  name: string
+  description: string
+  genre: string
+  target_engine: string
+  status: string
+  concept: GDD
+  created_at: string
+  current_step?: WizardStep
+  current_wizard_step?: Record<WizardStep, StepStatus>
+}
+
+type Asset = {
+  id: string
+  project_id: string
+  name: string
+  type: string
+  discipline: string
+  review_status: 'pending' | 'approved' | 'rejected' | 'invalidated'
+  current_version?: {
+    storage_url: string
+    metadata: Record<string, any>
+    prompt_used: string
+    model_used: string
+  }
+}
+
+## ─────────────────────────────────────────────
+## 5. API CLIENT (lib/api.ts)
+## ─────────────────────────────────────────────
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+
+Implement these functions:
+
+// Health
+checkHealth(): Promise<{ status: string, supabase: string }>
+
+// Step 1
+generateGDD(prompt: string): Promise<{ gdd: GDD, meta: any }>
+approveStep1(data: { gdd: GDD, prompt: string, meta: any }): Promise<{ project_id: string, project: Project }>
+
+// Step 2
+generateSprites(project_id: string): Promise<{ sprites: SpritePreview[] }>
+approveStep2(project_id: string, sprites: SpritePreview[]): Promise<any>
+
+// Step 3
+generateLevels(project_id: string): Promise<{ levels: any[] }>
+approveStep3(project_id: string, levels: any[]): Promise<any>
+
+// Step 4
+generateCode(project_id: string): Promise<{ code: { game_js: string, architecture_md: string } }>
+approveStep4(project_id: string, code: any): Promise<any>
+
+// Step 5
+generateAudio(project_id: string): Promise<{ audio: { sfx: any[], music: any[] } }>
+approveStep5(project_id: string, audio: any): Promise<any>
+
+// Step 6
+exportProject(project_id: string, target_engine: string): Promise<{ package_url: string, manifest: any }>
+
+// Projects
+getProjects(): Promise<Project[]>
+getProject(id: string): Promise<Project>
+
+// Assets
+reviewAsset(asset_id: string, action: 'approve' | 'reject', notes?: string): Promise<Asset>
+
+// Invalidate from step
+invalidateFromStep(project_id: string, from_step: number): Promise<any>
+
+All functions should throw with a readable error message on failure.
+
+## ─────────────────────────────────────────────
+## 6. HOME PAGE — PROJECTS LIST (app/page.tsx)
+## ─────────────────────────────────────────────
+
+Shows all created projects as cards.
+
+Layout:
+- Dark background (#0a0a0f)
+- Top: "FORGE" logo + tagline "AI-powered game prototype generator"
+- Button: "+ New Game" → navigates to /new
+- Grid of ProjectCard components
+
+ProjectCard shows:
+- Game name (large)
+- Genre badge
+- Current step indicator (e.g. "Step 3 / 6 — Levels")
+- Status badge (draft / active / completed)
+- Created date
+- Click → navigates to /projects/{id}
+
+Empty state: centered message "No games yet. Start your first prototype."
+with a big "+ New Game" button.
+
+## ─────────────────────────────────────────────
+## 7. NEW PROJECT PAGE — STEP 1 (app/new/page.tsx)
+## ─────────────────────────────────────────────
+
+This is where the wizard begins.
+
+Layout — three states:
+
+STATE A: Input
+  - Full screen dark layout
+  - Center: large text "Con qué idea de juego nos divertiremos esta vez?"
+  - Large textarea (min 3 rows) — placeholder: "Describe tu juego..."
+  - Character counter below textarea (10-1000 chars)
+  - Button: "Generar GDD" (disabled if < 10 chars)
+
+STATE B: Generating
+  - Show GeneratingOverlay component:
+    - Animated spinner or pulsing logo
+    - Text: "Gemini está diseñando tu juego..."
+    - Subtle progress animation (not a real progress bar — just visual)
+    - DO NOT show the textarea anymore
+
+STATE C: Review (GDD received)
+  - Show WizardProgress at top (Step 1 active)
+  - Show GDDCanvas component with full GDD
+  - Show ApprovalBar at bottom:
+      Left: "Regenerar" button (goes back to STATE A with same prompt)
+      Center: GDD summary (name + genre)
+      Right: "Aprobar y continuar →" button
+  - Approving calls approveStep1() → then navigates to /projects/{id}
+
+## ─────────────────────────────────────────────
+## 8. GDD CANVAS COMPONENT (components/gdd/GDDCanvas.tsx)
+## ─────────────────────────────────────────────
+
+This is the Figma-like view of the GDD. It should feel like a design document.
+
+Layout: scrollable canvas with organized sections
+
+HEADER SECTION:
+  - Game name (large, bold, white)
+  - Genre badge + target engine badge + scope badge
+  - Elevator pitch (italic, muted)
+  - Core loop (small badge: "Loop: ...")
+  - Tone description
+
+CHARACTERS SECTION (most important — top priority):
+  Grid of character cards (3 columns on desktop, 1 on mobile)
+  Each CharacterCard:
+    - Placeholder image (colored square with character initial)
+      Image from: http://localhost:8000{preview_url} (only in step 2+)
+      In step 1: show a colored placeholder rectangle
+    - Character name (bold)
+    - Role badge (hero=purple, enemy=red, npc=blue, boss=orange)
+    - Description (2 lines, truncated)
+    - Abilities list (small chips)
+    - sprite_prompt (collapsed, expandable — small muted text)
+
+MECHANICS SECTION:
+  Row of mechanic cards
+  Each card:
+    - Name (bold)
+    - Type badge (core=gold, secondary=gray, progression=teal)
+    - Description
+
+LEVELS SECTION:
+  Numbered list of level cards
+  Each card:
+    - Level number + name
+    - Difficulty badge (easy=green, medium=yellow, hard=orange, boss=red)
+    - Environment description
+    - Background image placeholder (colored bar, full width of card)
+
+ART DIRECTION SECTION:
+  Two columns:
+    Left: Style, palette, resolution
+    Right: References list
+
+AUDIO DIRECTION SECTION:
+  Music mood, style, SFX notes
+
+DEVELOPMENT SECTION:
+  Core features list + out of scope list + estimated scope
+
+## ─────────────────────────────────────────────
+## 9. WIZARD PROGRESS COMPONENT (components/layout/WizardProgress.tsx)
+## ─────────────────────────────────────────────
+
+Shows the 6 steps at the top of every project page.
+
+Visual design:
+  Step 1 ──── Step 2 ──── Step 3 ──── Step 4 ──── Step 5 ──── Step 6
+  [✓ GDD]  [✓ Sprites]  [● Levels]  [🔒 Code]  [🔒 Audio]  [🔒 Export]
+
+Each step node:
+  ✓  approved   → green circle with checkmark
+  ●  active     → purple/white circle, current step
+  ⚡ generating → pulsing animated circle
+  ⚠️  invalidated → amber circle with warning icon
+  🔒 locked     → gray circle with lock icon
+
+Clicking an approved step navigates back to it (with invalidation warning if needed).
+Clicking a locked step shows a tooltip "Complete previous steps first".
+
+Props:
+  steps: Array<{ step: number, label: string, status: StepStatus }>
+  current_step: number
+  project_id: string
+
+## ─────────────────────────────────────────────
+## 10. PROJECT PAGE (app/projects/[id]/page.tsx)
+## ─────────────────────────────────────────────
+
+Loads the project and determines which step to show based on current_step.
+
+Flow:
+1. Fetch project from GET /api/projects/:id
+2. Determine current step from current_wizard_step
+3. Render WizardProgress at top
+4. Render the correct Step component based on current step:
+   step 1 approved → show Step2Sprites
+   step 2 approved → show Step3Levels
+   etc.
+
+Each Step component (Step2 through Step6) has three states:
+  - IDLE: "Ready to generate. Click to start."
+          Button: "Generar [step name]"
+  - GENERATING: Loading overlay (same as Step 1)
+  - REVIEW: Show generated content + ApprovalBar
+
+## ─────────────────────────────────────────────
+## 11. STEP 2 — SPRITES (components/wizard/Step2Sprites.tsx)
+## ─────────────────────────────────────────────
+
+IDLE state:
+  - Shows the characters from the approved GDD
+  - Button: "Generar sprites para todos los personajes"
+
+REVIEW state:
+  Grid of sprite cards, one per character
+  Each SpriteCard:
+    - Placeholder image (colored 256x256 PNG from backend)
+    - Character name + role
+    - sprite_prompt used (collapsible)
+    - Two buttons: "✓ Aprobar" / "✗ Regenerar este"
+    - Visual state: pending (default) / approved (green border) / rejected (red border)
+
+  ApprovalBar at bottom:
+    - Shows count: "3/4 personajes aprobados"
+    - "Aprobar todos y continuar" button (disabled until ALL are approved)
+    - Requires explicit approval of each character individually
+
+## ─────────────────────────────────────────────
+## 12. STEP 3 — LEVELS (components/wizard/Step3Levels.tsx)
+## ─────────────────────────────────────────────
+
+Similar to Step 2 but for levels.
+
+REVIEW state:
+  Cards for each level showing:
+    - Background placeholder image (800x400 colored bar)
+    - Level name + order number
+    - Difficulty badge
+    - Expanded description from Gemini
+    - Enemy placements list
+    - Collectibles list
+    - Hazards list
+  Each level has individual approve/reject buttons
+  "Aprobar todos los niveles" button when all approved
+
+## ─────────────────────────────────────────────
+## 13. STEP 4 — CODE (components/wizard/Step4Code.tsx)
+## ─────────────────────────────────────────────
+
+REVIEW state:
+  Split view (two columns):
+    Left (60%): Code viewer
+      - Tab switcher: "game.js" | "architecture.md"
+      - game.js: syntax highlighted code viewer
+        Use a <pre> with Tailwind styles — no heavy syntax lib needed
+        Monospace font, dark background, green text (terminal aesthetic)
+      - architecture.md: rendered markdown
+        Use a simple markdown renderer or just <pre> with whitespace-pre-wrap
+
+    Right (40%): Summary
+      - "Lo que genera este código" section
+      - List of implemented mechanics
+      - How to use in Unity/Phaser
+      - File sizes
+
+  ApprovalBar:
+    "Aprobar código y continuar →"
+
+## ─────────────────────────────────────────────
+## 14. STEP 5 — AUDIO (components/wizard/Step5Audio.tsx)
+## ─────────────────────────────────────────────
+
+REVIEW state:
+  Two sections:
+
+  SFX section:
+    List of sound effects
+    Each SFX card:
+      - Name + trigger event
+      - Description + mood
+      - Duration estimate
+      - Placeholder waveform visualization (just a decorative SVG wave)
+      - "🔊 Placeholder" badge (real audio in Phase 2)
+
+  Music section:
+    Cards per level
+    Each music card:
+      - Level name
+      - Mood + style + tempo
+      - Instruments list
+      - Description (will be used as Suno prompt later)
+      - "🎵 Placeholder" badge
+
+  ApprovalBar: "Aprobar dirección de audio →"
+
+## ─────────────────────────────────────────────
+## 15. STEP 6 — EXPORT (components/wizard/Step6Export.tsx)
+## ─────────────────────────────────────────────
+
+This is the final step.
+
+Layout:
+  Left (50%): Summary
+    - Project name + all approved assets count
+    - Engine selector: Unity / Unreal (radio buttons)
+    - Cost summary: total tokens used, estimated cost
+    - "Forge v1.0 · {date}" generation metadata
+
+  Right (50%): File tree preview
+    Shows the folder structure that will be in the ZIP:
+    Assets/
+    └── Forge/
+        ├── Scripts/
+        │   └── game.js
+        ├── Sprites/
+        │   ├── hero.png
+        │   └── enemy.png
+        ├── Backgrounds/
+        │   ├── level-1.png
+        │   └── level-2.png
+        ├── Audio/
+        │   └── [descriptions]
+        └── Docs/
+            ├── gdd.json
+            └── architecture.md
+
+  Bottom: "⬇ Generar y descargar package" button
+    On click: calls exportProject() → shows progress → auto-downloads ZIP
+
+## ─────────────────────────────────────────────
+## 16. GENERATING OVERLAY (components/shared/GeneratingOverlay.tsx)
+## ─────────────────────────────────────────────
+
+Full-screen overlay shown during AI generation.
+
+Visual:
+  - Dark semi-transparent background
+  - Center: animated "FORGE" logo or simple spinner
+  - Rotating messages array (changes every 2 seconds):
+    Step 1: [
+      "Diseñando el universo del juego...",
+      "Creando personajes únicos...",
+      "Definiendo las mecánicas...",
+      "Construyendo los niveles..."
+    ]
+    Step 2: [
+      "Generando sprites de personajes...",
+      "Creando placeholders visuales...",
+      "Procesando arte conceptual..."
+    ]
+    Step 3: [
+      "Expandiendo los detalles de cada nivel...",
+      "Colocando enemigos y coleccionables...",
+      "Diseñando el ambiente visual..."
+    ]
+    Step 4: [
+      "Escribiendo el código del juego...",
+      "Implementando las mecánicas...",
+      "Documentando la arquitectura..."
+    ]
+    Step 5: [
+      "Componiendo la dirección de audio...",
+      "Definiendo efectos de sonido...",
+      "Diseñando la banda sonora..."
+    ]
+  - Subtle pulse animation on the container
+
+## ─────────────────────────────────────────────
+## 17. APPROVAL BAR (components/shared/ApprovalBar.tsx)
+## ─────────────────────────────────────────────
+
+Fixed bar at the bottom of the screen when content is in REVIEW state.
+
+Layout (horizontal):
+  [← Regenerar]   [Center info text]   [Aprobar y continuar →]
+
+Props:
+  onRegenerate: () => void
+  onApprove: () => void
+  approveDisabled: boolean
+  approveLabel: string
+  centerText: string
+  regenerateLabel?: string
+
+Visual:
+  - Dark bar with subtle border at top
+  - Regenerate: outline button (gray)
+  - Approve: solid button (purple/primary)
+  - When approveDisabled: approve button is grayed out
+
+## ─────────────────────────────────────────────
+## 18. INVALIDATION FLOW
+## ─────────────────────────────────────────────
+
+When user clicks on an already-approved step in WizardProgress:
+
+1. Show a confirmation modal:
+   "¿Regresar al Paso {N}?"
+   "Los pasos {N+1} hasta {current} serán marcados como inválidos
+    y deberás regenerarlos. El contenido anterior se conserva como historial."
+   Buttons: "Cancelar" | "Sí, regresar"
+
+2. If confirmed:
+   - Call PATCH /api/projects/:id/invalidate-from-step with from_step: N+1
+   - Update local step statuses to 'invalidated'
+   - Navigate to that step
+   - The step shows its previous approved content with an amber banner:
+     "⚠️ Este paso fue modificado. Regenera para actualizar el contenido."
+
+## ─────────────────────────────────────────────
+## 19. ENVIRONMENT VARIABLES
+## ─────────────────────────────────────────────
+
+Create .env.local:
+  NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+
+## ─────────────────────────────────────────────
+## 20. DESIGN SYSTEM — COLORS AND STYLE
+## ─────────────────────────────────────────────
+
+Use Tailwind with this dark theme consistently:
+
+Background levels:
+  bg-[#0a0a0f]   ← page background (darkest)
+  bg-[#0d0f16]   ← card background
+  bg-[#13151f]   ← elevated surface
+  bg-[#1a1e2e]   ← hover state
+
+Text:
+  text-white           ← primary titles
+  text-slate-300       ← body text
+  text-slate-500       ← muted / secondary
+
+Accent (primary actions):
+  bg-violet-600        ← primary buttons
+  hover:bg-violet-500
+  text-violet-400      ← links and accents
+
+Status colors:
+  approved   → green-500 / green border
+  pending    → yellow-500 / yellow border
+  rejected   → red-500 / red border
+  locked     → slate-600 / slate border
+  invalidated → amber-500 / amber border
+  generating → violet-500 / animated pulse
+
+Borders: border-slate-700 / border-slate-800
+
+Font: default Next.js (Geist) — no custom fonts needed
+
+Cards: rounded-xl, border border-slate-800, bg-[#0d0f16], p-4
+
+## ─────────────────────────────────────────────
+## 21. NEXT.JS CONFIG
+## ─────────────────────────────────────────────
+
+In next.config.js allow images from localhost:8000:
+  images: {
+    remotePatterns: [{ hostname: 'localhost', port: '8000', protocol: 'http' }]
+  }
+
+In tailwind.config.js ensure content includes:
+  './app/**/*.{js,ts,jsx,tsx}',
+  './components/**/*.{js,ts,jsx,tsx}'
+
+## ─────────────────────────────────────────────
+## 22. AFTER BUILDING — VERIFY THESE WORK
+## ─────────────────────────────────────────────
+
+1. / (home) shows empty state with "+ New Game" button
+2. /new shows the prompt input
+3. Typing a prompt enables the generate button
+4. Clicking generate shows the loading overlay
+5. GDD canvas shows organized sections with all data
+6. ApprovalBar is visible at bottom with Regenerar + Aprobar buttons
+7. Approving navigates to /projects/{id}
+8. WizardProgress shows Step 1 as approved, Step 2 as active
+9. Project detail page loads correctly with all sections
+10. Clicking "+ New Game" again starts a fresh wizard

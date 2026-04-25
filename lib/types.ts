@@ -118,6 +118,23 @@ export type GenerationJob = {
   completed_at?: string
 }
 
+export type Discipline = 'code' | 'art' | 'vfx' | 'audio' | 'design' | 'infra'
+
+export type Member = {
+  id: string
+  display_name: string
+  avatar_url?: string
+  role: string
+}
+
+export type ProjectMember = {
+  id: string
+  project_role: string
+  discipline: Discipline
+  joined_at: string
+  members: Member
+}
+
 export type Project = {
   id: string
   name: string
@@ -125,6 +142,7 @@ export type Project = {
   genre: string
   target_engine: string
   status: string
+  owner_member_id: string
   concept: GDD & { pipeline?: Record<string, PipelineNodeArtifact> }
   created_at: string
   current_step?: number

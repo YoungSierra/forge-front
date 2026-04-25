@@ -5,6 +5,9 @@ import Link from 'next/link'
 import type { Project } from '@/lib/types'
 import { formatDate } from '@/lib/utils'
 import { loadLayout } from '@/lib/canvas-storage'
+import MembersModal from './MembersModal'
+import { useAuth } from '@/lib/auth-context'
+import { getMemberByAuth } from '@/lib/api'
 
 const STEP_COLORS = [
   'var(--cat-design)',
@@ -24,6 +27,13 @@ const STATUS_COLOR: Record<string, string> = {
 export default function ProjectCard({ project }: { project: Project }) {
   const wizStep      = project.current_wizard_step ?? 1
   const wizApproved  = project.approved_wizard_count ?? Math.max(0, wizStep - 1)
+  const { user } = useAuth()
+  const [showMembers, setShowMembers] = useState(false)
+  const [currentMemberId, setCurrentMemberId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (user?.id) getMemberByAuth(user.id).then(m => setCurrentMemberId(m?.id ?? null))
+  }, [user?.id])
 
   // Read canvas layout from localStorage to show real node progress (same as toolbar)
   const [nodeStats, setNodeStats] = useState<{ approved: number; total: number } | null>(null)
@@ -52,6 +62,16 @@ export default function ProjectCard({ project }: { project: Project }) {
     : wizApproved
 
   return (
+    <>
+    {showMembers && (
+      <MembersModal
+        projectId={project.id}
+        projectName={project.name}
+        ownerMemberId={project.owner_member_id}
+        currentMemberId={currentMemberId}
+        onClose={() => setShowMembers(false)}
+      />
+    )}
     <Link href={`/projects/${project.id}`} style={{ textDecoration: 'none', display: 'block' }}>
       <div style={{
         background: 'var(--bg-2)', border: '1px solid var(--line-2)',
@@ -121,11 +141,24 @@ export default function ProjectCard({ project }: { project: Project }) {
               {project.genre}
             </span>
           )}
-          <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', marginLeft: 'auto' }}>
-            {formatDate(project.created_at)}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+            <button
+              onClick={e => { e.preventDefault(); e.stopPropagation(); setShowMembers(true) }}
+              style={{
+                background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 5,
+                padding: '2px 8px', fontSize: 9, fontFamily: 'monospace', color: 'var(--text-2)',
+                cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.06em',
+              }}
+            >
+              Members
+            </button>
+            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)' }}>
+              {formatDate(project.created_at)}
+            </span>
+          </div>
         </div>
       </div>
     </Link>
+    </>
   )
 }

@@ -1,0 +1,23 @@
+Audit the entire project and translate ALL user-facing text to English.
+This includes:
+- Button labels
+- Input placeholders
+- Section titles and headings
+- Field labels
+- Error messages
+- Empty states
+- Loading messages
+- Tooltips and helper text
+- Badge labels (status, difficulty, role, type)
+- Step labels in WizardProgress
+- Any hardcoded Spanish strings in all components
+
+Do NOT translate:
+- Code, variable names, or TypeScript types
+- Console.log messages
+- API endpoint paths
+- Database field names
+- File names
+
+Go through every file in components/ and app/ systematically.
+When done, show a list of all files that were modified.

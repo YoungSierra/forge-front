@@ -1,0 +1,266 @@
+# FORGE FRONTEND — STEP 4 UNITY SCRIPTS VIEWER
+# Redesign Step4Code.tsx to show engine-specific script files
+# Read this entire file before writing any code.
+
+## ─────────────────────────────────────────────
+## 1. CONTEXT
+## ─────────────────────────────────────────────
+
+The Step 4 code generation has been redesigned. The backend now returns
+an array of engine-specific script files instead of a single game.js.
+
+The frontend must be updated to:
+- Show a tab per generated file
+- Display C# syntax highlighting for Unity scripts
+- Remove the Phaser iframe for Unity projects
+- Show engine-specific instructions in the right panel
+
+## ─────────────────────────────────────────────
+## 2. UPDATE lib/api.ts
+## ─────────────────────────────────────────────
+
+Replace the generateCode and approveStep4 functions:
+
+```typescript
+export type ScriptFile = {
+  filename: string
+  description: string
+  url: string
+  size_bytes: number
+  content?: string  // populated from the generate response
+}
+
+export type CodeGenerationResult = {
+  engine: string
+  files: ScriptFile[]
+  architecture_md: string
+}
+
+export async function generateCode(project_id: string): Promise<CodeGenerationResult> {
+  const data = await request<{
+    success: boolean
+    engine: string
+    files: ScriptFile[]
+    architecture_md: string
+    meta: any
+  }>('/api/generate/code', {
+    method: 'POST',
+    body: JSON.stringify({ project_id })
+  })
+  return {
+    engine: data.engine,
+    files: data.files,
+    architecture_md: data.architecture_md
+  }
+}
+
+export async function approveStep4(
+  project_id: string,
+  result: CodeGenerationResult
+): Promise<any> {
+  return request(`/api/projects/${project_id}/approve-step4`, {
+    method: 'POST',
+    body: JSON.stringify({
+      files: result.files,
+      architecture_md: result.architecture_md,
+      engine: result.engine
+    })
+  })
+}
+```
+
+Also add ScriptFile and CodeGenerationResult to lib/types.ts.
+
+## ─────────────────────────────────────────────
+## 3. UPDATE components/wizard/Step4Code.tsx
+## ─────────────────────────────────────────────
+
+Complete rewrite of Step4Code.tsx:
+
+Props stay the same:
+  project: Project
+  onApproved: () => void
+  invalidated?: boolean
+
+State:
+  state: 'idle' | 'generating' | 'review'
+  result: CodeGenerationResult | null
+  activeTab: string  (filename of currently viewed file, or 'architecture')
+  error: string | null
+  approving: boolean
+
+─── IDLE STATE ───────────────────────────────
+
+Show centered card with:
+- Engine icon: 🎮 for unity, ⚡ for unreal, 🤖 for godot, 🌐 for phaser
+- Title: "Script Generation"
+- Subtitle: "AI will generate [Unity/Unreal/Godot/Phaser] scripts based on your approved GDD"
+- Engine badge showing target_engine value
+- invalidated warning if applicable
+- "Generate [engine] scripts" button
+
+Get target engine from: project.target_engine || 'unity'
+
+─── GENERATING STATE ─────────────────────────
+
+Show GeneratingOverlay with step={4}
+
+─── REVIEW STATE ─────────────────────────────
+
+Layout:
+  [Tab bar — full width]
+  [Code area — 65%] [Right panel — 35%]
+  [ApprovalBar — fixed bottom]
+
+TAB BAR:
+  One tab per file in result.files
+  Plus one tab "architecture.md" at the end
+  Active tab highlighted in violet
+  Each tab shows: filename (without extension shown separately)
+  File extension shown as a small badge: .cs / .gd / .cpp / .js
+  
+  Tab style:
+    Active: bg-violet-600/20 text-violet-300 border-b-2 border-violet-500
+    Inactive: text-slate-500 hover:text-slate-300
+
+CODE AREA:
+  Dark code viewer with syntax appropriate to engine:
+    unity/unreal → C# / C++ style highlighting
+    godot → GDScript style
+    phaser → JavaScript style
+  
+  Simple syntax highlighting using regex — no external library needed:
+    Keywords (public, private, class, void, using, return, if, else, for, new):
+      → color: #569cd6 (blue)
+    Types (string, int, float, bool, MonoBehaviour, GameObject, Transform):
+      → color: #4ec9b0 (teal)
+    Comments (// and /* */):
+      → color: #6a9955 (green)
+    Strings ("..."):
+      → color: #ce9178 (orange)
+    Attributes ([Header], [SerializeField], [RequireComponent]):
+      → color: #c586c0 (purple)
+    Numbers:
+      → color: #b5cea8 (light green)
+  
+  Implement as a function applySyntaxHighlighting(code: string, engine: string): string
+  Use dangerouslySetInnerHTML to render highlighted code
+  
+  For architecture.md tab:
+    Render as styled markdown-like text
+    Headers (# ##) → white bold text, larger size
+    Code blocks (```) → dark background monospace
+    Lists (- *) → with violet bullet points
+    Bold (**text**) → white font-semibold
+    No external markdown library — simple regex replacements
+
+  Copy button in top-right of code area:
+    "Copy" → copies current file content to clipboard
+    Shows "Copied!" for 2 seconds after clicking
+
+RIGHT PANEL:
+
+  Card 1 — Generated Files:
+    List of all files with:
+    - File icon based on extension (📄 for .cs, 📝 for .md)  
+    - Filename
+    - Description from result
+    - File size (from size_bytes, formatted as "4.2 KB")
+    - Click to switch to that tab
+    - Green checkmark if currently selected
+
+  Card 2 — Engine Info:
+    Unity: "Compatible with Unity 2022.3 LTS+"
+           "Scripts use MonoBehaviour pattern"
+           "Import via: Assets → Import Package"
+    Unreal: "Compatible with Unreal Engine 5.0+"
+    Godot: "Compatible with Godot 4.0+"
+    Phaser: "Runs in browser with Phaser 3.60"
+
+  Card 3 — TODO Summary:
+    Count occurrences of "// TODO" in all files combined
+    Show: "N items need developer attention"
+    List the first 5 TODO comments found (truncated at 60 chars)
+    Style: amber/yellow color scheme
+
+  Card 4 — Mechanics Implemented:
+    List mechanics from project.concept.mechanics
+    Each with a ▸ bullet in violet
+
+─── PHASER SPECIAL CASE ──────────────────────
+
+If result.engine === 'phaser', show an additional section
+ABOVE the tab bar:
+
+  Dark card with header "▶ Live Preview"
+  iframe loading: `${BACKEND_URL}/api/projects/${project.id}/play`
+  height: 400px
+  Controls hint below: "← → Move | ↑ Jump | SHIFT Dimensional Shift"
+
+For all other engines: NO iframe.
+
+─── APPROVAL BAR ─────────────────────────────
+
+Same ApprovalBar as before:
+  onRegenerate: generate()
+  onApprove: handleApprove()
+  approveLabel: "Approve scripts and continue →"
+  centerText: `${project.name} · ${result.files.length} scripts · ${result.engine}`
+
+## ─────────────────────────────────────────────
+## 4. CREATE components/shared/ScriptViewer.tsx
+## ─────────────────────────────────────────────
+
+Extract the code viewing logic into a reusable component:
+
+Props:
+  content: string
+  engine: string  ('unity' | 'unreal' | 'godot' | 'phaser' | 'markdown')
+  filename: string
+
+Features:
+  - Syntax highlighting via regex (as described above)
+  - Copy to clipboard button
+  - Line numbers (optional, can skip for simplicity)
+  - Scrollable with max-height: 60vh
+  - Monospace font (font-mono)
+  - Dark background: bg-[#0a0a0f]
+  - Font size: text-xs for code, text-sm for markdown
+
+## ─────────────────────────────────────────────
+## 5. DESIGN DETAILS
+## ─────────────────────────────────────────────
+
+Overall color scheme for Step 4:
+  C# Unity → teal accent (#4ec9b0) — the VS Code C# color
+  Unreal C++ → orange accent (#f59e0b)
+  Godot → blue accent (#478cbf)
+  Phaser → violet accent (#7c3aed) — same as Forge brand
+
+Engine badge in idle state:
+  Unity: bg-teal-500/20 text-teal-400 border border-teal-500/30
+  Unreal: bg-amber-500/20 text-amber-400 border border-amber-500/30
+  Godot: bg-blue-500/20 text-blue-400 border border-blue-500/30
+  Phaser: bg-violet-500/20 text-violet-400 border border-violet-500/30
+
+## ─────────────────────────────────────────────
+## 6. AFTER BUILDING — VERIFY
+## ─────────────────────────────────────────────
+
+1. Navigate to a project at Step 4
+2. Click "Generate Unity scripts"
+3. Generating overlay appears
+4. Review state shows:
+   - Tab bar with 4 .cs files + architecture.md tab
+   - Code viewer with syntax highlighting
+   - Right panel with file list, engine info, TODO count
+   - NO iframe for Unity projects
+5. Click different tabs — content switches correctly
+6. Copy button works
+7. Click "Approve scripts and continue →"
+8. Project advances to Step 5
+
+For a Phaser project (target_engine = phaser):
+   - iframe appears above the tab bar
+   - Game runs in browser
+   - All tabs still work below

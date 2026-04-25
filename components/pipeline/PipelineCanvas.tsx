@@ -497,7 +497,7 @@ function PipelineApp({
 
   const toolbarProject = liveProject ?? {
     id: '', name: 'New game', description: '', genre: '',
-    target_engine: '', status: 'draft',
+    target_engine: '', status: 'draft', owner_member_id: '',
     concept: null as unknown as Project['concept'],
     created_at: '',
   }
