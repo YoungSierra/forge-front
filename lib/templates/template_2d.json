@@ -1,0 +1,38 @@
+{
+  "id": "2d_game",
+  "name": "2D Game",
+  "description": "Pipeline para juegos 2D. Flujo real de producción: dirección visual → arte → audio → código → test.",
+
+  "nodes": [
+    { "id": "visual_guide",  "label": "Visual Guide",  "category": "design", "icon": "VG", "stepKey": "visual_guide",  "comingSoon": false,  "x": 680,  "y": 280,  "description": "Art direction, palette & style rules",       "inputLabel": "GDD Draft",    "outputLabel": "Style Sheet"   },
+    { "id": "sprites",       "label": "Sprites",       "category": "asset",  "icon": "SP", "stepKey": "sprites",       "comingSoon": false, "x": 1180, "y": 60,   "description": "Character & object sprite sheets",          "inputLabel": "Style Sheet",  "outputLabel": "Sprite Atlas"  },
+    { "id": "backgrounds",   "label": "Backgrounds",   "category": "asset",  "icon": "BG", "stepKey": "backgrounds",   "comingSoon": false,  "x": 1180, "y": 200,  "description": "Parallax background layers",                "inputLabel": "Style Sheet",  "outputLabel": "BG Pack"       },
+    { "id": "uiux",          "label": "UI/UX",         "category": "asset",  "icon": "UI", "stepKey": "uiux",          "comingSoon": false,  "x": 1180, "y": 340,  "description": "Menus, buttons & user flows",               "inputLabel": "Style Sheet",  "outputLabel": "UI Kit"        },
+    { "id": "icons",         "label": "Icons",         "category": "asset",  "icon": "IC", "stepKey": "icons",         "comingSoon": false,  "x": 1180, "y": 480,  "description": "Items, pickups & status icons",             "inputLabel": "Style Sheet",  "outputLabel": "Icon Set"      },
+    { "id": "hud",           "label": "HUD",           "category": "asset",  "icon": "HD", "stepKey": "hud",           "comingSoon": false,  "x": 1180, "y": 620,  "description": "Health bars, score & overlays",            "inputLabel": "Style Sheet",  "outputLabel": "HUD Assets"    },
+    { "id": "music",         "label": "Music",         "category": "audio",  "icon": "♫",  "stepKey": "audio",         "comingSoon": false, "x": 1180, "y": 820,  "description": "Adaptive soundtrack & seamless loops",      "inputLabel": "GDD Draft",    "outputLabel": "Audio Tracks"  },
+    { "id": "level_design",  "label": "Level Design",  "category": "level",  "icon": "LV", "stepKey": "levels",        "comingSoon": false, "x": 1180, "y": 1000, "description": "Tilemaps, layouts & encounter design",      "inputLabel": "GDD Draft",    "outputLabel": "Level Data"    },
+    { "id": "source_code",   "label": "Source Code",   "category": "code",   "icon": "/>", "stepKey": "code",          "comingSoon": false, "x": 1720, "y": 480,  "description": "Game logic & engine integration",           "inputLabel": "Sprites + Levels", "outputLabel": "Build"     },
+    { "id": "sfx",           "label": "SFX",           "category": "audio",  "icon": "♪",  "stepKey": "sfx",           "comingSoon": false,  "x": 2260, "y": 280,  "description": "Feedback sounds, hits & ambience",          "inputLabel": "Build + GDD",  "outputLabel": "SFX Pack"      },
+    { "id": "playtesting",   "label": "Playtesting",   "category": "test",   "icon": "▷",  "stepKey": "playtesting",   "comingSoon": true,  "x": 2260, "y": 480,  "description": "QA sessions, bug reports & balance",        "inputLabel": "Build",        "outputLabel": "QA Report"     }
+  ],
+
+  "edges": [
+    { "id": "e-gdd-vguide",     "source": "gdd",         "target": "visual_guide"  },
+    { "id": "e-vguide-sprites", "source": "visual_guide", "target": "sprites"      },
+    { "id": "e-vguide-bg",      "source": "visual_guide", "target": "backgrounds"  },
+    { "id": "e-vguide-uiux",    "source": "visual_guide", "target": "uiux"         },
+    { "id": "e-vguide-icons",   "source": "visual_guide", "target": "icons"        },
+    { "id": "e-vguide-hud",     "source": "visual_guide", "target": "hud"          },
+    { "id": "e-gdd-music",      "source": "gdd",         "target": "music"         },
+    { "id": "e-gdd-level",      "source": "gdd",         "target": "level_design"  },
+    { "id": "e-sprites-code",   "source": "sprites",      "target": "source_code"  },
+    { "id": "e-level-code",     "source": "level_design", "target": "source_code"  },
+    { "id": "e-code-sfx",       "source": "source_code",  "target": "sfx"          },
+    { "id": "e-gdd-sfx",        "source": "gdd",         "target": "sfx"           },
+    { "id": "e-code-play",      "source": "source_code",  "target": "playtesting"  },
+    { "id": "e-code-export",    "source": "source_code",  "target": "export"       },
+    { "id": "e-music-export",   "source": "music",        "target": "export"       },
+    { "id": "e-sfx-export",     "source": "sfx",          "target": "export"       }
+  ]
+}

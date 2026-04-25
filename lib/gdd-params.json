@@ -1,0 +1,170 @@
+[
+  {
+    "id": "genre",
+    "label": "Genre",
+    "type": "multiselect",
+    "default": [],
+    "promptKey": "Genre",
+    "options": [
+      { "value": "platformer",     "label": "2D Platformer" },
+      { "value": "rpg",            "label": "Action RPG" },
+      { "value": "puzzle",         "label": "Puzzle" },
+      { "value": "shooter",        "label": "Shooter" },
+      { "value": "adventure",      "label": "Adventure" },
+      { "value": "roguelike",      "label": "Roguelike" },
+      { "value": "metroidvania",   "label": "Metroidvania" },
+      { "value": "strategy",       "label": "Strategy" },
+      { "value": "simulation",     "label": "Simulation" },
+      { "value": "horror",         "label": "Horror" },
+      { "value": "fighting",       "label": "Fighting" },
+      { "value": "stealth",        "label": "Stealth" },
+      { "value": "idle",           "label": "Idle / Clicker" }
+    ]
+  },
+  {
+    "id": "tone",
+    "label": "Visual Tone",
+    "type": "multiselect",
+    "default": [],
+    "promptKey": "Visual tone",
+    "options": [
+      { "value": "dark fantasy",   "label": "Dark Fantasy" },
+      { "value": "colorful cartoon","label": "Colorful Cartoon" },
+      { "value": "cyberpunk",      "label": "Cyberpunk" },
+      { "value": "horror",         "label": "Horror" },
+      { "value": "epic fantasy",   "label": "Epic Fantasy" },
+      { "value": "cute cozy",      "label": "Cute / Cozy" },
+      { "value": "retro pixel",    "label": "Retro Pixel Art" },
+      { "value": "minimalist",     "label": "Minimalist" },
+      { "value": "noir",           "label": "Noir / Noir Sci-Fi" },
+      { "value": "anime",          "label": "Anime" },
+      { "value": "hand drawn",     "label": "Hand Drawn" },
+      { "value": "low poly",       "label": "Low Poly 3D" }
+    ]
+  },
+  {
+    "id": "art_style",
+    "label": "Art Style",
+    "type": "multiselect",
+    "default": [],
+    "promptKey": "Art style",
+    "options": [
+      { "value": "pixel art",      "label": "Pixel Art" },
+      { "value": "vector",         "label": "Vector / Flat" },
+      { "value": "hand drawn",     "label": "Hand Drawn / Sketch" },
+      { "value": "3d low poly",    "label": "3D Low Poly" },
+      { "value": "3d realistic",   "label": "3D Realistic" },
+      { "value": "3d stylized",    "label": "3D Stylized" },
+      { "value": "voxel",          "label": "Voxel" },
+      { "value": "photorealistic", "label": "Photorealistic" }
+    ]
+  },
+  {
+    "id": "platform",
+    "label": "Target Platform",
+    "type": "multiselect",
+    "default": [],
+    "promptKey": "Target platforms",
+    "options": [
+      { "value": "pc",      "label": "PC" },
+      { "value": "mac",     "label": "Mac" },
+      { "value": "web",     "label": "Web" },
+      { "value": "mobile",  "label": "Mobile" },
+      { "value": "console", "label": "Console" },
+      { "value": "vr",      "label": "VR" }
+    ]
+  },
+  {
+    "id": "player_count",
+    "label": "Player Count",
+    "type": "multiselect",
+    "default": ["single"],
+    "promptKey": "Player count",
+    "options": [
+      { "value": "single",      "label": "Single Player" },
+      { "value": "local_coop",  "label": "Local Co-op" },
+      { "value": "online_coop", "label": "Online Co-op" },
+      { "value": "pvp",         "label": "PvP" },
+      { "value": "mmo",         "label": "MMO" }
+    ]
+  },
+  {
+    "id": "target_audience",
+    "label": "Target Audience",
+    "type": "multiselect",
+    "default": [],
+    "promptKey": "Target audience",
+    "options": [
+      { "value": "kids",     "label": "Kids (< 12)" },
+      { "value": "teens",    "label": "Teens (12–17)" },
+      { "value": "adults",   "label": "Adults (18+)" },
+      { "value": "all_ages", "label": "All Ages" },
+      { "value": "hardcore", "label": "Hardcore Gamers" },
+      { "value": "casual",   "label": "Casual Gamers" }
+    ]
+  },
+  {
+    "id": "difficulty",
+    "label": "Difficulty",
+    "type": "select",
+    "default": "normal",
+    "promptKey": "Difficulty",
+    "options": [
+      { "value": "casual",     "label": "Casual" },
+      { "value": "normal",     "label": "Normal" },
+      { "value": "hard",       "label": "Hard" },
+      { "value": "souls_like", "label": "Souls-like" },
+      { "value": "adaptive",   "label": "Adaptive (scales)" }
+    ]
+  },
+  {
+    "id": "scope",
+    "label": "Scope",
+    "type": "select",
+    "default": "prototype",
+    "promptKey": "Project scope",
+    "options": [
+      { "value": "jam",       "label": "Game Jam (1–2 levels)" },
+      { "value": "demo",      "label": "Demo (2–3 levels)" },
+      { "value": "prototype", "label": "Prototype (4–6 levels)" },
+      { "value": "full_game", "label": "Full Game (8+ levels)" }
+    ]
+  },
+  {
+    "id": "engine",
+    "label": "Engine",
+    "type": "select",
+    "default": "unity",
+    "promptKey": "Target engine",
+    "options": [
+      { "value": "unity",   "label": "Unity" },
+      { "value": "unreal",  "label": "Unreal Engine" },
+      { "value": "phaser",  "label": "Phaser.js (web)" },
+      { "value": "godot",   "label": "Godot" },
+      { "value": "pygame",  "label": "Pygame" },
+      { "value": "love2d",  "label": "LÖVE 2D" }
+    ]
+  },
+  {
+    "id": "monetization",
+    "label": "Monetization",
+    "type": "multiselect",
+    "default": ["premium"],
+    "promptKey": "Monetization model",
+    "options": [
+      { "value": "premium",    "label": "Premium (paid)" },
+      { "value": "free",       "label": "Free" },
+      { "value": "f2p",        "label": "Free-to-Play" },
+      { "value": "dlc",        "label": "DLC / Expansions" },
+      { "value": "subscription","label": "Subscription" }
+    ]
+  },
+  {
+    "id": "inspiration",
+    "label": "Inspiration / References",
+    "type": "text",
+    "default": "",
+    "promptKey": "Inspired by",
+    "placeholder": "e.g. Like Hollow Knight but with time manipulation..."
+  }
+]

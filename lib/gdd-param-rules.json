@@ -1,0 +1,128 @@
+[
+  {
+    "id": "horror_kids",
+    "severity": "high",
+    "message": "Horror + Kids audience is likely inappropriate and incoherent.",
+    "conditions": [
+      { "param": "genre", "values": ["horror"] },
+      { "param": "target_audience", "values": ["kids"] }
+    ]
+  },
+  {
+    "id": "horror_tone_kids",
+    "severity": "high",
+    "message": "Dark/Horror tone + Kids audience is likely inappropriate.",
+    "conditions": [
+      { "param": "tone", "values": ["horror", "dark fantasy", "noir"] },
+      { "param": "target_audience", "values": ["kids"] }
+    ]
+  },
+  {
+    "id": "mmo_jam_scope",
+    "severity": "high",
+    "message": "MMO is far too complex for a Game Jam or Demo scope.",
+    "conditions": [
+      { "param": "player_count", "values": ["mmo"] },
+      { "param": "scope", "values": ["jam", "demo"] }
+    ]
+  },
+  {
+    "id": "mmo_prototype_scope",
+    "severity": "medium",
+    "message": "MMO in prototype scope is very ambitious — consider a simpler multiplayer mode.",
+    "conditions": [
+      { "param": "player_count", "values": ["mmo"] },
+      { "param": "scope", "values": ["prototype"] }
+    ]
+  },
+  {
+    "id": "vr_phaser",
+    "severity": "high",
+    "message": "Phaser.js doesn't support VR — pick a different engine (Unity, Godot, Unreal).",
+    "conditions": [
+      { "param": "platform", "values": ["vr"] },
+      { "param": "engine", "values": ["phaser", "pygame", "love2d"] }
+    ]
+  },
+  {
+    "id": "vr_jam_scope",
+    "severity": "medium",
+    "message": "VR development is complex — Game Jam scope is very risky.",
+    "conditions": [
+      { "param": "platform", "values": ["vr"] },
+      { "param": "scope", "values": ["jam"] }
+    ]
+  },
+  {
+    "id": "3d_realistic_phaser",
+    "severity": "high",
+    "message": "3D Realistic / Photorealistic art needs a 3D engine — Phaser.js, Pygame or LÖVE 2D are 2D only.",
+    "conditions": [
+      { "param": "art_style", "values": ["3d realistic", "photorealistic", "3d stylized", "3d low poly"] },
+      { "param": "engine", "values": ["phaser", "pygame", "love2d"] }
+    ]
+  },
+  {
+    "id": "souls_kids",
+    "severity": "medium",
+    "message": "Souls-like difficulty + Kids audience is a tough combination — consider 'Adaptive' difficulty.",
+    "conditions": [
+      { "param": "difficulty", "values": ["souls_like", "hard"] },
+      { "param": "target_audience", "values": ["kids"] }
+    ]
+  },
+  {
+    "id": "cute_horror",
+    "severity": "medium",
+    "message": "Cute/Cozy tone + Horror genre is contradictory — unless intentionally ironic.",
+    "conditions": [
+      { "param": "tone", "values": ["cute cozy"] },
+      { "param": "genre", "values": ["horror"] }
+    ]
+  },
+  {
+    "id": "colorful_noir",
+    "severity": "low",
+    "message": "Colorful Cartoon tone + Noir genre is an unusual mix — could work but needs strong direction.",
+    "conditions": [
+      { "param": "tone", "values": ["colorful cartoon"] },
+      { "param": "genre", "values": ["horror", "stealth"] }
+    ]
+  },
+  {
+    "id": "pvp_puzzle",
+    "severity": "low",
+    "message": "PvP + Puzzle is uncommon — make sure the competitive mechanic makes sense.",
+    "conditions": [
+      { "param": "player_count", "values": ["pvp"] },
+      { "param": "genre", "values": ["puzzle"] }
+    ]
+  },
+  {
+    "id": "f2p_jam",
+    "severity": "low",
+    "message": "F2P monetization in a Game Jam scope rarely makes sense.",
+    "conditions": [
+      { "param": "monetization", "values": ["f2p", "subscription"] },
+      { "param": "scope", "values": ["jam"] }
+    ]
+  },
+  {
+    "id": "online_jam",
+    "severity": "medium",
+    "message": "Online multiplayer in a Game Jam scope is very ambitious.",
+    "conditions": [
+      { "param": "player_count", "values": ["online_coop", "pvp", "mmo"] },
+      { "param": "scope", "values": ["jam"] }
+    ]
+  },
+  {
+    "id": "console_phaser",
+    "severity": "medium",
+    "message": "Phaser.js targets web browsers — console deployment is not straightforward.",
+    "conditions": [
+      { "param": "platform", "values": ["console"] },
+      { "param": "engine", "values": ["phaser", "pygame", "love2d"] }
+    ]
+  }
+]
