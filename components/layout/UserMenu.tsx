@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
-import { getMemberByAuth } from '@/lib/api'
+import { getMemberByAuth, updateAdminUser } from '@/lib/api'
 import { createClient } from '@/lib/supabase'
 import { useTheme } from '@/lib/theme'
 
@@ -34,7 +34,8 @@ export default function UserMenu() {
   const { theme, toggle: toggleTheme } = useTheme()
   const [open, setOpen]       = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
-  const [pwModal, setPwModal] = useState(false)
+  const [profileModal, setProfileModal] = useState(false)
+  const [profileName, setProfileName]   = useState('')
   const [pw, setPw]           = useState('')
   const [pwConfirm, setPwConfirm] = useState('')
   const [pwSaving, setPwSaving]   = useState(false)
@@ -65,23 +66,28 @@ export default function UserMenu() {
     router.push('/login')
   }
 
-  function openPwModal() {
+  function openProfileModal() {
     setOpen(false)
     setPw(''); setPwConfirm(''); setPwError(''); setPwSuccess(false)
-    setPwModal(true)
+    getMemberByAuth(user!.id).then(m => setProfileName(m?.display_name ?? ''))
+    setProfileModal(true)
   }
 
-  async function handleChangePassword(e: React.FormEvent) {
+  async function handleProfileSave(e: React.FormEvent) {
     e.preventDefault()
-    if (pw !== pwConfirm) { setPwError('Passwords do not match'); return }
-    if (pw.length < 6)    { setPwError('Password must be at least 6 characters'); return }
+    if (pw && pw !== pwConfirm) { setPwError('Passwords do not match'); return }
+    if (pw && pw.length < 6)    { setPwError('Password must be at least 6 characters'); return }
     setPwSaving(true)
     setPwError('')
     try {
-      const { error } = await createClient().auth.updateUser({ password: pw })
+      const supabase = createClient()
+      const updates: Record<string, unknown> = { data: { display_name: profileName } }
+      if (pw) updates.password = pw
+      const { error } = await supabase.auth.updateUser(updates as Parameters<typeof supabase.auth.updateUser>[0])
       if (error) throw error
+      if (profileName && user?.id) await updateAdminUser(user.id, { display_name: profileName })
       setPwSuccess(true)
-      setTimeout(() => setPwModal(false), 1500)
+      setTimeout(() => setProfileModal(false), 1500)
     } catch (err: unknown) {
       setPwError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -150,15 +156,15 @@ export default function UserMenu() {
               {theme === 'dark' ? 'Light mode' : 'Dark mode'}
             </button>
 
-            {/* Change password */}
+            {/* Profile */}
             <button
-              onClick={openPwModal}
+              onClick={openProfileModal}
               style={{ ...menuItemStyle, borderBottom: '1px solid var(--line-2)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-3)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-0)' }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-2)' }}
             >
               <span style={{ fontSize: 13, lineHeight: 1 }}>⊙</span>
-              Change password
+              Profile
             </button>
 
             {/* Sign out */}
@@ -175,10 +181,10 @@ export default function UserMenu() {
         )}
       </div>
 
-      {/* Change password modal */}
-      {pwModal && (
+      {/* Profile modal */}
+      {profileModal && (
         <div
-          onClick={() => setPwModal(false)}
+          onClick={() => setProfileModal(false)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
         >
           <div
@@ -186,32 +192,38 @@ export default function UserMenu() {
             style={{ width: '100%', maxWidth: 360, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 10, overflow: 'hidden', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
           >
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>Change password</span>
-              <button onClick={() => setPwModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-3)', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>×</button>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>Profile</span>
+              <button onClick={() => setProfileModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-3)', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
 
-            <form onSubmit={handleChangePassword} style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <form onSubmit={handleProfileSave} style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
               {pwSuccess ? (
                 <div style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--cat-code)', padding: '10px', textAlign: 'center' }}>
-                  ✓ Password updated
+                  ✓ Profile updated
                 </div>
               ) : (
                 <>
                   <div>
-                    <label style={labelStyle}>New password</label>
-                    <input type="password" value={pw} onChange={e => setPw(e.target.value)} required autoFocus style={inputStyle} />
+                    <label style={labelStyle}>Display name</label>
+                    <input type="text" value={profileName} onChange={e => setProfileName(e.target.value)} autoFocus style={inputStyle} />
                   </div>
                   <div>
-                    <label style={labelStyle}>Confirm password</label>
-                    <input type="password" value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} required style={inputStyle} />
+                    <label style={labelStyle}>New password <span style={{ opacity: 0.5, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
+                    <input type="password" value={pw} onChange={e => setPw(e.target.value)} style={inputStyle} />
                   </div>
+                  {pw && (
+                    <div>
+                      <label style={labelStyle}>Confirm password</label>
+                      <input type="password" value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} style={inputStyle} />
+                    </div>
+                  )}
                   {pwError && (
                     <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>
                       {pwError}
                     </div>
                   )}
                   <button type="submit" disabled={pwSaving} style={{ padding: '8px 0', borderRadius: 6, border: 'none', background: 'var(--bg-3)', color: 'var(--text-0)', fontSize: 12, fontFamily: 'monospace', fontWeight: 600, cursor: pwSaving ? 'not-allowed' : 'pointer' }}>
-                    {pwSaving ? 'Saving...' : 'Update password'}
+                    {pwSaving ? 'Saving...' : 'Save'}
                   </button>
                 </>
               )}

@@ -378,6 +378,14 @@ export async function getAdminUsers(): Promise<AdminUser[]> {
   return data.users
 }
 
+export async function inviteAdminUser(payload: { email: string; role: 'member' | 'admin' }): Promise<AdminUser> {
+  const data = await request<{ success: boolean; user: AdminUser }>('/api/admin/users/invite', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return data.user
+}
+
 export async function updateAdminUser(auth_id: string, payload: { display_name?: string; role?: 'member' | 'admin' }): Promise<AdminUser> {
   const data = await request<{ success: boolean; member: AdminUser }>(`/api/admin/users/${auth_id}`, {
     method: 'PATCH',
