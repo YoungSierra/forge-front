@@ -170,6 +170,7 @@ export type Feedback = {
   resolved_at?: string
   created_at: string
   members?: Member
+  resolver?: { id: string; display_name: string }
   projects?: { id: string; name: string }
 }
 

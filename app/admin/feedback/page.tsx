@@ -226,6 +226,9 @@ export default function FeedbackAdminPage() {
                 {selected.status === 'resolved' && selected.resolved_at && (
                   <span style={{ color: 'var(--cat-code)' }}>Resolved: {formatDateTime(selected.resolved_at)}</span>
                 )}
+                {selected.status === 'resolved' && selected.resolver && (
+                  <span style={{ color: 'var(--cat-code)' }}>Resolved by: {selected.resolver.display_name}</span>
+                )}
               </div>
 
               {/* Resolution note */}
