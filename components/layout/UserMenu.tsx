@@ -111,7 +111,7 @@ export default function UserMenu() {
         {open && (
           <div style={{
             position: 'absolute', top: 'calc(100% + 6px)', right: 0,
-            minWidth: 200, background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+            minWidth: 215, background: 'var(--bg-2)', border: '1px solid var(--line-2)',
             borderRadius: 6, overflow: 'hidden', zIndex: 200,
             boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
           }}>
