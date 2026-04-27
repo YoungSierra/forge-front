@@ -32,6 +32,16 @@ export function formatDate(iso: string): string {
   })
 }
 
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
 export function getCurrentStep(current_wizard_step?: Record<WizardStep, StepStatus>): WizardStep {
   if (!current_wizard_step) return 1
   const steps: WizardStep[] = [1, 2, 3, 4, 5, 6]

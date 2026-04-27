@@ -151,6 +151,28 @@ export type Project = {
   generation_jobs?: GenerationJob[]
 }
 
+export type FeedbackCategory = 'usability' | 'bug' | 'performance' | 'suggestion'
+export type FeedbackSeverity = 'low' | 'medium' | 'high'
+export type FeedbackStatus   = 'open' | 'reviewed' | 'resolved'
+
+export type Feedback = {
+  id: string
+  member_id?: string
+  project_id?: string
+  category: FeedbackCategory
+  severity: FeedbackSeverity
+  description: string
+  url_context?: string
+  screenshot_url?: string
+  status: FeedbackStatus
+  resolution_note?: string
+  resolved_by?: string
+  resolved_at?: string
+  created_at: string
+  members?: Member
+  projects?: { id: string; name: string }
+}
+
 export type GameFormData = {
   prompt: string
   genre: string

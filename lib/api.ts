@@ -1,4 +1,4 @@
-import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline } from './types'
+import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus } from './types'
 
 export type { ScriptFile, CodeGenerationResult }
 
@@ -337,6 +337,41 @@ export const generateLighting   = (id: string) => generateDoc('lighting',   id)
 export const generateAnimation  = (id: string) => generateDoc('animation',  id)
 export const generateCinematics = (id: string) => generateDoc('cinematics', id)
 export const generateVoice      = (id: string) => generateDoc('voice',      id)
+
+// Feedback
+export async function submitFeedback(payload: {
+  member_id?: string
+  project_id?: string
+  category: FeedbackCategory
+  severity: FeedbackSeverity
+  description: string
+  url_context?: string
+  screenshot_url?: string
+}): Promise<Feedback> {
+  const data = await request<{ success: boolean; feedback: Feedback }>('/api/feedback', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return data.feedback
+}
+
+export async function getFeedback(filters?: { status?: FeedbackStatus; category?: FeedbackCategory; severity?: FeedbackSeverity }): Promise<Feedback[]> {
+  const params = new URLSearchParams()
+  if (filters?.status)   params.set('status', filters.status)
+  if (filters?.category) params.set('category', filters.category)
+  if (filters?.severity) params.set('severity', filters.severity)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const data = await request<{ success: boolean; feedback: Feedback[] }>(`/api/feedback${qs}`)
+  return data.feedback || []
+}
+
+export async function updateFeedback(id: string, payload: { status: FeedbackStatus; resolution_note?: string; resolved_by?: string }): Promise<Feedback> {
+  const data = await request<{ success: boolean; feedback: Feedback }>(`/api/feedback/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+  return data.feedback
+}
 
 // Generic pipeline node approval — stores result in concept.pipeline.{stepKey}
 export async function approveNode(project_id: string, stepKey: string, nodeData: unknown) {

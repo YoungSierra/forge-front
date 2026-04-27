@@ -2,13 +2,20 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
+import { getMemberByAuth } from '@/lib/api'
 
 export default function UserMenu() {
   const { user, signOut } = useAuth()
   const router = useRouter()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen]     = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (user?.id) getMemberByAuth(user.id).then(m => setIsAdmin(m?.role === 'admin'))
+  }, [user?.id])
 
   useEffect(() => {
     if (!open) return
@@ -80,6 +87,30 @@ export default function UserMenu() {
               {user.email}
             </div>
           </div>
+
+          {/* Feedback admin — only for admins */}
+          {isAdmin && <Link
+            href="/admin/feedback"
+            onClick={() => setOpen(false)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              width: '100%', padding: '9px 14px',
+              fontSize: 12, color: 'var(--text-2)', textDecoration: 'none',
+              borderBottom: '1px solid var(--line-2)',
+              transition: 'background 80ms, color 80ms',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLAnchorElement).style.background = 'var(--bg-3)'
+              ;(e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-0)'
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLAnchorElement).style.background = 'none'
+              ;(e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-2)'
+            }}
+          >
+            <span style={{ fontSize: 13, lineHeight: 1 }}>◎</span>
+            Feedback
+          </Link>}
 
           {/* Sign out */}
           <button
