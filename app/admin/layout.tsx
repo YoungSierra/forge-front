@@ -1,4 +1,7 @@
+'use client'
+
 import Link from 'next/link'
+import UserMenu from '@/components/layout/UserMenu'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -36,6 +39,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <Link href="/admin/feedback" className="admin-nav-link" style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', textDecoration: 'none', transition: 'color 120ms' }}>
           Feedback
         </Link>
+
+        <div style={{ flex: 1 }} />
+
+        <UserMenu />
       </div>
 
       <div style={{ flex: 1, overflow: 'hidden' }}>
