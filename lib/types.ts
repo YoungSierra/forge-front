@@ -148,7 +148,20 @@ export type Project = {
   current_step?: number
   current_wizard_step?: number
   approved_wizard_count?: number
+  node_approved_count?: number
+  node_total_count?: number
+  canvas_layout?: unknown
   generation_jobs?: GenerationJob[]
+}
+
+export type AdminUser = {
+  auth_id: string
+  email: string
+  created_at: string
+  last_sign_in?: string
+  id?: string
+  display_name?: string
+  role?: 'member' | 'admin'
 }
 
 export type FeedbackCategory = 'usability' | 'bug' | 'performance' | 'suggestion'

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getFeedback, updateFeedback, getMemberByAuth } from '@/lib/api'
+import { getFeedback, updateFeedback, getMemberByAuth, summarizeFeedback } from '@/lib/api'
 import type { Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus } from '@/lib/types'
 import { useAuth } from '@/lib/auth-context'
 import { formatDateTime } from '@/lib/utils'
@@ -36,6 +36,25 @@ export default function FeedbackAdminPage() {
   const [resNote, setResNote]       = useState('')
   const [saving, setSaving]         = useState(false)
   const [currentMemberId, setMemberId] = useState<string | null>(null)
+  const [summaryOpen, setSummaryOpen]   = useState(false)
+  const [summaryText, setSummaryText]   = useState('')
+  const [summaryCount, setSummaryCount] = useState(0)
+  const [summaryLoading, setSummaryLoading] = useState(false)
+
+  async function handleSummarize() {
+    setSummaryOpen(true)
+    setSummaryText('')
+    setSummaryLoading(true)
+    try {
+      const { summary, count } = await summarizeFeedback()
+      setSummaryText(summary)
+      setSummaryCount(count)
+    } catch {
+      setSummaryText('Failed to generate summary. Check that FEEDBACK_SUMMARY_API_KEY is set.')
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (user?.id) getMemberByAuth(user.id).then(m => setMemberId(m?.id ?? null))
@@ -108,7 +127,7 @@ export default function FeedbackAdminPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100%', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
       <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
@@ -147,6 +166,12 @@ export default function FeedbackAdminPage() {
             style={{ padding: '4px 12px', borderRadius: 5, border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: items.length > 0 ? 'var(--text-1)' : 'var(--text-3)', fontSize: 10, fontFamily: 'monospace', cursor: items.length > 0 ? 'pointer' : 'not-allowed' }}
           >
             ↓ CSV
+          </button>
+          <button
+            onClick={handleSummarize}
+            style={{ padding: '4px 12px', borderRadius: 5, border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-1)', fontSize: 10, fontFamily: 'monospace', cursor: 'pointer' }}
+          >
+            ✦ Summarize
           </button>
         </div>
       </div>
@@ -274,6 +299,36 @@ export default function FeedbackAdminPage() {
           )}
         </div>
       </div>
+
+      {/* Summary modal */}
+      {summaryOpen && (
+        <div
+          onClick={() => setSummaryOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 560, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 10, overflow: 'hidden', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
+          >
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>Executive Summary</span>
+                {!summaryLoading && summaryCount > 0 && (
+                  <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', marginLeft: 10 }}>{summaryCount} open items analyzed</span>
+                )}
+              </div>
+              <button onClick={() => setSummaryOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-3)', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ padding: 18, minHeight: 100 }}>
+              {summaryLoading ? (
+                <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)' }}>Analyzing feedback...</div>
+              ) : (
+                <p style={{ fontSize: 13, color: 'var(--text-1)', lineHeight: 1.7, margin: 0, whiteSpace: 'pre-wrap' }}>{summaryText}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

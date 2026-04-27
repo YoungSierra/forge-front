@@ -1,4 +1,4 @@
-import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus } from './types'
+import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser } from './types'
 
 export type { ScriptFile, CodeGenerationResult }
 
@@ -371,6 +371,41 @@ export async function updateFeedback(id: string, payload: { status: FeedbackStat
     body: JSON.stringify(payload),
   })
   return data.feedback
+}
+
+export async function getAdminUsers(): Promise<AdminUser[]> {
+  const data = await request<{ success: boolean; users: AdminUser[] }>('/api/admin/users')
+  return data.users
+}
+
+export async function updateAdminUser(auth_id: string, payload: { display_name?: string; role?: 'member' | 'admin' }): Promise<AdminUser> {
+  const data = await request<{ success: boolean; member: AdminUser }>(`/api/admin/users/${auth_id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+  return data.member
+}
+
+export async function createAdminUser(payload: {
+  email: string; password: string; display_name: string; role: 'member' | 'admin'
+}): Promise<AdminUser> {
+  const data = await request<{ success: boolean; user: AdminUser }>('/api/admin/users', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return data.user
+}
+
+export async function saveCanvasLayout(projectId: string, layout: unknown): Promise<void> {
+  await request(`/api/projects/${projectId}/canvas`, {
+    method: 'PUT',
+    body: JSON.stringify({ canvas_layout: layout }),
+  })
+}
+
+export async function summarizeFeedback(): Promise<{ summary: string; count: number }> {
+  const data = await request<{ success: boolean; summary: string; count: number }>('/api/feedback/summary', { method: 'POST' })
+  return { summary: data.summary, count: data.count }
 }
 
 // Generic pipeline node approval — stores result in concept.pipeline.{stepKey}

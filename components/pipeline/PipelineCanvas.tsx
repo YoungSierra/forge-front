@@ -25,7 +25,8 @@ import ForgeStatusBar from './ForgeStatusBar'
 import ContextMenu, { type ContextMenuState } from './ContextMenu'
 import type { Project } from '@/lib/types'
 import { getTemplate, type TemplateCatalogNode } from '@/lib/templates'
-import { saveLayout, loadLayout } from '@/lib/canvas-storage'
+import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
+import type { CanvasLayout } from '@/lib/canvas-storage'
 
 const FIXED_NODE_IDS = new Set(['gdd', 'export'])
 
@@ -270,6 +271,10 @@ function PipelineApp({
 
   const initialState = (() => {
     if (initialProject?.id) {
+      // If DB has a canvas_layout, seed localStorage with it (cross-device sync)
+      if (initialProject.canvas_layout) {
+        seedLayoutFromDB(initialProject.id, initialProject.canvas_layout as CanvasLayout)
+      }
       const saved = loadLayout(initialProject.id)
       if (saved) return { nodes: hydrateNodes(saved.nodes, initialProject), edges: saved.edges }
       // Existing project with no saved layout → auto-apply 2D template
@@ -302,6 +307,9 @@ function PipelineApp({
     prevRef.current = initialProject
     setLiveProject(initialProject)
     if (initialProject?.id) {
+      if (initialProject.canvas_layout) {
+        seedLayoutFromDB(initialProject.id, initialProject.canvas_layout as CanvasLayout)
+      }
       const saved = loadLayout(initialProject.id)
       if (saved) { setFlowNodes(hydrateNodes(saved.nodes, initialProject)); setFlowEdges(saved.edges); return }
       const fixed = buildFixedNodes(initialProject)

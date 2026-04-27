@@ -38,6 +38,63 @@
   --cat-input:  oklch(0.82 0.08 212);
 }
 
+/* ─── Light theme ─── */
+[data-theme="light"] {
+  --bg-0: #f4f4f7;
+  --bg-1: #eeeef3;
+  --bg-2: #e6e6ec;
+  --bg-3: #dcdce4;
+  --bg-4: #d2d2dc;
+
+  --text-0: #0a0a0c;
+  --text-1: #1e1e28;
+  --text-2: #50505e;
+  --text-3: #909099;
+
+  --line:   #d8d8e2;
+  --line-2: #c8c8d4;
+}
+
+[data-theme="light"] .forge-canvas {
+  background: radial-gradient(1400px 900px at 50% 40%, var(--bg-2) 0%, var(--bg-0) 70%);
+}
+
+[data-theme="light"] .forge-node {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.10), 0 1px 0 rgba(255,255,255,0.6) inset;
+}
+
+[data-theme="light"] .group-title {
+  background: color-mix(in oklch, var(--group-color) 14%, var(--bg-2));
+}
+
+[data-theme="light"] .forge-subgroup {
+  background: color-mix(in oklch, var(--subgroup-color) 6%, var(--bg-1));
+}
+
+[data-theme="light"] .react-flow__controls {
+  background: rgba(240,240,243,0.92) !important;
+}
+
+[data-theme="light"] .react-flow__minimap {
+  background: rgba(240,240,243,0.92) !important;
+}
+
+[data-theme="light"] .react-flow__controls button {
+  color: var(--text-2) !important;
+}
+
+[data-theme="light"] .react-flow__minimap-mask {
+  fill: rgba(200,200,210,0.5) !important;
+}
+
+[data-theme="light"] .login-card {
+  background: rgba(238,238,243,0.88);
+}
+
+[data-theme="light"] .login-grid {
+  opacity: 0.25;
+}
+
 html, body {
   background: var(--bg-0);
   color: var(--text-0);

@@ -35,10 +35,11 @@ export default function ProjectCard({ project }: { project: Project }) {
     if (user?.id) getMemberByAuth(user.id).then(m => setCurrentMemberId(m?.id ?? null))
   }, [user?.id])
 
-  // Read canvas layout from localStorage to show real node progress (same as toolbar)
-  const [nodeStats, setNodeStats] = useState<{ approved: number; total: number } | null>(null)
+  // Prefer server-computed node stats (from DB canvas_layout), fallback to localStorage
+  const [localNodeStats, setLocalNodeStats] = useState<{ approved: number; total: number } | null>(null)
 
   useEffect(() => {
+    if (project.node_total_count != null) return // server has it, skip localStorage
     const layout = loadLayout(project.id)
     if (!layout?.nodes?.length) return
     const approvable = layout.nodes.filter(n => {
@@ -46,11 +47,15 @@ export default function ProjectCard({ project }: { project: Project }) {
       const d = n.data as Record<string, unknown>
       return !d.comingSoon
     })
-    setNodeStats({
+    setLocalNodeStats({
       total:    approvable.length,
       approved: approvable.filter(n => !!(n.data as Record<string, unknown>).approved).length,
     })
-  }, [project.id])
+  }, [project.id, project.node_total_count])
+
+  const nodeStats = project.node_total_count != null
+    ? { approved: project.node_approved_count ?? 0, total: project.node_total_count }
+    : localNodeStats
 
   // Use canvas stats when available, fall back to wizard steps
   const displayApproved = nodeStats?.approved ?? wizApproved
