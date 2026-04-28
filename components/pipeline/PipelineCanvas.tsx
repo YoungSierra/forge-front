@@ -30,53 +30,57 @@ import type { CanvasLayout } from '@/lib/canvas-storage'
 
 const FIXED_NODE_IDS = new Set(['gdd', 'export'])
 
-/* ─── Status helpers ─── */
-function nodeStatus(wizStep: number, nodeStep: number): ForgeNodeData['status'] {
-  if (wizStep === 0) return nodeStep === 1 ? 'idle' : 'locked'
-  if (nodeStep < wizStep)  return 'complete'
-  if (nodeStep === wizStep) return 'idle'
-  return 'locked'
-}
+/* ─── Unified node hydration — graph-based dependency logic ─── */
 
-// Maps stepKey → wizard step number so nodes can be re-hydrated from project state
-const STEP_KEY_TO_NUM: Record<string, number> = {
-  gdd:          1,
-  sprites:      2,
-  backgrounds:  2,
-  levels:       3,
-  level_design: 3,
-  code:         4,
-  source_code:  4,
-  audio:        5,
-  music:        5,
-  export:       6,
-}
+function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []): Node[] {
+  // Map stepKey → nodeId (to resolve generation_jobs which store stepKey)
+  const stepKeyToNodeId = new Map<string, string>()
+  for (const n of nodes) {
+    const sk = (n.data as unknown as ForgeNodeData).stepKey
+    if (sk) stepKeyToNodeId.set(sk, n.id)
+  }
 
-function hydrateNodes(nodes: Node[], project: Project | null): Node[] {
-  const w = project?.current_wizard_step ?? 0
-  // Build a set of approved step keys from generation_jobs for pipeline-only nodes
-  const approvedSteps = new Set(
-    (project?.generation_jobs ?? [])
-      .filter(j => j.status === 'approved')
-      .map(j => j.current_step)
-  )
+  // Build set of approved node IDs
+  const approved = new Set<string>()
+  if (project) {
+    if ((project.current_wizard_step ?? 0) > 1) approved.add('gdd')
+    for (const job of project.generation_jobs ?? []) {
+      if (job.status === 'approved') {
+        approved.add(stepKeyToNodeId.get(job.current_step) ?? job.current_step)
+      }
+    }
+  }
+
+  // Build parent map: nodeId → [parentNodeIds] from edges
+  const parentMap = new Map<string, string[]>()
+  for (const edge of edges) {
+    const tgt = edge.target as string
+    const src = edge.source as string
+    if (!tgt || !src) continue
+    const parents = parentMap.get(tgt) ?? []
+    parents.push(src)
+    parentMap.set(tgt, parents)
+  }
+
   return nodes.map(n => {
     if (n.type === 'forgeGroup') return n
     const data = n.data as unknown as ForgeNodeData
     if (data.comingSoon) return n
-    const stepNum = STEP_KEY_TO_NUM[data.stepKey ?? '']
-    if (stepNum) {
-      const status  = nodeStatus(w, stepNum)
-      const approved = w > stepNum
-      return { ...n, data: { ...n.data, status, approved } }
+
+    const nodeApproved = approved.has(n.id)
+    const parents = parentMap.get(n.id) ?? []
+
+    let status: ForgeNodeData['status']
+    if (nodeApproved) {
+      status = 'complete'
+    } else if (parents.length === 0 || parents.every(pid => approved.has(pid))) {
+      // No parents in graph (e.g. GDD) or all parents approved → available
+      status = project ? 'idle' : (n.id === 'gdd' ? 'idle' : 'locked')
+    } else {
+      status = 'locked'
     }
-    // Pipeline-only node — derive state from generation_jobs
-    const sk = data.stepKey
-    if (sk) {
-      const nodeApproved = approvedSteps.has(sk)
-      return { ...n, data: { ...n.data, status: nodeApproved ? 'complete' : 'idle', approved: nodeApproved } }
-    }
-    return n
+
+    return { ...n, data: { ...n.data, status, approved: nodeApproved } }
   })
 }
 
@@ -94,16 +98,13 @@ const EDGE_TYPES = { forgeEdge: ForgeEdge }
 
 /* ─── Fixed nodes: GDD + Export ─── */
 function buildFixedNodes(project: Project | null): Node[] {
-  const w   = project?.current_wizard_step ?? 0
   const gdd = project?.concept
-  const ns  = (s: number) => nodeStatus(w, s)
-
   return [
     {
       id: 'gdd', type: 'forgeNode', position: { x: 60, y: 300 },
       data: {
         label: 'Game Design Doc', category: 'design', icon: 'GD', num: '01',
-        status: project ? ns(1) : 'idle', stepKey: 'gdd',
+        status: 'idle', stepKey: 'gdd',
         rows: [
           { key: 'genre',  value: gdd?.project.genre ?? '–', accent: true },
           { key: 'tone',   value: gdd?.project.tone  ?? '–' },
@@ -111,21 +112,21 @@ function buildFixedNodes(project: Project | null): Node[] {
         ],
         inputs: [], outputs: [{ id: 'o', label: 'GDD Draft' }],
         previewType: 'text', previewContent: gdd?.project.elevator_pitch,
-        approved: w > 1,
+        approved: false,
       } satisfies ForgeNodeData,
     },
     {
       id: 'export', type: 'forgeNode', position: { x: 2200, y: 300 },
       data: {
         label: 'Export', category: 'output', icon: '⬡', num: '99',
-        status: project ? ns(6) : 'locked', stepKey: 'export',
+        status: 'locked', stepKey: 'export',
         rows: [
           { key: 'engine',  value: project?.target_engine ?? 'godot', accent: true },
           { key: 'formats', value: 'zip / web / itch.io' },
         ],
         inputs:  [{ id: 'i', label: 'All Approved' }],
         outputs: [],
-        previewType: 'progress', previewContent: w >= 6 ? '100' : '0',
+        previewType: 'progress', previewContent: '0',
       } satisfies ForgeNodeData,
     },
   ]
@@ -276,11 +277,11 @@ function PipelineApp({
         seedLayoutFromDB(initialProject.id, initialProject.canvas_layout as CanvasLayout)
       }
       const saved = loadLayout(initialProject.id)
-      if (saved) return { nodes: hydrateNodes(saved.nodes, initialProject), edges: saved.edges }
+      if (saved) return { nodes: hydrateNodes(saved.nodes, initialProject, saved.edges), edges: saved.edges }
       // Existing project with no saved layout → auto-apply 2D template
       const fixed = buildFixedNodes(initialProject)
       const { nodes, edges } = applyTemplate('2d_game', fixed)
-      return { nodes: hydrateNodes(nodes, initialProject), edges }
+      return { nodes: hydrateNodes(nodes, initialProject, edges), edges }
     }
     return { nodes: buildFixedNodes(initialProject), edges: [] as Edge[] }
   })()
@@ -311,10 +312,10 @@ function PipelineApp({
         seedLayoutFromDB(initialProject.id, initialProject.canvas_layout as CanvasLayout)
       }
       const saved = loadLayout(initialProject.id)
-      if (saved) { setFlowNodes(hydrateNodes(saved.nodes, initialProject)); setFlowEdges(saved.edges); return }
+      if (saved) { setFlowNodes(hydrateNodes(saved.nodes, initialProject, saved.edges)); setFlowEdges(saved.edges); return }
       const fixed = buildFixedNodes(initialProject)
       const { nodes, edges } = applyTemplate('2d_game', fixed)
-      setFlowNodes(hydrateNodes(nodes, initialProject)); setFlowEdges(edges); return
+      setFlowNodes(hydrateNodes(nodes, initialProject, edges)); setFlowEdges(edges); return
     }
     setFlowNodes(buildFixedNodes(initialProject))
     setFlowEdges([])
@@ -404,7 +405,7 @@ function PipelineApp({
   function handleApplyTemplate(templateId: string) {
     const fixed = buildFixedNodes(liveProject)
     const { nodes, edges } = applyTemplate(templateId, fixed)
-    setFlowNodes(hydrateNodes(nodes, liveProject))
+    setFlowNodes(hydrateNodes(nodes, liveProject, edges))
     setFlowEdges(edges)
     setLog(`Template "${getTemplate(templateId)?.name}" applied`)
   }
@@ -492,7 +493,7 @@ function PipelineApp({
     // Auto-apply 2D template so the full pipeline is visible immediately
     const fixed = buildFixedNodes(p)
     const { nodes, edges } = applyTemplate('2d_game', fixed)
-    setFlowNodes(hydrateNodes(nodes, p))
+    setFlowNodes(hydrateNodes(nodes, p, edges))
     setFlowEdges(edges)
     prevRef.current = p
     setSelectedId('sprites')       // focus the next active node
