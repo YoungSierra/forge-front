@@ -239,7 +239,7 @@ function CharacterChip({ c }: { c: Record<string, unknown> }) {
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color, background: `color-mix(in oklch, ${color} 12%, transparent)`, padding: '1px 6px', borderRadius: 99 }}>{role}</span>
         </div>
-        {c.description && <p style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4, lineHeight: 1.5 }}>{String(c.description).slice(0, 120)}{String(c.description).length > 120 ? '…' : ''}</p>}
+        {!!c.description && <p style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4, lineHeight: 1.5 }}>{String(c.description).slice(0, 120)}{String(c.description).length > 120 ? '…' : ''}</p>}
       </div>
     </div>
   )
@@ -271,7 +271,7 @@ function MechanicChip({ m }: { m: Record<string, unknown> }) {
     <div style={{ display: 'flex', gap: 8, padding: '7px 10px', background: 'var(--bg-2)', borderRadius: 7, border: '1px solid var(--line-2)', alignItems: 'flex-start' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-0)', marginBottom: 2 }}>{String(m.name ?? '–')}</div>
-        {m.description && <p style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>{String(m.description).slice(0, 100)}{String(m.description).length > 100 ? '…' : ''}</p>}
+        {!!m.description && <p style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>{String(m.description).slice(0, 100)}{String(m.description).length > 100 ? '…' : ''}</p>}
       </div>
       <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color, background: `color-mix(in oklch, ${color} 12%, transparent)`, padding: '1px 6px', borderRadius: 99, flexShrink: 0 }}>{type}</span>
     </div>
