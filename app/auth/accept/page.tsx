@@ -42,6 +42,14 @@ export default function AcceptInvitePage() {
         return
       }
 
+      // Direct hash redirect from Supabase (production): Supabase already processed
+      // the hash tokens on page load via detectSessionInUrl — just read the session.
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user?.email) {
+        resolve(session.user.email)
+        return
+      }
+
       // No invite tokens — user refreshed after already accepting, just go home
       router.replace('/')
     }

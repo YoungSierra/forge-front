@@ -123,7 +123,7 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
             ) : members.length === 0 ? (
               <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'monospace' }}>No members yet</div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
                 {members.map(pm => (
                   <div key={pm.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--line-2)' }}>
                     <Avatar member={pm.members} />
