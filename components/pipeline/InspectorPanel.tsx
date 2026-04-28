@@ -746,8 +746,9 @@ function NewGamePanel({ onProjectCreated, onLog }: NewGamePanelProps) {
         setPhase('form')
         setValidationFailure(v)
       }
-    } catch {
-      await doGenerate(fullPrompt)
+    } catch (e) {
+      setPhase('form')
+      setError(e instanceof Error ? e.message : 'Validation failed — please retry')
     }
   }
 
