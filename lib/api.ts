@@ -3,7 +3,8 @@ import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, 
 export type { ScriptFile, CodeGenerationResult }
 
 export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-export const assetUrl = (path: string) => path ? `${BACKEND_URL}${path}` : ''
+export const assetUrl = (path: string) =>
+  path ? (path.startsWith('http') ? path : `${BACKEND_URL}${path}`) : ''
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BACKEND_URL}${path}`, {

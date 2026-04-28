@@ -777,8 +777,9 @@ function PipelineNodeDetail({ stepKey, project }: { stepKey: string; project: Pr
   function renderValue(v: unknown, depth = 0): React.ReactNode {
     if (v == null) return <span style={{ color: 'var(--text-3)' }}>–</span>
     if (typeof v === 'string') {
-      // Render image assets inline
-      if (v.startsWith('/assets/')) {
+      // Render image assets inline (relative /assets/ path or absolute Supabase/http URL with image extension)
+      const isImg = v.startsWith('/assets/') || (v.startsWith('http') && /\.(jpe?g|png|webp|gif)(\?|$)/i.test(v))
+      if (isImg) {
         return (
           <img src={assetUrl(v)} style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 6, objectFit: 'cover', display: 'block', marginTop: 4 }}
             onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
@@ -879,8 +880,9 @@ export default function DetailModal({ stepKey, project, onClose }: Props) {
       case 'levels':  return <LevelsDetail project={project} />
       case 'audio':   return <AudioDetail project={project} />
       case 'code':    return <CodeDetail project={project} />
-      case 'export':  return <ExportDetail project={project} />
-      default:        return <PipelineNodeDetail stepKey={contentKey} project={project} />
+      case 'export':       return <ExportDetail project={project} />
+      case 'concept_art':  return <ConceptArtDetail project={project} />
+      default:             return <PipelineNodeDetail stepKey={contentKey} project={project} />
     }
   }
 

@@ -174,7 +174,8 @@ export function getInputSources(stepKey: string, project: Project): InputSource[
 function renderGenericValue(v: unknown, depth = 0): React.ReactNode {
   if (v == null) return <span style={{ color: 'var(--text-3)' }}>–</span>
   if (typeof v === 'string') {
-    if (v.startsWith('/assets/'))
+    const isImg = v.startsWith('/assets/') || (v.startsWith('http') && /\.(jpe?g|png|webp|gif)(\?|$)/i.test(v))
+    if (isImg)
       return <img src={assetUrl(v)} style={{ maxWidth: '100%', maxHeight: 160, borderRadius: 6, objectFit: 'cover', display: 'block', marginTop: 4 }}
                onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
     return <span style={{ color: 'var(--text-1)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{v}</span>

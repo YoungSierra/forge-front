@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Node } from '@xyflow/react'
 import type { ForgeNodeData } from './ForgeNode'
 import { CAT_VAR } from './ForgeNode'
@@ -1573,6 +1573,7 @@ function BackgroundsPanel({ project, onRefresh, onLog }: { project: Project; onR
 function ConceptCard({ item, size = 'char' }: { item: { name: string; prompt: string; design_notes?: string; preview_url?: string; placeholder?: boolean; role?: string; type?: string; mood?: string }; size?: 'char' | 'env' }) {
   const [imgErr, setImgErr] = useState(false)
   const src = item.preview_url ? assetUrl(item.preview_url) : ''
+  useEffect(() => { setImgErr(false) }, [src])
   const h = size === 'char' ? 110 : 80
   return (
     <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, overflow: 'hidden' }}>
