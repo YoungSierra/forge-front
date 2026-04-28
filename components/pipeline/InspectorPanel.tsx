@@ -37,7 +37,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <label style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>{label}</label>
@@ -164,17 +164,28 @@ function buildParamPrompt(values: Record<string, string | string[]>): string {
   return lines.join('\n')
 }
 
+function conflictedParamIds(values: Record<string, string | string[]>): Set<string> {
+  const fired = evalRules(values)
+  const ids = new Set<string>()
+  fired.forEach(rule => rule.conditions.forEach(cond => ids.add(cond.param)))
+  return ids
+}
+
 /* Multi-select chip toggle */
-function ChipGroup({ param, value, onChange }: {
+function ChipGroup({ param, value, onChange, conflicted }: {
   param: GDDParam
   value: string[]
   onChange: (v: string[]) => void
+  conflicted?: boolean
 }) {
   function toggle(opt: string) {
     onChange(value.includes(opt) ? value.filter(x => x !== opt) : [...value, opt])
   }
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+    <div style={{
+      display: 'flex', flexWrap: 'wrap', gap: 5,
+      ...(conflicted ? { padding: '4px 6px', borderRadius: 5, border: '1px solid color-mix(in oklch, var(--cat-output) 45%, transparent)', background: 'color-mix(in oklch, var(--cat-output) 5%, transparent)' } : {}),
+    }}>
       {(param.options ?? []).map(opt => {
         const active = value.includes(opt.value)
         return (
@@ -204,33 +215,39 @@ function ChipGroup({ param, value, onChange }: {
 }
 
 /* Render a single param field */
-function ParamField({ param, value, onChange }: {
+function ParamField({ param, value, onChange, conflicted }: {
   param: GDDParam
   value: string | string[]
   onChange: (id: string, v: string | string[]) => void
+  conflicted?: boolean
 }) {
+  const conflictBorder = conflicted ? 'color-mix(in oklch, var(--cat-output) 55%, transparent)' : undefined
+  const labelEl = conflicted
+    ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{param.label} <span style={{ color: 'var(--cat-output)', fontSize: 9 }}>⚠</span></span>
+    : param.label
+
   if (param.type === 'multiselect') {
     return (
-      <Field label={param.label}>
-        <ChipGroup param={param} value={value as string[]} onChange={v => onChange(param.id, v)} />
+      <Field label={labelEl}>
+        <ChipGroup param={param} value={value as string[]} onChange={v => onChange(param.id, v)} conflicted={conflicted} />
       </Field>
     )
   }
   if (param.type === 'text') {
     return (
-      <Field label={param.label}>
+      <Field label={labelEl}>
         <input
           value={value as string}
           onChange={e => onChange(param.id, e.target.value)}
           placeholder={param.placeholder ?? ''}
-          style={INPUT_STYLE}
+          style={{ ...INPUT_STYLE, ...(conflictBorder ? { borderColor: conflictBorder } : {}) }}
         />
       </Field>
     )
   }
   return (
-    <Field label={param.label}>
-      <select value={value as string} onChange={e => onChange(param.id, e.target.value)} style={SELECT_STYLE}>
+    <Field label={labelEl}>
+      <select value={value as string} onChange={e => onChange(param.id, e.target.value)} style={{ ...SELECT_STYLE, ...(conflictBorder ? { borderColor: conflictBorder } : {}) }}>
         {(param.options ?? []).map(opt => (
           <option key={opt.value} value={opt.value}>{opt.label}</option>
         ))}
@@ -245,26 +262,92 @@ const SEVERITY_STYLE: Record<ParamRule['severity'], { bg: string; border: string
   low:    { bg: 'color-mix(in oklch, var(--cat-audio) 7%, var(--bg-2))',   border: 'color-mix(in oklch, var(--cat-audio) 25%, transparent)',   color: 'var(--cat-audio)',  icon: '◌' },
 }
 
-function ParamWarnings({ values }: { values: Record<string, string | string[]> }) {
+function ParamConflictBanner({ values }: { values: Record<string, string | string[]> }) {
   const warnings = evalRules(values)
+  const [open, setOpen] = useState(false)
   if (warnings.length === 0) return null
+  const hasHigh = warnings.some(w => w.severity === 'high')
+  const topColor = hasHigh ? 'var(--cat-output)' : 'var(--cat-gate)'
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      {warnings.map(w => {
-        const s = SEVERITY_STYLE[w.severity]
-        return (
-          <div key={w.id} style={{
-            display: 'flex', gap: 7, alignItems: 'flex-start',
-            background: s.bg, border: `1px solid ${s.border}`,
-            borderRadius: 5, padding: '6px 9px',
-          }}>
-            <span style={{ color: s.color, fontSize: 11, flexShrink: 0, marginTop: 1 }}>{s.icon}</span>
-            <span style={{ fontSize: 10, color: 'var(--text-1)', fontFamily: 'var(--font-sans)', lineHeight: 1.5 }}>
-              {w.message}
-            </span>
+    <div style={{ borderRadius: 5, overflow: 'hidden', border: `1px solid color-mix(in oklch, ${topColor} 35%, transparent)` }}>
+      <button
+        type="button"
+        onClick={() => setOpen(p => !p)}
+        style={{
+          width: '100%', background: `color-mix(in oklch, ${topColor} 10%, var(--bg-2))`,
+          border: 'none', cursor: 'pointer', padding: '6px 9px',
+          display: 'flex', alignItems: 'center', gap: 7,
+        }}
+      >
+        <span style={{ color: topColor, fontSize: 11 }}>⚠</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: topColor, flex: 1, textAlign: 'left' }}>
+          {warnings.length} conflicto{warnings.length > 1 ? 's' : ''} detectado{warnings.length > 1 ? 's' : ''}
+        </span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)' }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px', background: 'var(--bg-2)' }}>
+          {warnings.map(w => {
+            const s = SEVERITY_STYLE[w.severity]
+            return (
+              <div key={w.id} style={{
+                display: 'flex', gap: 7, alignItems: 'flex-start',
+                background: s.bg, border: `1px solid ${s.border}`,
+                borderRadius: 5, padding: '5px 8px',
+              }}>
+                <span style={{ color: s.color, fontSize: 10, flexShrink: 0, marginTop: 1 }}>{s.icon}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-1)', fontFamily: 'var(--font-sans)', lineHeight: 1.5 }}>
+                  {w.message}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── AI Validation failure feedback ─── */
+
+function ValidationFeedback({ result }: { result: ValidationResult }) {
+  const score = result.coherence_score
+  const scoreColor = score >= 60 ? 'var(--cat-code)' : score >= 40 ? 'var(--cat-gate)' : 'var(--cat-output)'
+  return (
+    <div style={{ borderRadius: 6, overflow: 'hidden', border: `1px solid color-mix(in oklch, ${scoreColor} 35%, transparent)` }}>
+      <div style={{ background: `color-mix(in oklch, ${scoreColor} 10%, var(--bg-2))`, padding: '7px 10px', display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: scoreColor }}>{score}/100</span>
+        <span style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, flex: 1 }}>{result.coherence_summary}</span>
+      </div>
+      {result.issues.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px', background: 'var(--bg-2)' }}>
+          {result.issues.map((issue, i) => {
+            const s = SEVERITY_STYLE[issue.severity]
+            return (
+              <div key={i} style={{ display: 'flex', gap: 7, alignItems: 'flex-start', background: s.bg, border: `1px solid ${s.border}`, borderRadius: 5, padding: '5px 8px' }}>
+                <span style={{ color: s.color, fontSize: 10, flexShrink: 0, marginTop: 1 }}>{s.icon}</span>
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: s.color, textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 6 }}>{issue.type.replace('_', ' ')}</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-1)', lineHeight: 1.5 }}>{issue.description}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {result.suggestions.length > 0 && (
+        <div style={{ padding: '6px 10px 8px', borderTop: '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>Sugerencias</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {result.suggestions.map((s, i) => (
+              <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                <span style={{ color: 'var(--cat-code)', fontSize: 10, flexShrink: 0, marginTop: 1 }}>›</span>
+                <span style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>{s}</span>
+              </div>
+            ))}
           </div>
-        )
-      })}
+        </div>
+      )}
     </div>
   )
 }
@@ -607,6 +690,7 @@ function NewGamePanel({ onProjectCreated, onLog }: NewGamePanelProps) {
   const [params, setParams] = useState<Record<string, string | string[]>>(initParamValues)
   const [showParams, setShowParams] = useState(true)
   const [validation, setValidation] = useState<ValidationResult | null>(null)
+  const [validationFailure, setValidationFailure] = useState<ValidationResult | null>(null)
   const [gdd, setGdd] = useState<GDD | null>(null)
   const [meta, setMeta] = useState<unknown>(null)
   const [error, setError] = useState<string | null>(null)
@@ -638,6 +722,7 @@ function NewGamePanel({ onProjectCreated, onLog }: NewGamePanelProps) {
   async function handleSubmit() {
     if (ideaPrompt.trim().length < 10) return
     setError(null)
+    setValidationFailure(null)
     setPhase('validating')
     const fullPrompt = buildFullPrompt()
     try {
@@ -659,7 +744,7 @@ function NewGamePanel({ onProjectCreated, onLog }: NewGamePanelProps) {
         await doGenerate(fullPrompt)
       } else {
         setPhase('form')
-        setError(`Low coherence (${v.coherence_score}/100): ${v.coherence_summary}`)
+        setValidationFailure(v)
       }
     } catch {
       await doGenerate(fullPrompt)
@@ -746,9 +831,14 @@ function NewGamePanel({ onProjectCreated, onLog }: NewGamePanelProps) {
   }
 
   /* ── Form ── */
+  const conflicted = conflictedParamIds(params)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <SectionTitle>New game idea</SectionTitle>
+
+      {validationFailure && <ValidationFeedback result={validationFailure} />}
+
       {error && (
         <div style={{ fontSize: 10, color: 'var(--cat-output)', fontFamily: 'var(--font-mono)', background: 'color-mix(in oklch, var(--cat-output) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--cat-output) 25%, transparent)', borderRadius: 4, padding: '6px 8px', lineHeight: 1.5 }}>
           {error}
@@ -775,18 +865,18 @@ function NewGamePanel({ onProjectCreated, onLog }: NewGamePanelProps) {
 
       {showParams && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <ParamConflictBanner values={params} />
           {GDD_PARAMS.map(param => (
             <ParamField
               key={param.id}
               param={param}
               value={params[param.id]}
               onChange={setParam}
+              conflicted={conflicted.has(param.id)}
             />
           ))}
         </div>
       )}
-
-      <ParamWarnings values={params} />
 
       <ActionBtn
         label={ideaPrompt.trim().length < 10 ? 'Min. 10 characters' : '▶ Validate & generate GDD'}
