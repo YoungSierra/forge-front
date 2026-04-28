@@ -138,9 +138,14 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
                         <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--text-3)', background: 'var(--bg-3)', padding: '1px 6px', borderRadius: 99 }}>
                           {pm.project_role}
                         </span>
+                        {pm.members.id === ownerMemberId && (
+                          <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--cat-code)', background: 'color-mix(in srgb, var(--cat-code) 12%, transparent)', padding: '1px 6px', borderRadius: 99 }}>
+                            owner
+                          </span>
+                        )}
                       </div>
                     </div>
-                    {isOwner && (
+                    {isOwner && pm.members.id !== ownerMemberId && (
                       <button
                         onClick={() => handleRemove(pm.members.id)}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 14, padding: 4, borderRadius: 4, lineHeight: 1 }}
