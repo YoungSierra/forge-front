@@ -4,11 +4,30 @@ import React, { useEffect, useState } from 'react'
 import type { Project } from '@/lib/types'
 import { exportGDDToPDF, } from '@/lib/gdd-pdf'
 import { assetUrl } from '@/lib/api'
+import { InputContext, getInputSources } from './InputContext'
 
 interface Props {
   stepKey: string
   project: Project
   onClose: () => void
+}
+
+/* Determine if a step already has generated output */
+function stepHasOutput(stepKey: string, project: Project): boolean {
+  const key      = stepKey.replace('-gate', '')
+  const pipeline = (project.concept as Record<string, unknown>)?.pipeline as Record<string, unknown> | undefined
+  switch (key) {
+    case 'gdd':    return !!project.concept?.project?.name
+    case 'sprites': return (project.concept?.characters?.length ?? 0) > 0
+    case 'levels':  return (project.concept?.levels?.length ?? 0) > 0
+    case 'audio':   return !!project.concept?.audio_direction?.music_mood
+    case 'code':    return (project.concept?.development?.core_features?.length ?? 0) > 0
+    case 'export':  return true
+    default: {
+      const d = pipeline?.[key] as Record<string, unknown> | undefined
+      return !!d && Object.keys(d).filter(k => k !== 'approved' && k !== 'approved_at').length > 0
+    }
+  }
 }
 
 function toStr(v: unknown): string {
@@ -848,19 +867,37 @@ export default function DetailModal({ stepKey, project, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // Map gate nodes to their parent step for content
-  const contentKey = stepKey.replace('-gate', '')
+  const contentKey   = stepKey.replace('-gate', '')
+  const hasOutput    = stepHasOutput(stepKey, project)
+  const hasSources   = getInputSources(stepKey, project).length > 0
+  const [tab, setTab] = useState<'output' | 'context'>(hasOutput ? 'output' : 'context')
 
   function renderContent() {
     switch (contentKey) {
-      case 'gdd':         return <GDDDetail project={project} />
-      case 'sprites':     return <SpritesDetail project={project} />
-      case 'levels':      return <LevelsDetail project={project} />
-      case 'audio':       return <AudioDetail project={project} />
-      case 'code':        return <CodeDetail project={project} />
-      case 'export':      return <ExportDetail project={project} />
-      default:            return <PipelineNodeDetail stepKey={contentKey} project={project} />
+      case 'gdd':     return <GDDDetail project={project} />
+      case 'sprites': return <SpritesDetail project={project} />
+      case 'levels':  return <LevelsDetail project={project} />
+      case 'audio':   return <AudioDetail project={project} />
+      case 'code':    return <CodeDetail project={project} />
+      case 'export':  return <ExportDetail project={project} />
+      default:        return <PipelineNodeDetail stepKey={contentKey} project={project} />
     }
+  }
+
+  function TabBtn({ id, label }: { id: 'output' | 'context'; label: string }) {
+    const active = tab === id
+    return (
+      <button
+        onClick={() => setTab(id)}
+        style={{
+          padding: '6px 14px', borderRadius: 5, border: 'none', cursor: 'pointer',
+          fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em',
+          background: active ? 'var(--bg-3)' : 'transparent',
+          color: active ? 'var(--text-0)' : 'var(--text-3)',
+          transition: 'all 100ms',
+        }}
+      >{label}</button>
+    )
   }
 
   return (
@@ -891,7 +928,7 @@ export default function DetailModal({ stepKey, project, onClose }: Props) {
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12,
           padding: '14px 20px',
-          borderBottom: '1px solid var(--line)',
+          borderBottom: hasSources ? 'none' : '1px solid var(--line)',
           flexShrink: 0,
         }}>
           <div style={{ flex: 1 }}>
@@ -937,9 +974,26 @@ export default function DetailModal({ stepKey, project, onClose }: Props) {
           </button>
         </div>
 
+        {/* Tab bar — only when input context is available */}
+        {hasSources && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 2,
+            padding: '6px 16px',
+            borderBottom: '1px solid var(--line)',
+            background: 'var(--bg-1)',
+            flexShrink: 0,
+          }}>
+            <TabBtn id="context" label="Input Context" />
+            <TabBtn id="output"  label="Output" />
+          </div>
+        )}
+
         {/* Modal body — scrollable */}
         <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px' }}>
-          {renderContent()}
+          {tab === 'context'
+            ? <InputContext stepKey={stepKey} project={project} />
+            : renderContent()
+          }
         </div>
       </div>
     </div>
