@@ -26,9 +26,22 @@ export function getInputSources(stepKey: string, project: Project): InputSource[
   const p   = project
 
   switch (key) {
-    case 'gdd':
     case 'export':
       return []
+
+    case 'gdd': {
+      const saved = (() => {
+        try {
+          const raw = typeof window !== 'undefined' ? localStorage.getItem(`forge:gdd-input:${p.id}`) : null
+          return raw ? JSON.parse(raw) as { ideaPrompt: string; params: Record<string, string | string[]> } : null
+        } catch { return null }
+      })()
+      if (!saved) return []
+      return [
+        { label: 'Idea / Prompt', color: 'var(--cat-design)', data: saved.ideaPrompt },
+        { label: 'Parameters',    color: 'var(--cat-asset)',   data: saved.params },
+      ]
+    }
 
     case 'sprites':
       return [
@@ -283,6 +296,10 @@ function MechanicChip({ m }: { m: Record<string, unknown> }) {
 function renderSourceData(data: unknown): React.ReactNode {
   if (data == null)
     return <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', fontStyle: 'italic', padding: '8px 0' }}>Not yet generated</div>
+
+  // Plain string — render as readable text block
+  if (typeof data === 'string')
+    return <div style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.6, padding: '8px 10px', background: 'var(--bg-2)', borderRadius: 6, border: '1px solid var(--line-2)' }}>{data}</div>
 
   // Array of objects with 'name' key — could be characters, levels, mechanics, features
   if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object' && data[0] !== null) {
