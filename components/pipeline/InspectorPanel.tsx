@@ -61,13 +61,14 @@ function ReviewActions({
   const effectiveHasData = hasData || !!(pipeline?.[stepKey])
 
   // Reset optimistic flag when parent refreshes with updated job data
-  const prevReviewStatus = useRef(pendingJob?.review_status)
+  const prevJobKey = useRef(`${pendingJob?.id}:${pendingJob?.review_status}`)
   useEffect(() => {
-    if (pendingJob?.review_status !== prevReviewStatus.current) {
-      prevReviewStatus.current = pendingJob?.review_status
+    const key = `${pendingJob?.id}:${pendingJob?.review_status}`
+    if (key !== prevJobKey.current) {
+      prevJobKey.current = key
       setSentForReview(false)
     }
-  }, [pendingJob?.review_status])
+  }, [pendingJob?.id, pendingJob?.review_status])
 
   async function handleRequestReview() {
     if (!reviewerId) return
@@ -138,6 +139,13 @@ function ReviewActions({
       </div>
     )
   }
+
+  // Optimistic: just sent for review but project prop is still stale (no pendingJob yet)
+  if (sentForReview) return (
+    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-gate)', textAlign: 'center', padding: '4px 0' }}>
+      ⏳ Awaiting review…
+    </div>
+  )
 
   if (!effectiveHasData) return null
 
@@ -1059,7 +1067,7 @@ function SpriteCard({ name, role, prompt, url }: { name: string; role: string; p
   )
 }
 
-function SpritesPanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function SpritesPanel({ project, onRefresh, onLog, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [sprites, setSprites] = useState<SpritePreview[] | null>(null)
   const approved = (project.current_wizard_step ?? 0) > 2
@@ -1117,7 +1125,7 @@ function SpritesPanel({ project, onRefresh, onLog }: { project: Project; onRefre
           ))}
         </div>
       )}
-      {!approved && (
+      {!approved && !locked && (
         <ActionBtn label={busy ? '⟳ Generating sprites…' : '▶ Generate sprites'} onClick={generate} variant="run" disabled={busy} />
       )}
       <ReviewActions project={project} stepKey="sprites" nodeData={sprites} hasData={!!sprites} approved={approved} busy={busy} approveLabel="✓ Approve sprites" onApprove={approve} />
@@ -1174,7 +1182,7 @@ function LevelCard({ level, mechNames }: { level: LevelItem; mechNames: Record<s
   )
 }
 
-function LevelsPanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function LevelsPanel({ project, onRefresh, onLog, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [levels, setLevels] = useState<LevelItem[] | null>(null)
   const approved = (project.current_wizard_step ?? 0) > 3
@@ -1219,7 +1227,7 @@ function LevelsPanel({ project, onRefresh, onLog }: { project: Project; onRefres
           ))}
         </div>
       )}
-      {!approved && (
+      {!approved && !locked && (
         <ActionBtn label={busy ? '⟳ Generating levels…' : '▶ Generate levels'} onClick={generate} variant="run" disabled={busy} />
       )}
       <ReviewActions project={project} stepKey="levels" nodeData={levels} hasData={!!levels} approved={approved} busy={busy} approveLabel="✓ Approve levels" onApprove={approve} />
@@ -1227,7 +1235,7 @@ function LevelsPanel({ project, onRefresh, onLog }: { project: Project; onRefres
   )
 }
 
-function AudioPanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function AudioPanel({ project, onRefresh, onLog, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [audio, setAudio] = useState<{ sfx: unknown[]; music: unknown[] } | null>(null)
   const approved = (project.current_wizard_step ?? 0) > 5
@@ -1297,7 +1305,7 @@ function AudioPanel({ project, onRefresh, onLog }: { project: Project; onRefresh
           )}
         </>
       )}
-      {!approved && (
+      {!approved && !locked && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate audio'} onClick={generate} variant="run" disabled={busy} />
       )}
       <ReviewActions project={project} stepKey="audio" nodeData={audio} hasData={!!audio} approved={approved} busy={busy} approveLabel="✓ Approve audio" onApprove={approve} />
@@ -1305,7 +1313,7 @@ function AudioPanel({ project, onRefresh, onLog }: { project: Project; onRefresh
   )
 }
 
-function CodePanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function CodePanel({ project, onRefresh, onLog, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ engine: string; files: ScriptFile[]; architecture_md: string } | null>(null)
   const [engine, setEngine] = useState(project.target_engine ?? project.concept?.development?.suggested_engine?.toLowerCase() ?? 'godot')
@@ -1387,7 +1395,7 @@ function CodePanel({ project, onRefresh, onLog }: { project: Project; onRefresh:
           </div>
         </>
       )}
-      {!approved && (
+      {!approved && !locked && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate code'} onClick={generate} variant="run" disabled={busy} />
       )}
       <ReviewActions project={project} stepKey="code" nodeData={result} hasData={!!result} approved={approved} busy={busy} approveLabel="✓ Approve code" onApprove={approve} />
@@ -1533,7 +1541,7 @@ function RuleList({ rules }: { rules: string[] }) {
   )
 }
 
-function VisualGuidePanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
+function VisualGuidePanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [guide, setGuide] = useState<VisualGuide | null>(null)
   const [tab, setTab] = useState<'palette' | 'rules' | 'refs'>('palette')
@@ -1683,7 +1691,7 @@ function VisualGuidePanel({ project, onRefresh, onLog, onResult }: { project: Pr
         </>
       )}
 
-      {!approved && (
+      {!approved && !locked && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate visual guide'} onClick={generate} variant="run" disabled={busy} />
       )}
       <ReviewActions project={project} stepKey="visual_guide" nodeData={guide} hasData={!!guide} approved={approved} busy={busy} approveLabel="✓ Approve style guide" onApprove={approve} />
@@ -1721,7 +1729,7 @@ function BgCard({ bg }: { bg: BackgroundPreview }) {
   )
 }
 
-function BackgroundsPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
+function BackgroundsPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [backgrounds, setBackgrounds] = useState<BackgroundPreview[] | null>(null)
 
@@ -1766,7 +1774,7 @@ function BackgroundsPanel({ project, onRefresh, onLog, onResult }: { project: Pr
           {display.map((bg, i) => <BgCard key={i} bg={bg} />)}
         </div>
       )}
-      {!approved && (
+      {!approved && !locked && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate backgrounds'} onClick={generate} variant="run" disabled={busy} />
       )}
       <ReviewActions project={project} stepKey="backgrounds" nodeData={backgrounds} hasData={!!backgrounds} approved={approved} busy={busy} approveLabel="✓ Approve backgrounds" onApprove={approve} />
@@ -1804,7 +1812,7 @@ function ConceptCard({ item, size = 'char' }: { item: { name: string; prompt: st
   )
 }
 
-function ConceptArtPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
+function ConceptArtPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ConceptArtResult | null>(null)
   const [tab, setTab] = useState<'chars' | 'envs'>('chars')
@@ -1883,7 +1891,7 @@ function ConceptArtPanel({ project, onRefresh, onLog, onResult }: { project: Pro
         </>
       )}
 
-      {!approved && (
+      {!approved && !locked && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate concept art'} onClick={generate} variant="run" disabled={busy} />
       )}
       <ReviewActions project={project} stepKey="concept_art" nodeData={result} hasData={!!result} approved={approved} busy={busy} approveLabel="✓ Approve concept art" onApprove={approve} />
@@ -1901,7 +1909,7 @@ const SFX_CAT_COLOR: Record<string, string> = {
   environment: 'var(--cat-gate)',
 }
 
-function SfxPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
+function SfxPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ sfx_pack: SfxEntry[]; implementation_notes: string } | null>(null)
 
@@ -1976,7 +1984,7 @@ function SfxPanel({ project, onRefresh, onLog, onResult }: { project: Project; o
         </>
       )}
 
-      {!approved && (
+      {!approved && !locked && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate SFX'} onClick={generate} variant="run" disabled={busy} />
       )}
       {result && !approved && (
@@ -2052,7 +2060,7 @@ function JsonDocRenderer({ data }: { data: unknown }) {
 }
 
 function JsonDocPanel({
-  title, stepKey, project, onRefresh, onLog, generateFn, summaryRows, onResult,
+  title, stepKey, project, onRefresh, onLog, generateFn, summaryRows, onResult, locked,
 }: {
   title: string
   stepKey: string
@@ -2062,6 +2070,7 @@ function JsonDocPanel({
   generateFn: (id: string) => Promise<unknown>
   summaryRows: { k: string; v: string; accent?: boolean }[]
   onResult?: (d: unknown) => void
+  locked?: boolean
 }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<unknown | null>(null)
@@ -2100,7 +2109,7 @@ function JsonDocPanel({
       {summaryRows.map(r => <MonoRow key={r.k} k={r.k} v={r.v} accent={r.accent} />)}
       <Divider />
       {display && <JsonDocRenderer data={display} />}
-      {!approved && (
+      {!approved && !locked && (
         <ActionBtn label={busy ? '⟳ Generating…' : `▶ Generate ${title.toLowerCase()}`} onClick={generate} variant="run" disabled={busy} />
       )}
       <ReviewActions project={project} stepKey={stepKey} nodeData={result} hasData={result != null} approved={approved} busy={busy} approveLabel={`✓ Approve ${title.toLowerCase()}`} onApprove={approve} />
@@ -2112,7 +2121,7 @@ function JsonDocPanel({
 
 function DocPanel<T>({
   title, project, onRefresh, onLog,
-  storedKey, summaryRows, generateFn, renderContent, onResult,
+  storedKey, summaryRows, generateFn, renderContent, onResult, locked,
 }: {
   title: string
   project: Project
@@ -2123,6 +2132,7 @@ function DocPanel<T>({
   generateFn: (project_id: string) => Promise<T>
   renderContent: (data: T) => React.ReactNode
   onResult?: (d: unknown) => void
+  locked?: boolean
 }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<T | null>(null)
@@ -2161,7 +2171,7 @@ function DocPanel<T>({
       {summaryRows.map(r => <MonoRow key={r.k} k={r.k} v={r.v} accent={r.accent} />)}
       <Divider />
       {display && renderContent(display)}
-      {!approved && (
+      {!approved && !locked && (
         <ActionBtn label={busy ? `⟳ Generating…` : `▶ Generate ${title.toLowerCase()}`} onClick={generate} variant="run" disabled={busy} />
       )}
       <ReviewActions project={project} stepKey={storedKey} nodeData={result} hasData={!!result} approved={approved} busy={busy} approveLabel={`✓ Approve ${title.toLowerCase()}`} onApprove={approve} />
@@ -2169,7 +2179,7 @@ function DocPanel<T>({
   )
 }
 
-function UIUXPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
+function UIUXPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
   return (
     <DocPanel<UIUXResult>
       title="UI/UX"
@@ -2177,6 +2187,7 @@ function UIUXPanel({ project, onRefresh, onLog, onResult }: { project: Project; 
       onRefresh={onRefresh}
       onLog={onLog}
       onResult={onResult}
+      locked={locked}
       storedKey="uiux"
       summaryRows={[
         { k: 'platform', v: project.concept?.project?.target_platform ?? 'PC', accent: true },
@@ -2224,7 +2235,7 @@ function UIUXPanel({ project, onRefresh, onLog, onResult }: { project: Project; 
   )
 }
 
-function IconsPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
+function IconsPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
   return (
     <DocPanel<IconsResult>
       title="Icons"
@@ -2232,6 +2243,7 @@ function IconsPanel({ project, onRefresh, onLog, onResult }: { project: Project;
       onRefresh={onRefresh}
       onLog={onLog}
       onResult={onResult}
+      locked={locked}
       storedKey="icons"
       summaryRows={[
         { k: 'art style', v: project.concept?.art_direction?.style ?? '–', accent: true },
@@ -2265,7 +2277,7 @@ function IconsPanel({ project, onRefresh, onLog, onResult }: { project: Project;
   )
 }
 
-function HUDPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
+function HUDPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
   return (
     <DocPanel<HUDResult>
       title="HUD"
@@ -2273,6 +2285,7 @@ function HUDPanel({ project, onRefresh, onLog, onResult }: { project: Project; o
       onRefresh={onRefresh}
       onLog={onLog}
       onResult={onResult}
+      locked={locked}
       storedKey="hud"
       summaryRows={[
         { k: 'platform', v: project.concept?.project?.target_platform ?? 'PC', accent: true },
@@ -2449,6 +2462,7 @@ function NodeContent({
   const [modalOpen, setModalOpen] = useState(false)
   const [pendingResult, setPendingResult] = useState<unknown>(null)
   const stepKey = data.stepKey ?? node.id
+  const locked = data.status === 'locked'
 
   useEffect(() => { setPendingResult(null) }, [stepKey])
 
@@ -2500,7 +2514,7 @@ function NodeContent({
   if (stepKey === 'sprites' || stepKey === 'sprites-gate') {
     return (
       <>
-        <SpritesPanel project={project} onRefresh={onRefresh} onLog={onLog} />
+        <SpritesPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2509,7 +2523,7 @@ function NodeContent({
   if (stepKey === 'levels' || stepKey === 'levels-gate') {
     return (
       <>
-        <LevelsPanel project={project} onRefresh={onRefresh} onLog={onLog} />
+        <LevelsPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2518,7 +2532,7 @@ function NodeContent({
   if (stepKey === 'audio' || stepKey === 'audio-gate') {
     return (
       <>
-        <AudioPanel project={project} onRefresh={onRefresh} onLog={onLog} />
+        <AudioPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2527,7 +2541,7 @@ function NodeContent({
   if (stepKey === 'code' || stepKey === 'code-gate') {
     return (
       <>
-        <CodePanel project={project} onRefresh={onRefresh} onLog={onLog} />
+        <CodePanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2562,7 +2576,7 @@ function NodeContent({
     const cfg = doc3dNodes[stepKey]
     return (
       <>
-        <JsonDocPanel title={cfg.title} stepKey={stepKey} project={project} onRefresh={ar(stepKey)} onLog={onLog} generateFn={cfg.fn} summaryRows={cfg.rows} onResult={setPendingResult} />
+        <JsonDocPanel title={cfg.title} stepKey={stepKey} project={project} onRefresh={ar(stepKey)} onLog={onLog} generateFn={cfg.fn} summaryRows={cfg.rows} onResult={setPendingResult} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2572,7 +2586,7 @@ function NodeContent({
   if (stepKey === 'concept_art') {
     return (
       <>
-        <ConceptArtPanel project={project} onRefresh={ar('concept_art')} onLog={onLog} onResult={setPendingResult} />
+        <ConceptArtPanel project={project} onRefresh={ar('concept_art')} onLog={onLog} onResult={setPendingResult} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2582,7 +2596,7 @@ function NodeContent({
   if (stepKey === 'visual_guide') {
     return (
       <>
-        <VisualGuidePanel project={project} onRefresh={ar('visual_guide')} onLog={onLog} onResult={setPendingResult} />
+        <VisualGuidePanel project={project} onRefresh={ar('visual_guide')} onLog={onLog} onResult={setPendingResult} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2592,7 +2606,7 @@ function NodeContent({
   if (stepKey === 'backgrounds') {
     return (
       <>
-        <BackgroundsPanel project={project} onRefresh={ar('backgrounds')} onLog={onLog} onResult={setPendingResult} />
+        <BackgroundsPanel project={project} onRefresh={ar('backgrounds')} onLog={onLog} onResult={setPendingResult} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2602,7 +2616,7 @@ function NodeContent({
   if (stepKey === 'uiux') {
     return (
       <>
-        <UIUXPanel project={project} onRefresh={ar('uiux')} onLog={onLog} onResult={setPendingResult} />
+        <UIUXPanel project={project} onRefresh={ar('uiux')} onLog={onLog} onResult={setPendingResult} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2612,7 +2626,7 @@ function NodeContent({
   if (stepKey === 'icons') {
     return (
       <>
-        <IconsPanel project={project} onRefresh={ar('icons')} onLog={onLog} onResult={setPendingResult} />
+        <IconsPanel project={project} onRefresh={ar('icons')} onLog={onLog} onResult={setPendingResult} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2622,7 +2636,7 @@ function NodeContent({
   if (stepKey === 'hud') {
     return (
       <>
-        <HUDPanel project={project} onRefresh={ar('hud')} onLog={onLog} onResult={setPendingResult} />
+        <HUDPanel project={project} onRefresh={ar('hud')} onLog={onLog} onResult={setPendingResult} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
@@ -2632,7 +2646,7 @@ function NodeContent({
   if (stepKey === 'sfx') {
     return (
       <>
-        <SfxPanel project={project} onRefresh={ar('sfx')} onLog={onLog} onResult={setPendingResult} />
+        <SfxPanel project={project} onRefresh={ar('sfx')} onLog={onLog} onResult={setPendingResult} locked={locked} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
