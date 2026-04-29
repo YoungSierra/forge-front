@@ -2462,7 +2462,7 @@ function NodeContent({
   const [modalOpen, setModalOpen] = useState(false)
   const [pendingResult, setPendingResult] = useState<unknown>(null)
   const stepKey = data.stepKey ?? node.id
-  const locked = data.status === 'locked'
+  const locked = data.status === 'locked' || data.status === 'pending_review'
 
   useEffect(() => { setPendingResult(null) }, [stepKey])
 
