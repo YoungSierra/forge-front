@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import UserMenu from './UserMenu'
+import ReviewBadge from './ReviewBadge'
 
 export default function HomeHeader() {
   return (
@@ -24,7 +25,10 @@ export default function HomeHeader() {
       </Link>
 
       {/* Right */}
-      <UserMenu />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <ReviewBadge />
+        <UserMenu />
+      </div>
     </header>
   )
 }

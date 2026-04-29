@@ -425,6 +425,30 @@ export async function approveNode(project_id: string, stepKey: string, nodeData:
   })
 }
 
+// Request peer review for a pipeline node
+export async function requestNodeReview(project_id: string, stepKey: string, reviewer_id: string, nodeData: unknown) {
+  return request(`/api/projects/${project_id}/request-node-review`, {
+    method: 'POST',
+    body: JSON.stringify({ stepKey, reviewer_id, nodeData }),
+  })
+}
+
+// Reviewer submits their review
+export async function submitReview(job_id: string, review_status: 'reviewed' | 'changes_requested', reviewer_note?: string) {
+  return request(`/api/projects/jobs/${job_id}/submit-review`, {
+    method: 'PATCH',
+    body: JSON.stringify({ review_status, reviewer_note }),
+  })
+}
+
+// Get all jobs pending review for a member
+export async function getPendingReviews(member_id: string) {
+  const data = await request<{ success: boolean; jobs: (import('./types').GenerationJob & { projects: { id: string; name: string } })[] }>(
+    `/api/projects/pending-reviews?member_id=${member_id}`
+  )
+  return data.jobs || []
+}
+
 export interface VisualGuide {
   style_summary: string
   palette: { name: string; hex: string; usage: string }[]

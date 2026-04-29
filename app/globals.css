@@ -212,6 +212,21 @@ html, body {
   min-height: 0;
   min-width: 0;
   transition: none;
+  position: relative;
+  font-size: 11px; /* base — overridden inline when resizing */
+}
+.lib-resize-handle {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 20;
+  background: transparent;
+  transition: background 120ms;
+}
+.lib-resize-handle:hover,
+.lib-resize-handle.dragging {
+  background: color-mix(in oklch, var(--cat-design) 55%, transparent);
 }
 .lib-collapse-btn {
   display: flex; align-items: center; justify-content: center;
@@ -228,7 +243,7 @@ html, body {
 
 /* Panel title */
 .lib-panel-title {
-  font-family: var(--font-mono); font-size: 9px;
+  font-family: var(--font-mono); font-size: 0.82em;
   text-transform: uppercase; letter-spacing: 0.12em;
   color: var(--text-3); padding: 8px 12px 4px;
   flex-shrink: 0;
@@ -239,7 +254,7 @@ html, body {
   display: flex; align-items: center; gap: 7px;
   padding: 5px 12px;
   cursor: pointer;
-  font-size: 11px; color: var(--text-2);
+  font-size: 1em; color: var(--text-2);
   border-left: 2px solid transparent;
   transition: all 80ms;
   white-space: nowrap; overflow: hidden;
@@ -247,7 +262,7 @@ html, body {
 .lib-item:hover { background: var(--bg-2); color: var(--text-0); border-left-color: var(--item-color, var(--text-3)); }
 .lib-item.active { background: color-mix(in oklch, var(--item-color, var(--cat-code)) 8%, var(--bg-2)); border-left-color: var(--item-color, var(--cat-code)); color: var(--text-0); }
 .lib-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.lib-meta { font-family: var(--font-mono); font-size: 9px; margin-left: auto; flex-shrink: 0; opacity: 0.7; }
+.lib-meta { font-family: var(--font-mono); font-size: 0.82em; margin-left: auto; flex-shrink: 0; opacity: 0.7; }
 
 /* Frame group */
 .lib-frame-group { margin: 4px 0; }
@@ -259,7 +274,7 @@ html, body {
   border-top: 1px solid color-mix(in oklch, var(--frame-color, var(--cat-design)) 18%, var(--line));
   border-left: 2px solid transparent;
   color: color-mix(in oklch, var(--frame-color, var(--cat-design)) 80%, var(--text-1));
-  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  font-family: var(--font-mono); font-size: 0.91em; font-weight: 700;
   letter-spacing: 0.08em; text-transform: uppercase;
   cursor: pointer; text-align: left;
   transition: background 80ms;
@@ -269,10 +284,10 @@ html, body {
   background: color-mix(in oklch, var(--frame-color, var(--cat-design)) 14%, var(--bg-2));
   border-left-color: var(--frame-color, var(--cat-design));
 }
-.lib-chevron { font-size: 9px; flex-shrink: 0; opacity: 0.8; }
+.lib-chevron { font-size: 0.82em; flex-shrink: 0; opacity: 0.8; }
 .lib-frame-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .lib-frame-count {
-  font-size: 9px; opacity: 0.5;
+  font-size: 0.82em; opacity: 0.5;
   background: var(--bg-3); border-radius: 8px;
   padding: 1px 5px; flex-shrink: 0;
 }
@@ -640,6 +655,20 @@ html, body {
 .forge-node.approved .node-led {
   background: var(--node-color) !important;
   box-shadow: 0 0 6px var(--node-color) !important;
+}
+
+/* ─── Pending review node ─── */
+.forge-node.pending-review {
+  border-color: color-mix(in oklch, var(--cat-gate) 55%, var(--line)) !important;
+}
+.forge-node.pending-review .node-led {
+  background: var(--cat-gate) !important;
+  box-shadow: 0 0 6px var(--cat-gate) !important;
+  animation: led-pulse 1.8s ease-in-out infinite;
+}
+@keyframes led-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
 }
 
 /* ─── Group frames ─── */

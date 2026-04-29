@@ -40,14 +40,15 @@ function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []
     if (sk) stepKeyToNodeId.set(sk, n.id)
   }
 
-  // Build set of approved node IDs
+  // Build approved + pending_review sets
   const approved = new Set<string>()
+  const pendingReview = new Set<string>()
   if (project) {
     if ((project.current_wizard_step ?? 0) > 1) approved.add('gdd')
     for (const job of project.generation_jobs ?? []) {
-      if (job.status === 'approved') {
-        approved.add(stepKeyToNodeId.get(job.current_step) ?? job.current_step)
-      }
+      const nodeId = stepKeyToNodeId.get(job.current_step) ?? job.current_step
+      if (job.status === 'approved') approved.add(nodeId)
+      else if (job.status === 'review' && job.review_status === 'pending') pendingReview.add(nodeId)
     }
   }
 
@@ -73,8 +74,9 @@ function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []
     let status: ForgeNodeData['status']
     if (nodeApproved) {
       status = 'complete'
+    } else if (pendingReview.has(n.id)) {
+      status = 'pending_review'
     } else if (parents.length === 0 || parents.every(pid => approved.has(pid))) {
-      // No parents in graph (e.g. GDD) or all parents approved → available
       status = project ? 'idle' : (n.id === 'gdd' ? 'idle' : 'locked')
     } else {
       status = 'locked'
@@ -84,11 +86,11 @@ function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []
   })
 }
 
-function fe(id: string, src: string, tgt: string, cat: ForgeNodeCategory, active = true): Edge {
+function fe(id: string, src: string, tgt: string, cat: ForgeNodeCategory): Edge {
   return {
     id, source: src, target: tgt,
     type: 'forgeEdge',
-    data: { color: CAT_VAR[cat], active },
+    data: { color: CAT_VAR[cat], active: false },
     style: { stroke: CAT_VAR[cat] },
   }
 }
@@ -265,6 +267,7 @@ function PipelineApp({
   const [liveProject, setLiveProject] = useState<Project | null>(initialProject)
   const [selectedId, setSelectedId] = useState<string | null>(initialProject === null ? 'gdd' : null)
   const [libraryOpen, setLibraryOpen] = useState(true)
+  const [libraryWidth, setLibraryWidth] = useState(220)
   const [log, setLog] = useState('')
   const [zoom, setZoom] = useState(0.85)
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
@@ -461,6 +464,17 @@ function PipelineApp({
 
   const selectedNode = flowNodes.find(n => n.id === selectedId) ?? null
 
+  // Edge glow only when source node is approved
+  const approvedIds = new Set(
+    flowNodes
+      .filter(n => (n.data as unknown as ForgeNodeData).approved === true)
+      .map(n => n.id)
+  )
+  const displayEdges = flowEdges.map(e => ({
+    ...e,
+    data: { ...(e.data ?? {}), active: approvedIds.has(e.source as string) },
+  }))
+
   function handleRefresh() {
     onRefresh()
     setLog('Pipeline refreshed')
@@ -514,7 +528,7 @@ function PipelineApp({
   return (
     <div
       className="forge-app"
-      style={{ gridTemplateColumns: `${libraryOpen ? 220 : 32}px 1fr 280px` }}
+      style={{ gridTemplateColumns: `${libraryOpen ? libraryWidth : 32}px 1fr 280px` }}
     >
       <ForgeToolbar project={toolbarProject} phase="idle" onRefresh={handleRefresh} nodes={flowNodes} />
 
@@ -525,13 +539,15 @@ function PipelineApp({
         onFocus={handleFocusNode}
         isOpen={libraryOpen}
         onToggle={() => setLibraryOpen(o => !o)}
+        width={libraryWidth}
+        onWidthChange={setLibraryWidth}
       />
 
       <div className="forge-canvas">
         <div style={{ position: 'absolute', inset: 0 }}>
           <ReactFlow
             nodes={flowNodes.map(n => ({ ...n, selected: n.id === selectedId }))}
-            edges={flowEdges}
+            edges={displayEdges}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
             onNodesChange={onNodesChange}

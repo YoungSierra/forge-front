@@ -9,11 +9,13 @@ import { InputContext, getInputSources } from './InputContext'
 interface Props {
   stepKey: string
   project: Project
+  pendingData?: unknown
   onClose: () => void
 }
 
 /* Determine if a step already has generated output */
-function stepHasOutput(stepKey: string, project: Project): boolean {
+function stepHasOutput(stepKey: string, project: Project, pendingData?: unknown): boolean {
+  if (pendingData != null) return true
   const key      = stepKey.replace('-gate', '')
   const pipeline = (project.concept as Record<string, unknown>)?.pipeline as Record<string, unknown> | undefined
   switch (key) {
@@ -657,9 +659,9 @@ type ConceptArtData = {
   approved_at?: string
 }
 
-function ConceptArtDetail({ project }: { project: Project }) {
+function ConceptArtDetail({ project, pendingData }: { project: Project; pendingData?: unknown }) {
   const pipeline = (project.concept as Record<string, unknown>)?.pipeline as Record<string, unknown> | undefined
-  const data = pipeline?.concept_art as ConceptArtData | undefined
+  const data = (pipeline?.concept_art as ConceptArtData | undefined) ?? (pendingData as ConceptArtData | undefined)
 
   if (!data?.character_concepts && !data?.environment_concepts) {
     return <div style={{ color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 11, padding: '20px 0', textAlign: 'center' }}>Concept art has not been generated yet.</div>
@@ -762,9 +764,9 @@ function BackgroundsDetail({ project }: { project: Project }) {
 
 /* ─── Generic pipeline node detail ─── */
 
-function PipelineNodeDetail({ stepKey, project }: { stepKey: string; project: Project }) {
+function PipelineNodeDetail({ stepKey, project, pendingData }: { stepKey: string; project: Project; pendingData?: unknown }) {
   const pipeline = (project.concept as Record<string, unknown>)?.pipeline as Record<string, unknown> | undefined
-  const data = pipeline?.[stepKey]
+  const data = pipeline?.[stepKey] ?? pendingData
 
   if (!data) {
     return (
@@ -860,7 +862,7 @@ function PipelineNodeDetail({ stepKey, project }: { stepKey: string; project: Pr
   )
 }
 
-export default function DetailModal({ stepKey, project, onClose }: Props) {
+export default function DetailModal({ stepKey, project, pendingData, onClose }: Props) {
   // Close on Escape
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
@@ -869,7 +871,7 @@ export default function DetailModal({ stepKey, project, onClose }: Props) {
   }, [onClose])
 
   const contentKey   = stepKey.replace('-gate', '')
-  const hasOutput    = stepHasOutput(stepKey, project)
+  const hasOutput    = stepHasOutput(stepKey, project, pendingData)
   const hasSources   = getInputSources(stepKey, project).length > 0
   const [tab, setTab] = useState<'output' | 'context'>(hasOutput ? 'output' : 'context')
 
@@ -881,8 +883,8 @@ export default function DetailModal({ stepKey, project, onClose }: Props) {
       case 'audio':   return <AudioDetail project={project} />
       case 'code':    return <CodeDetail project={project} />
       case 'export':       return <ExportDetail project={project} />
-      case 'concept_art':  return <ConceptArtDetail project={project} />
-      default:             return <PipelineNodeDetail stepKey={contentKey} project={project} />
+      case 'concept_art':  return <ConceptArtDetail project={project} pendingData={pendingData} />
+      default:             return <PipelineNodeDetail stepKey={contentKey} project={project} pendingData={pendingData} />
     }
   }
 

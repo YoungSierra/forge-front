@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Node } from '@xyflow/react'
 import { CAT_VAR, type ForgeNodeData, type ForgeNodeCategory } from './ForgeNode'
 import type { ForgeGroupNodeData } from './ForgeGroupNode'
@@ -12,6 +12,8 @@ interface Props {
   onFocus: (id: string) => void
   isOpen: boolean
   onToggle: () => void
+  width?: number
+  onWidthChange?: (w: number) => void
 }
 
 interface OutlinerFrame {
@@ -70,15 +72,17 @@ function byPos(a: Node, b: Node) {
   return a.position.x - b.position.x || a.position.y - b.position.y
 }
 
-function statusDot(status: ForgeNodeData['status'], approved?: boolean) {
+function statusDot(status: ForgeNodeData['status'], approved?: boolean): { char: string; color: string; pulse?: boolean } {
   if (approved) return { char: '✓', color: 'var(--cat-code)' }
   switch (status) {
-    case 'complete':     return { char: '●', color: 'var(--cat-code)' }
-    case 'running':      return { char: '◉', color: 'var(--cat-audio)' }
-    case 'error':        return { char: '✕', color: 'var(--cat-output)' }
-    case 'idle':         return { char: '●', color: 'var(--cat-design)' }
+    case 'complete':        return { char: '✓', color: 'var(--cat-code)' }
+    case 'pending_review':  return { char: '◈', color: 'var(--cat-gate)', pulse: true }
+    case 'running':         return { char: '⟳', color: 'var(--cat-audio)', pulse: true }
+    case 'error':           return { char: '✕', color: 'var(--cat-output)' }
+    case 'gate-pending':    return { char: '◇', color: 'var(--cat-gate)' }
+    case 'idle':            return { char: '●', color: 'var(--cat-design)' }
     case 'locked':
-    default:             return { char: '○', color: 'var(--text-3)' }
+    default:                return { char: '○', color: 'var(--text-3)' }
   }
 }
 
@@ -100,21 +104,59 @@ function NodeRow({ node, selectedId, onSelect, onFocus, indent = 0 }: {
       style={{ '--item-color': color, paddingLeft: 12 + indent * 14 } as React.CSSProperties}
       onClick={() => { onSelect(node.id); onFocus(node.id) }}
     >
-      <span style={{ fontSize: 9, color: dot.color, flexShrink: 0 }}>{dot.char}</span>
+      <span style={{ fontSize: 9, color: dot.color, flexShrink: 0, ...(dot.pulse ? { animation: 'led-pulse 1.8s ease-in-out infinite', display: 'inline-block' } : {}) }}>{dot.char}</span>
       <span className="lib-item-label">{data.label}</span>
       <span className="lib-meta" style={{ color }}>#{data.num}</span>
     </div>
   )
 }
 
-export default function LibraryPanel({ nodes, selectedNodeId, onSelect, onFocus, isOpen, onToggle }: Props) {
+export default function LibraryPanel({ nodes, selectedNodeId, onSelect, onFocus, isOpen, onToggle, width = 220, onWidthChange }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const toggle = (id: string) => setCollapsed(p => ({ ...p, [id]: !p[id] }))
+
+  const dragging = useRef(false)
+  const startX = useRef(0)
+  const startW = useRef(0)
+  const handleRef = useRef<HTMLDivElement>(null)
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragging.current = true
+    startX.current = e.clientX
+    startW.current = width
+    handleRef.current?.classList.add('dragging')
+  }, [width])
+
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragging.current) return
+      const delta = e.clientX - startX.current
+      const next = Math.max(160, Math.min(480, startW.current + delta))
+      onWidthChange?.(next)
+    }
+    function onUp() {
+      if (!dragging.current) return
+      dragging.current = false
+      handleRef.current?.classList.remove('dragging')
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+  }, [onWidthChange])
+
+  const fontSize = isOpen
+    ? (Math.max(9, Math.min(17, 11 * width / 220)).toFixed(1) + 'px')
+    : undefined
 
   const sections = buildOutliner(nodes)
 
   return (
-    <aside className="forge-library">
+    <aside className="forge-library" style={fontSize ? { fontSize } : undefined}>
+      {isOpen && <div ref={handleRef} className="lib-resize-handle" onMouseDown={onMouseDown} />}
       <button className="lib-collapse-btn" onClick={onToggle} title={isOpen ? 'Collapse' : 'Expand'}>
         {isOpen ? '‹' : '›'}
       </button>

@@ -116,6 +116,9 @@ export type GenerationJob = {
   progress?: number
   created_at?: string
   completed_at?: string
+  review_status?: 'pending' | 'reviewed' | 'changes_requested' | null
+  reviewer_id?: string | null
+  reviewer_note?: string | null
 }
 
 export type Discipline = 'code' | 'art' | 'vfx' | 'audio' | 'design' | 'infra'

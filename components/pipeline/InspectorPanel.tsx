@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { Node } from '@xyflow/react'
 import type { ForgeNodeData } from './ForgeNode'
 import { CAT_VAR } from './ForgeNode'
 import DetailModal from './DetailModal'
 import type {
   Project, GameFormData, GDD, ValidationResult,
-  SpritePreview, ScriptFile,
+  SpritePreview, ScriptFile, ProjectMember,
 } from '@/lib/types'
 import {
   validateIdea, generateGDD, approveStep1,
@@ -20,10 +20,149 @@ import {
   generateUIUX, generateIcons, generateHUD, approveNode,
   generateModeling, generateCharaters, generateVfx, generateTexturing,
   generateRigging, generateLighting, generateAnimation, generateCinematics, generateVoice,
-  assetUrl,
+  assetUrl, getProjectMembers, requestNodeReview, submitReview, getMemberByAuth,
   type VisualGuide, type BackgroundPreview, type SfxEntry, type ConceptArtResult,
   type UIUXResult, type IconsResult, type HUDResult,
 } from '@/lib/api'
+import { useAuth } from '@/lib/auth-context'
+
+/* ─── Review actions (approve / request peer review / reviewer view) ─── */
+
+function ReviewActions({
+  project, stepKey, nodeData, hasData, approved, busy, approveLabel, onApprove,
+}: {
+  project: Project
+  stepKey: string
+  nodeData: unknown
+  hasData: boolean
+  approved: boolean
+  busy: boolean
+  approveLabel?: string
+  onApprove: () => Promise<void>
+}) {
+  const { user } = useAuth()
+  const [memberId, setMemberId]       = useState<string | null>(null)
+  const [showPicker, setShowPicker]   = useState(false)
+  const [members, setMembers]         = useState<ProjectMember[]>([])
+  const [reviewerId, setReviewerId]   = useState('')
+  const [requesting, setRequesting]   = useState(false)
+  const [submitting, setSubmitting]   = useState(false)
+  const [sentForReview, setSentForReview] = useState(false)
+
+  useEffect(() => {
+    if (user?.id) getMemberByAuth(user.id).then(m => setMemberId(m?.id ?? null))
+  }, [user?.id])
+
+  const pendingJob = project.generation_jobs?.find(j => j.current_step === stepKey && j.status === 'review')
+  const isReviewer = !!memberId && pendingJob?.reviewer_id === memberId
+
+  // hasData is true if caller passed data OR if backend already persisted it in concept.pipeline
+  const pipeline = (project.concept as unknown as { pipeline?: Record<string, unknown> } | null)?.pipeline
+  const effectiveHasData = hasData || !!(pipeline?.[stepKey])
+
+  // Reset optimistic flag when parent refreshes with updated job data
+  const prevReviewStatus = useRef(pendingJob?.review_status)
+  useEffect(() => {
+    if (pendingJob?.review_status !== prevReviewStatus.current) {
+      prevReviewStatus.current = pendingJob?.review_status
+      setSentForReview(false)
+    }
+  }, [pendingJob?.review_status])
+
+  async function handleRequestReview() {
+    if (!reviewerId) return
+    setRequesting(true)
+    try {
+      await requestNodeReview(project.id, stepKey, reviewerId, nodeData)
+      setShowPicker(false); setReviewerId('')
+      setSentForReview(true)
+    } catch (e) { console.error(e) }
+    finally { setRequesting(false) }
+  }
+
+  async function handleSubmitReview(status: 'reviewed' | 'changes_requested') {
+    if (!pendingJob) return
+    setSubmitting(true)
+    try { await submitReview(pendingJob.id, status) }
+    catch (e) { console.error(e) }
+    finally { setSubmitting(false) }
+  }
+
+  function openPicker() {
+    getProjectMembers(project.id).then(setMembers)
+    setShowPicker(true)
+  }
+
+  if (approved) return (
+    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
+  )
+
+  if (isReviewer && pendingJob?.review_status === 'pending') return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-gate)', textAlign: 'center', padding: '4px 0' }}>⏳ Assigned for your review</div>
+      <ActionBtn label={submitting ? '⟳ Saving…' : '✓ Mark as reviewed'} onClick={() => handleSubmitReview('reviewed')} variant="approve" disabled={submitting} />
+      <ActionBtn label={submitting ? '⟳ Saving…' : '↺ Request changes'} onClick={() => handleSubmitReview('changes_requested')} variant="reject" disabled={submitting} />
+    </div>
+  )
+
+  if (pendingJob) {
+    const rs = sentForReview ? 'pending' : pendingJob.review_status
+    const statusText  = rs === 'reviewed' ? '✓ Reviewed — ready to approve' : rs === 'changes_requested' ? '↺ Changes requested by reviewer' : '⏳ Awaiting review…'
+    const statusColor = rs === 'reviewed' ? 'var(--cat-code)' : rs === 'changes_requested' ? 'var(--cat-output)' : 'var(--cat-gate)'
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: statusColor, textAlign: 'center', padding: '4px 0' }}>{statusText}</div>
+        {effectiveHasData && (rs === 'reviewed' || rs === 'changes_requested') && (
+          <ActionBtn label={busy ? '⟳ Approving…' : approveLabel ?? '✓ Approve'} onClick={onApprove} variant="approve" disabled={busy} />
+        )}
+        {rs === 'changes_requested' && (
+          <>
+            <ActionBtn label="↺ Re-send for review" onClick={openPicker} variant="ghost" disabled={busy} />
+            {showPicker && (
+              <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Assign reviewer</div>
+                <select value={reviewerId} onChange={e => setReviewerId(e.target.value)} style={SELECT_STYLE}>
+                  <option value="">Select member…</option>
+                  {members.filter(m => m.members.id !== memberId).map(m => (
+                    <option key={m.members.id} value={m.members.id}>{m.members.display_name}</option>
+                  ))}
+                </select>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <ActionBtn label={requesting ? 'Sending…' : 'Send'} onClick={handleRequestReview} variant="run" disabled={!reviewerId || requesting} />
+                  <ActionBtn label="Cancel" onClick={() => { setShowPicker(false); setReviewerId('') }} variant="ghost" />
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
+  if (!effectiveHasData) return null
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <ActionBtn label={busy ? '⟳ Approving…' : approveLabel ?? '✓ Approve'} onClick={onApprove} variant="approve" disabled={busy} />
+      <ActionBtn label="⊕ Request review" onClick={openPicker} variant="ghost" disabled={busy} />
+      {showPicker && (
+        <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Assign reviewer</div>
+          <select value={reviewerId} onChange={e => setReviewerId(e.target.value)} style={SELECT_STYLE}>
+            <option value="">Select member…</option>
+            {members.filter(m => m.members.id !== memberId).map(m => (
+              <option key={m.members.id} value={m.members.id}>{m.members.display_name}</option>
+            ))}
+          </select>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <ActionBtn label={requesting ? 'Sending…' : 'Send'} onClick={handleRequestReview} variant="run" disabled={!reviewerId || requesting} />
+            <ActionBtn label="Cancel" onClick={() => { setShowPicker(false); setReviewerId('') }} variant="ghost" />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 /* ─── Shared sub-components ─── */
 
@@ -981,12 +1120,7 @@ function SpritesPanel({ project, onRefresh, onLog }: { project: Project; onRefre
       {!approved && (
         <ActionBtn label={busy ? '⟳ Generating sprites…' : '▶ Generate sprites'} onClick={generate} variant="run" disabled={busy} />
       )}
-      {sprites && !approved && (
-        <ActionBtn label={busy ? '⟳ Approving…' : '✓ Approve sprites'} onClick={approve} variant="approve" disabled={busy} />
-      )}
-      {approved && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
-      )}
+      <ReviewActions project={project} stepKey="sprites" nodeData={sprites} hasData={!!sprites} approved={approved} busy={busy} approveLabel="✓ Approve sprites" onApprove={approve} />
     </div>
   )
 }
@@ -1088,12 +1222,7 @@ function LevelsPanel({ project, onRefresh, onLog }: { project: Project; onRefres
       {!approved && (
         <ActionBtn label={busy ? '⟳ Generating levels…' : '▶ Generate levels'} onClick={generate} variant="run" disabled={busy} />
       )}
-      {levels && !approved && (
-        <ActionBtn label={busy ? '⟳ Approving…' : '✓ Approve levels'} onClick={approve} variant="approve" disabled={busy} />
-      )}
-      {approved && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
-      )}
+      <ReviewActions project={project} stepKey="levels" nodeData={levels} hasData={!!levels} approved={approved} busy={busy} approveLabel="✓ Approve levels" onApprove={approve} />
     </div>
   )
 }
@@ -1171,12 +1300,7 @@ function AudioPanel({ project, onRefresh, onLog }: { project: Project; onRefresh
       {!approved && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate audio'} onClick={generate} variant="run" disabled={busy} />
       )}
-      {audio && !approved && (
-        <ActionBtn label={busy ? '⟳ Approving…' : '✓ Approve audio'} onClick={approve} variant="approve" disabled={busy} />
-      )}
-      {approved && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
-      )}
+      <ReviewActions project={project} stepKey="audio" nodeData={audio} hasData={!!audio} approved={approved} busy={busy} approveLabel="✓ Approve audio" onApprove={approve} />
     </div>
   )
 }
@@ -1189,6 +1313,7 @@ function CodePanel({ project, onRefresh, onLog }: { project: Project; onRefresh:
 
   const mechanics = project.concept?.mechanics ?? []
   const suggested = project.concept?.development?.suggested_engine
+  const storedCode = project.concept?.pipeline?.code as ({ engine: string; files: ScriptFile[]; architecture_md: string; approved?: boolean }) | undefined
 
   async function generate() {
     setBusy(true)
@@ -1202,10 +1327,11 @@ function CodePanel({ project, onRefresh, onLog }: { project: Project; onRefresh:
   }
 
   async function approve() {
-    if (!result) return
+    const data = result ?? (storedCode as { engine: string; files: ScriptFile[]; architecture_md: string } | undefined)
+    if (!data) return
     setBusy(true)
     try {
-      await approveStep4(project.id, result)
+      await approveStep4(project.id, data)
       onRefresh()
       onLog('Code approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1264,12 +1390,7 @@ function CodePanel({ project, onRefresh, onLog }: { project: Project; onRefresh:
       {!approved && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate code'} onClick={generate} variant="run" disabled={busy} />
       )}
-      {result && !approved && (
-        <ActionBtn label={busy ? '⟳ Approving…' : '✓ Approve code'} onClick={approve} variant="approve" disabled={busy} />
-      )}
-      {approved && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
-      )}
+      <ReviewActions project={project} stepKey="code" nodeData={result} hasData={!!result} approved={approved} busy={busy} approveLabel="✓ Approve code" onApprove={approve} />
     </div>
   )
 }
@@ -1412,14 +1533,14 @@ function RuleList({ rules }: { rules: string[] }) {
   )
 }
 
-function VisualGuidePanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function VisualGuidePanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
   const [busy, setBusy] = useState(false)
   const [guide, setGuide] = useState<VisualGuide | null>(null)
   const [tab, setTab] = useState<'palette' | 'rules' | 'refs'>('palette')
 
   const stored = project.concept?.pipeline?.visual_guide as (VisualGuide & { approved?: boolean }) | undefined
   const approved = !!stored?.approved
-  const display = guide ?? (stored?.approved ? stored as VisualGuide : null)
+  const display = guide ?? (stored ? stored as VisualGuide : null)
 
   async function generate() {
     setBusy(true)
@@ -1427,16 +1548,18 @@ function VisualGuidePanel({ project, onRefresh, onLog }: { project: Project; onR
       onLog('Generating visual style guide…')
       const result = await generateVisualGuide(project.id)
       setGuide(result)
+      onResult?.(result)
       onLog('Visual guide ready — review and approve')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
     finally { setBusy(false) }
   }
 
   async function approve() {
-    if (!guide) return
+    const data = guide ?? (stored as VisualGuide | undefined)
+    if (!data) return
     setBusy(true)
     try {
-      await approveNode(project.id, 'visual_guide', guide)
+      await approveNode(project.id, 'visual_guide', data)
       onRefresh()
       onLog('Visual guide approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1563,12 +1686,7 @@ function VisualGuidePanel({ project, onRefresh, onLog }: { project: Project; onR
       {!approved && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate visual guide'} onClick={generate} variant="run" disabled={busy} />
       )}
-      {guide && !approved && (
-        <ActionBtn label={busy ? '⟳ Approving…' : '✓ Approve style guide'} onClick={approve} variant="approve" disabled={busy} />
-      )}
-      {approved && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
-      )}
+      <ReviewActions project={project} stepKey="visual_guide" nodeData={guide} hasData={!!guide} approved={approved} busy={busy} approveLabel="✓ Approve style guide" onApprove={approve} />
     </div>
   )
 }
@@ -1603,13 +1721,13 @@ function BgCard({ bg }: { bg: BackgroundPreview }) {
   )
 }
 
-function BackgroundsPanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function BackgroundsPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
   const [busy, setBusy] = useState(false)
   const [backgrounds, setBackgrounds] = useState<BackgroundPreview[] | null>(null)
 
   const stored = project.concept?.pipeline?.backgrounds as ({ items?: BackgroundPreview[]; approved?: boolean }) | undefined
   const approved = !!stored?.approved
-  const display = backgrounds ?? (stored?.approved ? stored.items ?? null : null)
+  const display = backgrounds ?? (stored ? stored.items ?? null : null)
 
   async function generate() {
     setBusy(true)
@@ -1617,16 +1735,18 @@ function BackgroundsPanel({ project, onRefresh, onLog }: { project: Project; onR
       onLog('Generating backgrounds… (may take 30–60s)')
       const result = await generateBackgrounds(project.id)
       setBackgrounds(result)
+      onResult?.({ items: result })
       onLog('Backgrounds ready — review and approve')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
     finally { setBusy(false) }
   }
 
   async function approve() {
-    if (!backgrounds) return
+    const items = backgrounds ?? stored?.items
+    if (!items) return
     setBusy(true)
     try {
-      await approveNode(project.id, 'backgrounds', { items: backgrounds })
+      await approveNode(project.id, 'backgrounds', { items })
       onRefresh()
       onLog('Backgrounds approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1649,12 +1769,7 @@ function BackgroundsPanel({ project, onRefresh, onLog }: { project: Project; onR
       {!approved && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate backgrounds'} onClick={generate} variant="run" disabled={busy} />
       )}
-      {backgrounds && !approved && (
-        <ActionBtn label={busy ? '⟳ Approving…' : '✓ Approve backgrounds'} onClick={approve} variant="approve" disabled={busy} />
-      )}
-      {approved && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
-      )}
+      <ReviewActions project={project} stepKey="backgrounds" nodeData={backgrounds} hasData={!!backgrounds} approved={approved} busy={busy} approveLabel="✓ Approve backgrounds" onApprove={approve} />
     </div>
   )
 }
@@ -1689,14 +1804,14 @@ function ConceptCard({ item, size = 'char' }: { item: { name: string; prompt: st
   )
 }
 
-function ConceptArtPanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function ConceptArtPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ConceptArtResult | null>(null)
   const [tab, setTab] = useState<'chars' | 'envs'>('chars')
 
   const stored = project.concept?.pipeline?.concept_art as (ConceptArtResult & { approved?: boolean }) | undefined
   const approved = !!stored?.approved
-  const display = result ?? (stored?.approved ? stored as ConceptArtResult : null)
+  const display = result ?? (stored ? stored as ConceptArtResult : null)
 
   async function generate() {
     setBusy(true)
@@ -1704,16 +1819,18 @@ function ConceptArtPanel({ project, onRefresh, onLog }: { project: Project; onRe
       onLog('Generating concept art… (may take 30–60s)')
       const res = await generateConceptArt(project.id)
       setResult(res)
+      onResult?.(res)
       onLog(`Concept art ready (${res.character_concepts.length} chars, ${res.environment_concepts.length} envs) — review and approve`)
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
     finally { setBusy(false) }
   }
 
   async function approve() {
-    if (!result) return
+    const data = result ?? (stored as ConceptArtResult | undefined)
+    if (!data) return
     setBusy(true)
     try {
-      await approveNode(project.id, 'concept_art', result)
+      await approveNode(project.id, 'concept_art', data)
       onRefresh()
       onLog('Concept art approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1769,12 +1886,7 @@ function ConceptArtPanel({ project, onRefresh, onLog }: { project: Project; onRe
       {!approved && (
         <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate concept art'} onClick={generate} variant="run" disabled={busy} />
       )}
-      {result && !approved && (
-        <ActionBtn label={busy ? '⟳ Approving…' : '✓ Approve concept art'} onClick={approve} variant="approve" disabled={busy} />
-      )}
-      {approved && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
-      )}
+      <ReviewActions project={project} stepKey="concept_art" nodeData={result} hasData={!!result} approved={approved} busy={busy} approveLabel="✓ Approve concept art" onApprove={approve} />
     </div>
   )
 }
@@ -1789,13 +1901,13 @@ const SFX_CAT_COLOR: Record<string, string> = {
   environment: 'var(--cat-gate)',
 }
 
-function SfxPanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function SfxPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ sfx_pack: SfxEntry[]; implementation_notes: string } | null>(null)
 
   const stored = project.concept?.pipeline?.sfx as ({ sfx_pack?: SfxEntry[]; implementation_notes?: string; approved?: boolean }) | undefined
   const approved = !!stored?.approved
-  const display = result ?? (stored?.approved ? { sfx_pack: stored.sfx_pack ?? [], implementation_notes: stored.implementation_notes ?? '' } : null)
+  const display = result ?? (stored ? { sfx_pack: stored.sfx_pack ?? [], implementation_notes: stored.implementation_notes ?? '' } : null)
 
   async function generate() {
     setBusy(true)
@@ -1803,16 +1915,18 @@ function SfxPanel({ project, onRefresh, onLog }: { project: Project; onRefresh: 
       onLog('Generating SFX design…')
       const res = await generateSfx(project.id)
       setResult(res)
+      onResult?.(res)
       onLog(`SFX pack ready (${res.sfx_pack.length} sounds) — review and approve`)
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
     finally { setBusy(false) }
   }
 
   async function approve() {
-    if (!result) return
+    const data = result ?? (stored?.sfx_pack ? { sfx_pack: stored.sfx_pack, implementation_notes: stored.implementation_notes ?? '' } : null)
+    if (!data) return
     setBusy(true)
     try {
-      await approveNode(project.id, 'sfx', result)
+      await approveNode(project.id, 'sfx', data)
       onRefresh()
       onLog('SFX approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1938,7 +2052,7 @@ function JsonDocRenderer({ data }: { data: unknown }) {
 }
 
 function JsonDocPanel({
-  title, stepKey, project, onRefresh, onLog, generateFn, summaryRows,
+  title, stepKey, project, onRefresh, onLog, generateFn, summaryRows, onResult,
 }: {
   title: string
   stepKey: string
@@ -1947,13 +2061,14 @@ function JsonDocPanel({
   onLog: (m: string) => void
   generateFn: (id: string) => Promise<unknown>
   summaryRows: { k: string; v: string; accent?: boolean }[]
+  onResult?: (d: unknown) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<unknown | null>(null)
 
   const stored = project.concept?.pipeline?.[stepKey] as ({ approved?: boolean } & Record<string, unknown>) | undefined
   const approved = !!stored?.approved
-  const display = result ?? (stored?.approved ? stored : null)
+  const display = result ?? (stored ? stored : null)
 
   async function generate() {
     setBusy(true)
@@ -1961,16 +2076,18 @@ function JsonDocPanel({
       onLog(`Generating ${title.toLowerCase()}…`)
       const res = await generateFn(project.id)
       setResult(res)
+      onResult?.(res)
       onLog(`${title} ready — review and approve`)
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
     finally { setBusy(false) }
   }
 
   async function approve() {
-    if (!result) return
+    const data = result ?? stored
+    if (!data) return
     setBusy(true)
     try {
-      await approveNode(project.id, stepKey, result)
+      await approveNode(project.id, stepKey, data)
       onRefresh()
       onLog(`${title} approved`)
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1986,12 +2103,7 @@ function JsonDocPanel({
       {!approved && (
         <ActionBtn label={busy ? '⟳ Generating…' : `▶ Generate ${title.toLowerCase()}`} onClick={generate} variant="run" disabled={busy} />
       )}
-      {result != null && !approved && (
-        <ActionBtn label={busy ? '⟳ Approving…' : `✓ Approve ${title.toLowerCase()}`} onClick={approve} variant="approve" disabled={busy} />
-      )}
-      {approved && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
-      )}
+      <ReviewActions project={project} stepKey={stepKey} nodeData={result} hasData={result != null} approved={approved} busy={busy} approveLabel={`✓ Approve ${title.toLowerCase()}`} onApprove={approve} />
     </div>
   )
 }
@@ -2000,7 +2112,7 @@ function JsonDocPanel({
 
 function DocPanel<T>({
   title, project, onRefresh, onLog,
-  storedKey, summaryRows, generateFn, renderContent,
+  storedKey, summaryRows, generateFn, renderContent, onResult,
 }: {
   title: string
   project: Project
@@ -2010,13 +2122,14 @@ function DocPanel<T>({
   summaryRows: { k: string; v: string; accent?: boolean }[]
   generateFn: (project_id: string) => Promise<T>
   renderContent: (data: T) => React.ReactNode
+  onResult?: (d: unknown) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<T | null>(null)
 
   const stored = project.concept?.pipeline?.[storedKey] as (T & { approved?: boolean }) | undefined
   const approved = !!stored?.approved
-  const display = result ?? (stored?.approved ? stored as T : null)
+  const display = result ?? (stored ? stored as T : null)
 
   async function generate() {
     setBusy(true)
@@ -2024,16 +2137,18 @@ function DocPanel<T>({
       onLog(`Generating ${title.toLowerCase()}…`)
       const res = await generateFn(project.id)
       setResult(res)
+      onResult?.(res)
       onLog(`${title} ready — review and approve`)
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
     finally { setBusy(false) }
   }
 
   async function approve() {
-    if (!result) return
+    const data = result ?? stored
+    if (!data) return
     setBusy(true)
     try {
-      await approveNode(project.id, storedKey, result)
+      await approveNode(project.id, storedKey, data)
       onRefresh()
       onLog(`${title} approved`)
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -2049,23 +2164,19 @@ function DocPanel<T>({
       {!approved && (
         <ActionBtn label={busy ? `⟳ Generating…` : `▶ Generate ${title.toLowerCase()}`} onClick={generate} variant="run" disabled={busy} />
       )}
-      {result && !approved && (
-        <ActionBtn label={busy ? '⟳ Approving…' : `✓ Approve ${title.toLowerCase()}`} onClick={approve} variant="approve" disabled={busy} />
-      )}
-      {approved && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
-      )}
+      <ReviewActions project={project} stepKey={storedKey} nodeData={result} hasData={!!result} approved={approved} busy={busy} approveLabel={`✓ Approve ${title.toLowerCase()}`} onApprove={approve} />
     </div>
   )
 }
 
-function UIUXPanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function UIUXPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
   return (
     <DocPanel<UIUXResult>
       title="UI/UX"
       project={project}
       onRefresh={onRefresh}
       onLog={onLog}
+      onResult={onResult}
       storedKey="uiux"
       summaryRows={[
         { k: 'platform', v: project.concept?.project?.target_platform ?? 'PC', accent: true },
@@ -2113,13 +2224,14 @@ function UIUXPanel({ project, onRefresh, onLog }: { project: Project; onRefresh:
   )
 }
 
-function IconsPanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function IconsPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
   return (
     <DocPanel<IconsResult>
       title="Icons"
       project={project}
       onRefresh={onRefresh}
       onLog={onLog}
+      onResult={onResult}
       storedKey="icons"
       summaryRows={[
         { k: 'art style', v: project.concept?.art_direction?.style ?? '–', accent: true },
@@ -2153,13 +2265,14 @@ function IconsPanel({ project, onRefresh, onLog }: { project: Project; onRefresh
   )
 }
 
-function HUDPanel({ project, onRefresh, onLog }: { project: Project; onRefresh: () => void; onLog: (m: string) => void }) {
+function HUDPanel({ project, onRefresh, onLog, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void }) {
   return (
     <DocPanel<HUDResult>
       title="HUD"
       project={project}
       onRefresh={onRefresh}
       onLog={onLog}
+      onResult={onResult}
       storedKey="hud"
       summaryRows={[
         { k: 'platform', v: project.concept?.project?.target_platform ?? 'PC', accent: true },
@@ -2334,7 +2447,10 @@ function NodeContent({
   onApproveNode?: (nodeId: string) => void
 }) {
   const [modalOpen, setModalOpen] = useState(false)
+  const [pendingResult, setPendingResult] = useState<unknown>(null)
   const stepKey = data.stepKey ?? node.id
+
+  useEffect(() => { setPendingResult(null) }, [stepKey])
 
   /* ── GDD node ── */
   if (stepKey === 'gdd') {
@@ -2350,7 +2466,7 @@ function NodeContent({
       <>
         <GDDSummaryPanel project={project} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2367,7 +2483,7 @@ function NodeContent({
           {gddApproved && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ GDD approved — pipeline unlocked</div>}
           <ViewDetailBtn onClick={() => setModalOpen(true)} />
         </div>
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2386,7 +2502,7 @@ function NodeContent({
       <>
         <SpritesPanel project={project} onRefresh={onRefresh} onLog={onLog} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2395,7 +2511,7 @@ function NodeContent({
       <>
         <LevelsPanel project={project} onRefresh={onRefresh} onLog={onLog} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2404,7 +2520,7 @@ function NodeContent({
       <>
         <AudioPanel project={project} onRefresh={onRefresh} onLog={onLog} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2413,7 +2529,7 @@ function NodeContent({
       <>
         <CodePanel project={project} onRefresh={onRefresh} onLog={onLog} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2422,7 +2538,7 @@ function NodeContent({
       <>
         <ExportPanel project={project} onRefresh={onRefresh} onLog={onLog} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2446,9 +2562,9 @@ function NodeContent({
     const cfg = doc3dNodes[stepKey]
     return (
       <>
-        <JsonDocPanel title={cfg.title} stepKey={stepKey} project={project} onRefresh={ar(stepKey)} onLog={onLog} generateFn={cfg.fn} summaryRows={cfg.rows} />
+        <JsonDocPanel title={cfg.title} stepKey={stepKey} project={project} onRefresh={ar(stepKey)} onLog={onLog} generateFn={cfg.fn} summaryRows={cfg.rows} onResult={setPendingResult} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2456,9 +2572,9 @@ function NodeContent({
   if (stepKey === 'concept_art') {
     return (
       <>
-        <ConceptArtPanel project={project} onRefresh={ar('concept_art')} onLog={onLog} />
+        <ConceptArtPanel project={project} onRefresh={ar('concept_art')} onLog={onLog} onResult={setPendingResult} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2466,9 +2582,9 @@ function NodeContent({
   if (stepKey === 'visual_guide') {
     return (
       <>
-        <VisualGuidePanel project={project} onRefresh={ar('visual_guide')} onLog={onLog} />
+        <VisualGuidePanel project={project} onRefresh={ar('visual_guide')} onLog={onLog} onResult={setPendingResult} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2476,9 +2592,9 @@ function NodeContent({
   if (stepKey === 'backgrounds') {
     return (
       <>
-        <BackgroundsPanel project={project} onRefresh={ar('backgrounds')} onLog={onLog} />
+        <BackgroundsPanel project={project} onRefresh={ar('backgrounds')} onLog={onLog} onResult={setPendingResult} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2486,9 +2602,9 @@ function NodeContent({
   if (stepKey === 'uiux') {
     return (
       <>
-        <UIUXPanel project={project} onRefresh={ar('uiux')} onLog={onLog} />
+        <UIUXPanel project={project} onRefresh={ar('uiux')} onLog={onLog} onResult={setPendingResult} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2496,9 +2612,9 @@ function NodeContent({
   if (stepKey === 'icons') {
     return (
       <>
-        <IconsPanel project={project} onRefresh={ar('icons')} onLog={onLog} />
+        <IconsPanel project={project} onRefresh={ar('icons')} onLog={onLog} onResult={setPendingResult} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2506,9 +2622,9 @@ function NodeContent({
   if (stepKey === 'hud') {
     return (
       <>
-        <HUDPanel project={project} onRefresh={ar('hud')} onLog={onLog} />
+        <HUDPanel project={project} onRefresh={ar('hud')} onLog={onLog} onResult={setPendingResult} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }
@@ -2516,9 +2632,9 @@ function NodeContent({
   if (stepKey === 'sfx') {
     return (
       <>
-        <SfxPanel project={project} onRefresh={ar('sfx')} onLog={onLog} />
+        <SfxPanel project={project} onRefresh={ar('sfx')} onLog={onLog} onResult={setPendingResult} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
       </>
     )
   }

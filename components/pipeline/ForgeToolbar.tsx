@@ -5,6 +5,7 @@ import type { Node } from '@xyflow/react'
 import type { Project } from '@/lib/types'
 import type { ForgeNodeData } from './ForgeNode'
 import UserMenu from '@/components/layout/UserMenu'
+import ReviewBadge from '@/components/layout/ReviewBadge'
 
 type PipelinePhase = 'idle' | 'running' | 'error'
 
@@ -72,6 +73,8 @@ export default function ForgeToolbar({ project, phase, onRefresh, nodes = [] }: 
           <span>{phase === 'running' ? 'Running' : 'Error'}</span>
         </div>
       )}
+
+      <ReviewBadge />
 
       <div className="tb-divider" />
 

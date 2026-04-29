@@ -1,9 +1,9 @@
 'use client'
 
-import { memo } from 'react'
+import React, { memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 
-export type ForgeNodeStatus = 'idle' | 'running' | 'complete' | 'error' | 'locked' | 'gate-pending'
+export type ForgeNodeStatus = 'idle' | 'running' | 'complete' | 'error' | 'locked' | 'gate-pending' | 'pending_review'
 
 export type ForgeNodeCategory =
   | 'design' | 'asset' | 'level' | 'code'
@@ -44,6 +44,46 @@ export interface ForgeNodeData {
   compact?: boolean
   stepKey?: string
   approved?: boolean
+}
+
+const BADGE: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)', lineHeight: 1.2, borderRadius: 99,
+  padding: '1px 6px', fontSize: 9, whiteSpace: 'nowrap',
+}
+const BADGE_SM: React.CSSProperties = { ...BADGE, padding: '1px 4px', fontSize: 8 }
+
+function NodeStatusBadge({ status, approved, compact }: {
+  status: ForgeNodeStatus; approved?: boolean; compact?: boolean
+}) {
+  const s = compact ? BADGE_SM : BADGE
+  if (approved || status === 'complete') return (
+    <span style={{ ...s, fontWeight: 700, color: 'var(--node-color)', background: 'color-mix(in oklch, var(--node-color) 14%, transparent)', border: '1px solid color-mix(in oklch, var(--node-color) 38%, transparent)' }}>
+      ✓{!compact && ' done'}
+    </span>
+  )
+  if (status === 'pending_review') return (
+    <span style={{ ...s, color: 'var(--cat-gate)', background: 'color-mix(in oklch, var(--cat-gate) 12%, transparent)', border: '1px solid color-mix(in oklch, var(--cat-gate) 35%, transparent)', animation: 'led-pulse 1.8s ease-in-out infinite', display: 'inline-block' }}>
+      ◈{!compact && ' review'}
+    </span>
+  )
+  if (status === 'running') return (
+    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--node-color)', animation: 'ledPulse 0.8s infinite', lineHeight: 1 }}>⟳</span>
+  )
+  if (status === 'error') return (
+    <span style={{ ...s, fontWeight: 700, color: 'var(--cat-output)', background: 'color-mix(in oklch, var(--cat-output) 12%, transparent)', border: '1px solid color-mix(in oklch, var(--cat-output) 35%, transparent)' }}>
+      ✕{!compact && ' error'}
+    </span>
+  )
+  if (status === 'locked') return (
+    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', lineHeight: 1, userSelect: 'none' }}>⊘</span>
+  )
+  if (status === 'gate-pending') return (
+    <span style={{ ...s, color: 'var(--cat-gate)', background: 'color-mix(in oklch, var(--cat-gate) 10%, transparent)', border: '1px solid color-mix(in oklch, var(--cat-gate) 28%, transparent)' }}>
+      ◇{!compact && ' gate'}
+    </span>
+  )
+  // idle — dot LED
+  return <div className="node-led" />
 }
 
 function Preview({ type, content, color }: { type: PreviewType; content?: string; color: string }) {
@@ -130,12 +170,13 @@ function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean 
     'forge-node',
     data.compact                   ? 'compact' : '',
     data.category === 'gate'       ? 'gate-node' : '',
-    data.status === 'running'      ? 'running' : '',
-    data.status === 'complete'     ? 'complete' : '',
-    data.status === 'error'        ? 'error' : '',
-    data.status === 'locked'       ? 'locked' : '',
-    data.status === 'gate-pending' ? 'gate-pending' : '',
-    data.approved                  ? 'approved' : '',
+    data.status === 'running'        ? 'running' : '',
+    data.status === 'complete'       ? 'complete' : '',
+    data.status === 'error'          ? 'error' : '',
+    data.status === 'locked'         ? 'locked' : '',
+    data.status === 'gate-pending'   ? 'gate-pending' : '',
+    data.status === 'pending_review' ? 'pending-review' : '',
+    data.approved                    ? 'approved' : '',
     selected                       ? 'selected' : '',
   ].filter(Boolean).join(' ')
 
@@ -152,7 +193,7 @@ function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean 
         <div className="node-icon">{data.icon}</div>
         <div className="node-title">{data.label}</div>
         {!data.compact && data.num && <div className="node-num">#{data.num}</div>}
-        <div className="node-led" />
+        <NodeStatusBadge status={data.status} approved={data.approved} compact={data.compact} />
       </div>
 
       {/* Description */}
