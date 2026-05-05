@@ -1,9 +1,21 @@
 'use client'
 
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import UserMenu from '@/components/layout/UserMenu'
+import { useAuth } from '@/lib/auth-context'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const { member, loading } = useAuth()
+  const router = useRouter()
+
+  useEffect(() => {
+    if (!loading && member?.role !== 'admin') router.replace('/')
+  }, [loading, member, router])
+
+  if (loading || member?.role !== 'admin') return null
+
   return (
     <div style={{ height: '100vh', background: 'var(--bg-0)', display: 'flex', flexDirection: 'column' }}>
       <style>{`
@@ -38,6 +50,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </Link>
         <Link href="/admin/feedback" className="admin-nav-link" style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', textDecoration: 'none', transition: 'color 120ms' }}>
           Feedback
+        </Link>
+        <Link href="/admin/integrations" className="admin-nav-link" style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', textDecoration: 'none', transition: 'color 120ms' }}>
+          Integrations
         </Link>
 
         <div style={{ flex: 1 }} />

@@ -83,6 +83,11 @@ export type GDD = {
     combat?: string
     ui_flow?: string
   }
+  narrative?: Record<string, unknown>
+  world?: Record<string, unknown>
+  glossary?: unknown[]
+  uiux_direction?: Record<string, unknown>
+  open_questions?: unknown[]
   development: {
     estimated_scope: string
     team_size?: number
@@ -138,6 +143,13 @@ export type ProjectMember = {
   members: Member
 }
 
+export type ProjectConcept = {
+  pipeline?: {
+    gdd?: GDD
+    [key: string]: PipelineNodeArtifact | GDD | undefined
+  }
+}
+
 export type Project = {
   id: string
   name: string
@@ -146,7 +158,7 @@ export type Project = {
   target_engine: string
   status: string
   owner_member_id: string
-  concept: GDD & { pipeline?: Record<string, PipelineNodeArtifact> }
+  concept: ProjectConcept
   created_at: string
   current_step?: number
   current_wizard_step?: number
@@ -188,6 +200,43 @@ export type Feedback = {
   members?: Member
   resolver?: { id: string; display_name: string }
   projects?: { id: string; name: string }
+}
+
+export type InjectConfig = {
+  prompt: { node: string; field: string }
+  width:  { node: string; field: string }
+  height: { node: string; field: string }
+  seed:   { node: string; field: string }
+}
+
+export type ComfyUIWorkflow = {
+  id: string
+  name: string
+  description: string | null
+  workflow_json?: Record<string, unknown>
+  inject_config: InjectConfig
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type StepConfig = {
+  id: string
+  step_key: string
+  integration_type: 'llm' | 'comfyui' | 'n8n'
+  model_name: string | null
+  comfyui_workflow_id: string | null
+  webhook_url: string | null
+  extra_params: Record<string, unknown>
+  is_active: boolean
+  updated_at: string
+  comfyui_workflows?: { id: string; name: string } | null
+}
+
+export type ModelsConfig = {
+  default: string
+  available_providers: Record<string, boolean>
+  [stepKey: string]: unknown
 }
 
 export type GameFormData = {

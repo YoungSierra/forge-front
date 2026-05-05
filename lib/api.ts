@@ -1,15 +1,22 @@
-import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser } from './types'
+import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser, StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig } from './types'
+import type { InputContext } from './nodeExecutionContext'
 
 export type { ScriptFile, CodeGenerationResult }
+export type { InputContext }
 
 export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
 export const assetUrl = (path: string) =>
   path ? (path.startsWith('http') ? path : `${BACKEND_URL}${path}`) : ''
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
   const res = await fetch(`${BACKEND_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(memberId ? { 'x-member-id': memberId } : {}),
+      ...(options?.headers as Record<string, string> | undefined),
+    },
   })
   if (!res.ok) {
     let message = `Request failed: ${res.status} ${res.statusText}`
@@ -38,7 +45,7 @@ export async function generateGDD(prompt: string) {
   return { gdd: data.gdd, meta: data.meta }
 }
 
-export async function approveStep1(payload: { gdd: GDD; prompt: string; meta: unknown }) {
+export async function approveStep1(payload: { gdd: GDD; prompt: string; meta: unknown; member_id?: string }) {
   const data = await request<{ success: boolean; project_id: string; project: Project }>(
     '/api/projects/approve-step1',
     { method: 'POST', body: JSON.stringify(payload) }
@@ -67,39 +74,39 @@ export async function validateIdea(data: {
 }
 
 // Step 2
-export async function generateSprites(project_id: string) {
+export async function generateSprites(project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean; sprites: SpritePreview[] }>(
     '/api/generate/sprites',
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return data.sprites || []
 }
 
-export async function approveStep2(project_id: string, sprites: SpritePreview[]) {
+export async function approveStep2(project_id: string, sprites: SpritePreview[], member_id?: string) {
   return request(`/api/projects/${project_id}/approve-step2`, {
     method: 'POST',
-    body: JSON.stringify({ approved_sprites: sprites }),
+    body: JSON.stringify({ approved_sprites: sprites, member_id }),
   })
 }
 
 // Step 3
-export async function generateLevels(project_id: string) {
+export async function generateLevels(project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean; levels: unknown[] }>(
     '/api/generate/levels',
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return data.levels || []
 }
 
-export async function approveStep3(project_id: string, levels: unknown[]) {
+export async function approveStep3(project_id: string, levels: unknown[], member_id?: string) {
   return request(`/api/projects/${project_id}/approve-step3`, {
     method: 'POST',
-    body: JSON.stringify({ approved_levels: levels }),
+    body: JSON.stringify({ approved_levels: levels, member_id }),
   })
 }
 
 // Step 4
-export async function generateCode(project_id: string): Promise<CodeGenerationResult> {
+export async function generateCode(project_id: string, input_context?: InputContext): Promise<CodeGenerationResult> {
   const data = await request<{
     success: boolean
     engine: string
@@ -108,7 +115,7 @@ export async function generateCode(project_id: string): Promise<CodeGenerationRe
     meta: unknown
   }>('/api/generate/code', {
     method: 'POST',
-    body: JSON.stringify({ project_id })
+    body: JSON.stringify({ project_id, input_context })
   })
   return {
     engine: data.engine,
@@ -119,31 +126,33 @@ export async function generateCode(project_id: string): Promise<CodeGenerationRe
 
 export async function approveStep4(
   project_id: string,
-  result: CodeGenerationResult
+  result: CodeGenerationResult,
+  member_id?: string
 ): Promise<unknown> {
   return request(`/api/projects/${project_id}/approve-step4`, {
     method: 'POST',
     body: JSON.stringify({
       files: result.files,
       architecture_md: result.architecture_md,
-      engine: result.engine
+      engine: result.engine,
+      member_id,
     })
   })
 }
 
 // Step 5
-export async function generateAudio(project_id: string) {
+export async function generateAudio(project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean; audio: { sfx: unknown[]; music: unknown[] } }>(
     '/api/generate/audio',
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return data.audio
 }
 
-export async function approveStep5(project_id: string, audio: unknown) {
+export async function approveStep5(project_id: string, audio: unknown, member_id?: string) {
   return request(`/api/projects/${project_id}/approve-step5`, {
     method: 'POST',
-    body: JSON.stringify({ audio }),
+    body: JSON.stringify({ audio, member_id }),
   })
 }
 
@@ -174,11 +183,21 @@ export async function searchMembers(q: string): Promise<Member[]> {
   return data.members || []
 }
 
-export async function getMemberByAuth(auth_user_id: string): Promise<Member | null> {
-  try {
-    const data = await request<{ success: boolean; member: Member }>(`/api/members/by-auth/${auth_user_id}`)
-    return data.member
-  } catch { return null }
+const _memberByAuthCache = new Map<string, Promise<Member | null>>()
+
+export function getMemberByAuth(auth_user_id: string): Promise<Member | null> {
+  if (!_memberByAuthCache.has(auth_user_id)) {
+    const promise = request<{ success: boolean; member: Member }>(`/api/members/by-auth/${auth_user_id}`)
+      .then(data => data.member)
+      .catch(() => null)
+    _memberByAuthCache.set(auth_user_id, promise)
+  }
+  return _memberByAuthCache.get(auth_user_id)!
+}
+
+export function invalidateMemberCache(auth_user_id?: string) {
+  if (auth_user_id) _memberByAuthCache.delete(auth_user_id)
+  else _memberByAuthCache.clear()
 }
 
 export async function getProjectMembers(project_id: string): Promise<ProjectMember[]> {
@@ -241,24 +260,24 @@ export interface UIUXResult {
   hud_elements: string[]
 }
 
-export async function generateUIUX(project_id: string) {
+export async function generateUIUX(project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean; uiux: UIUXResult }>(
     '/api/generate/uiux',
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return data.uiux
 }
 
 export interface IconsResult {
-  icon_style: { shape: string; border: string; shadow: string; size_base: string; color_scheme: string }
-  icons: { name: string; category: string; description: string; prompt: string; color_hint: string; usage: string }[]
+  icon_style: { shape: string; border: string; shadow: string; base_size?: string; size_base?: string; color_palette?: string[]; style_keywords?: string[] }
+  icons: { name: string; category: string; description: string; prompt: string; color_hint: string; usage: string; image_url?: string | null }[]
   total_count: number
 }
 
-export async function generateIcons(project_id: string) {
+export async function generateIcons(project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean; icons: IconsResult }>(
     '/api/generate/icons',
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return data.icons
 }
@@ -271,34 +290,81 @@ export interface HUDResult {
   implementation_notes: string
 }
 
-export async function generateHUD(project_id: string) {
+export async function generateHUD(project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean; hud: HUDResult }>(
     '/api/generate/hud',
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return data.hud
 }
 
-export async function generateConceptArt(project_id: string) {
+export interface SplashArtResult {
+  title: string
+  image_prompt: string
+  composition: string
+  mood: string
+  focal_point: string
+  color_treatment: string
+  style_reference: string
+  dimensions: string
+  format_notes: string
+  image_url?: string | null
+}
+
+export async function generateSplashArt(project_id: string, input_context?: InputContext) {
+  const data = await request<{ success: boolean; splash_art: SplashArtResult }>(
+    '/api/generate/splash-art',
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
+  )
+  return data.splash_art
+}
+
+export interface MarketingAsset {
+  name: string
+  platform: string
+  type: string
+  width: number
+  height: number
+  image_prompt: string
+  copy: string
+  image_url?: string | null
+}
+
+export interface MarketingResult {
+  campaign_concept: string
+  tagline: string
+  assets: MarketingAsset[]
+  total_count: number
+}
+
+export async function generateMarketing(project_id: string, input_context?: InputContext) {
+  const data = await request<{ success: boolean; marketing: MarketingResult }>(
+    '/api/generate/marketing',
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
+  )
+  return data.marketing
+}
+
+export async function generateConceptArt(project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean } & ConceptArtResult>(
     '/api/generate/concept-art',
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return { character_concepts: data.character_concepts || [], environment_concepts: data.environment_concepts || [], style_notes: data.style_notes }
 }
 
-export async function generateSfx(project_id: string) {
+export async function generateSfx(project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean; sfx_pack: SfxEntry[]; implementation_notes: string }>(
     '/api/generate/sfx',
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return { sfx_pack: data.sfx_pack || [], implementation_notes: data.implementation_notes }
 }
 
-export async function generateBackgrounds(project_id: string) {
+export async function generateBackgrounds(project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean; backgrounds: BackgroundPreview[] }>(
     '/api/generate/backgrounds',
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return data.backgrounds || []
 }
@@ -312,32 +378,32 @@ export interface BackgroundPreview {
   placeholder: boolean
 }
 
-export async function generateVisualGuide(project_id: string) {
+export async function generateVisualGuide(project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean; visual_guide: VisualGuide; meta: unknown }>(
     '/api/generate/visual-guide',
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return data.visual_guide
 }
 
 // 3D pipeline node generators (all return raw doc objects)
-async function generateDoc(stepKey: string, project_id: string) {
+async function generateDoc(stepKey: string, project_id: string, input_context?: InputContext) {
   const data = await request<{ success: boolean; [key: string]: unknown }>(
     `/api/generate/${stepKey}`,
-    { method: 'POST', body: JSON.stringify({ project_id }) }
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
   return data[stepKey]
 }
 
-export const generateModeling   = (id: string) => generateDoc('modeling',   id)
-export const generateCharaters  = (id: string) => generateDoc('charaters',  id)
-export const generateVfx        = (id: string) => generateDoc('vfx',        id)
-export const generateTexturing  = (id: string) => generateDoc('texturing',  id)
-export const generateRigging    = (id: string) => generateDoc('rigging',    id)
-export const generateLighting   = (id: string) => generateDoc('lighting',   id)
-export const generateAnimation  = (id: string) => generateDoc('animation',  id)
-export const generateCinematics = (id: string) => generateDoc('cinematics', id)
-export const generateVoice      = (id: string) => generateDoc('voice',      id)
+export const generateModeling   = (id: string, ctx?: InputContext) => generateDoc('modeling',   id, ctx)
+export const generateCharaters  = (id: string, ctx?: InputContext) => generateDoc('charaters',  id, ctx)
+export const generateVfx        = (id: string, ctx?: InputContext) => generateDoc('vfx',        id, ctx)
+export const generateTexturing  = (id: string, ctx?: InputContext) => generateDoc('texturing',  id, ctx)
+export const generateRigging    = (id: string, ctx?: InputContext) => generateDoc('rigging',    id, ctx)
+export const generateLighting   = (id: string, ctx?: InputContext) => generateDoc('lighting',   id, ctx)
+export const generateAnimation  = (id: string, ctx?: InputContext) => generateDoc('animation',  id, ctx)
+export const generateCinematics = (id: string, ctx?: InputContext) => generateDoc('cinematics', id, ctx)
+export const generateVoice      = (id: string, ctx?: InputContext) => generateDoc('voice',      id, ctx)
 
 // Feedback
 export async function submitFeedback(payload: {
@@ -405,6 +471,59 @@ export async function createAdminUser(payload: {
   return data.user
 }
 
+// ─── Admin: integrations ──────────────────────────────────────────────────────
+
+export async function getModelsConfig(): Promise<ModelsConfig> {
+  const data = await request<{ success: boolean } & ModelsConfig>('/api/models')
+  const { success: _, ...rest } = data
+  return rest as ModelsConfig
+}
+
+export async function getAdminStepConfigs(): Promise<StepConfig[]> {
+  const data = await request<{ success: boolean; step_configs: StepConfig[] }>('/api/admin/step-configs')
+  return data.step_configs
+}
+
+export async function updateAdminStepConfig(stepKey: string, payload: Partial<StepConfig>): Promise<StepConfig> {
+  const data = await request<{ success: boolean; step_config: StepConfig }>(`/api/admin/step-configs/${stepKey}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+  return data.step_config
+}
+
+export async function getAdminWorkflows(): Promise<ComfyUIWorkflow[]> {
+  const data = await request<{ success: boolean; workflows: ComfyUIWorkflow[] }>('/api/admin/comfyui-workflows')
+  return data.workflows
+}
+
+export async function getAdminWorkflow(id: string): Promise<ComfyUIWorkflow> {
+  const data = await request<{ success: boolean; workflow: ComfyUIWorkflow }>(`/api/admin/comfyui-workflows/${id}`)
+  return data.workflow
+}
+
+export async function createAdminWorkflow(payload: {
+  name: string; description?: string; workflow_json: Record<string, unknown>; inject_config: InjectConfig
+}): Promise<ComfyUIWorkflow> {
+  const data = await request<{ success: boolean; workflow: ComfyUIWorkflow }>('/api/admin/comfyui-workflows', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return data.workflow
+}
+
+export async function updateAdminWorkflow(id: string, payload: Partial<ComfyUIWorkflow>): Promise<ComfyUIWorkflow> {
+  const data = await request<{ success: boolean; workflow: ComfyUIWorkflow }>(`/api/admin/comfyui-workflows/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+  return data.workflow
+}
+
+export async function deleteAdminWorkflow(id: string): Promise<void> {
+  await request(`/api/admin/comfyui-workflows/${id}`, { method: 'DELETE' })
+}
+
 export async function saveCanvasLayout(projectId: string, layout: unknown): Promise<void> {
   await request(`/api/projects/${projectId}/canvas`, {
     method: 'PUT',
@@ -418,10 +537,10 @@ export async function summarizeFeedback(): Promise<{ summary: string; count: num
 }
 
 // Generic pipeline node approval — stores result in concept.pipeline.{stepKey}
-export async function approveNode(project_id: string, stepKey: string, nodeData: unknown) {
+export async function approveNode(project_id: string, stepKey: string, nodeData: unknown, member_id?: string) {
   return request(`/api/projects/${project_id}/approve-node`, {
     method: 'POST',
-    body: JSON.stringify({ stepKey, data: nodeData }),
+    body: JSON.stringify({ stepKey, data: nodeData, member_id }),
   })
 }
 
@@ -442,11 +561,51 @@ export async function submitReview(job_id: string, review_status: 'reviewed' | '
 }
 
 // Get all jobs pending review for a member
-export async function getPendingReviews(member_id: string) {
-  const data = await request<{ success: boolean; jobs: (import('./types').GenerationJob & { projects: { id: string; name: string } })[] }>(
+type PendingReviewsResult = (import('./types').GenerationJob & { projects: { id: string; name: string } })[]
+const _pendingReviewsCache = new Map<string, { result: Promise<PendingReviewsResult>; ts: number }>()
+const PENDING_REVIEWS_TTL = 10_000
+
+export function getPendingReviews(member_id: string): Promise<PendingReviewsResult> {
+  const cached = _pendingReviewsCache.get(member_id)
+  if (cached && Date.now() - cached.ts < PENDING_REVIEWS_TTL) return cached.result
+  const result = request<{ success: boolean; jobs: PendingReviewsResult }>(
     `/api/projects/pending-reviews?member_id=${member_id}`
+  ).then(data => data.jobs || []).catch(() => [])
+  _pendingReviewsCache.set(member_id, { result, ts: Date.now() })
+  return result
+}
+
+export interface ArtDirectionIntakeResult {
+  description: string
+  world_summary: {
+    tone: string[]
+    mood: string
+    themes: string[]
+    core_fantasy: string
+    contradictions: string[]
+  }
+  key_elements: {
+    characters: { name: string; role: string; behavior: string; visual_identity: string; gameplay_implications: string }[]
+    environments: { name: string; gameplay_function: string; visual_language: string; emotional_impact: string }[]
+    technology: { advancement_level: string; visual_logic: string; material_identity: string; world_interaction: string }
+    narrative_elements: { core_conflict: string; visual_storytelling: string[]; symbolism: string[] }
+  }
+  visual_keywords: { style: string[]; world: string[]; character: string[]; material: string[]; fx: string[]; mood: string[] }
+  visual_references: { titles: string[]; direction: string; rationale: string }
+  art_direction_pillars: { name: string; description: string }[]
+  ui_visual_direction: { style: string; palette_notes: string; typography_direction: string; iconography_style: string; hud_philosophy: string; menu_feel: string }
+  splash_and_marketing: { key_art_direction: string; composition_notes: string; brand_identity: string; social_format_guidance: string }
+  open_questions: { gap: string; type: string; impact: string }[]
+  risks: { risk: string; type: string }[]
+  acceptance_criteria: { clear_visual_direction: boolean; production_ready: boolean; concept_art_executable: boolean; cross_team_understandable: boolean; notes: string }
+}
+
+export async function generateArtDirectionIntake(project_id: string, input_context?: InputContext) {
+  const data = await request<{ success: boolean; art_direction_intake: ArtDirectionIntakeResult; meta: unknown }>(
+    '/api/generate/art-direction-intake',
+    { method: 'POST', body: JSON.stringify({ project_id, input_context }) }
   )
-  return data.jobs || []
+  return data.art_direction_intake
 }
 
 export interface VisualGuide {
