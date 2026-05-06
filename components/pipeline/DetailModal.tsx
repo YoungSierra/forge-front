@@ -11,19 +11,21 @@ interface Props {
   project: Project
   pendingData?: unknown
   onClose: () => void
+  nodeContext?: Record<string, unknown>
 }
 
 /* Determine if a step already has generated output */
 function stepHasOutput(stepKey: string, project: Project, pendingData?: unknown): boolean {
   if (pendingData != null) return true
-  const key      = stepKey.replace('-gate', '')
-  const pipeline = (project.concept as Record<string, unknown>)?.pipeline as Record<string, unknown> | undefined
+  const key = stepKey.replace('-gate', '')
+  const g   = project.concept?.pipeline?.gdd
+  const pipeline = project.concept?.pipeline
   switch (key) {
-    case 'gdd':    return !!project.concept?.project?.name
-    case 'sprites': return (project.concept?.characters?.length ?? 0) > 0
-    case 'levels':  return (project.concept?.levels?.length ?? 0) > 0
-    case 'audio':   return !!project.concept?.audio_direction?.music_mood
-    case 'code':    return (project.concept?.development?.core_features?.length ?? 0) > 0
+    case 'gdd':     return !!g?.project?.name
+    case 'sprites': return (g?.characters?.length ?? 0) > 0
+    case 'levels':  return (g?.levels?.length ?? 0) > 0
+    case 'audio':   return !!g?.audio_direction?.music_mood
+    case 'code':    return (g?.development?.core_features?.length ?? 0) > 0
     case 'export':  return true
     default: {
       const d = pipeline?.[key] as Record<string, unknown> | undefined
@@ -41,6 +43,14 @@ function toStr(v: unknown): string {
     return String(o.name ?? o.label ?? o.description ?? o.title ?? JSON.stringify(v))
   }
   return String(v)
+}
+
+type EnvObj = { type?: string; theme?: string; lighting?: string }
+function envLabel(env: unknown): string {
+  if (!env) return '–'
+  if (typeof env === 'string') return env
+  const o = env as EnvObj
+  return o.theme ?? o.type ?? JSON.stringify(env)
 }
 
 function Badge({ label, color = 'var(--text-3)' }: { label: string; color?: string }) {
@@ -80,7 +90,7 @@ function Card({ children }: { children: React.ReactNode }) {
 /* ─── Per-step detail views ─── */
 
 function GDDDetail({ project }: { project: Project }) {
-  const gdd = project.concept
+  const gdd = project.concept?.pipeline?.gdd
   if (!gdd) return <p style={{ color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>No GDD available.</p>
 
   const DIFFICULTY_COLOR: Record<string, string> = {
@@ -204,7 +214,7 @@ function GDDDetail({ project }: { project: Project }) {
                   </span>
                   <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-0)', flex: 1 }}>{toStr(l.name)}</span>
                   <Badge label={toStr(l.difficulty)} color={DIFFICULTY_COLOR[toStr(l.difficulty)] ?? 'var(--text-3)'} />
-                  <Badge label={toStr(l.environment)} color="var(--cat-level)" />
+                  <Badge label={envLabel(l.environment)} color="var(--cat-level)" />
                 </div>
                 <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 6 }}>{toStr(l.description)}</p>
                 {l.background_prompt && (
@@ -295,7 +305,7 @@ function GDDDetail({ project }: { project: Project }) {
                   <>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginTop: 6 }}>OUT OF SCOPE</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {gdd.development.out_of_scope.map((f, i) => (
+                      {(gdd.development?.out_of_scope ?? []).map((f, i) => (
                         <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--text-3)' }}>
                           <span style={{ color: 'var(--cat-output)' }}>✕</span>
                           {typeof f === 'string' ? f : (f as Record<string,string>).name ?? (f as Record<string,string>).description ?? ''}
@@ -358,7 +368,8 @@ function SpriteImgBox({ url, placeholder, name, color }: { url?: string; placeho
 }
 
 function SpritesDetail({ project }: { project: Project }) {
-  const chars = project.concept?.characters ?? []
+  const g = project.concept?.pipeline?.gdd
+  const chars = g?.characters ?? []
   const ROLE_COLOR: Record<string, string> = {
     hero: 'var(--cat-design)', enemy: 'var(--cat-output)',
     npc: 'var(--cat-asset)', boss: 'oklch(0.65 0.25 340)',
@@ -366,8 +377,8 @@ function SpritesDetail({ project }: { project: Project }) {
   return (
     <div>
       <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>
-        Style: <strong style={{ color: 'var(--cat-asset)' }}>{project.concept?.art_direction?.style ?? '–'}</strong>
-        &nbsp;·&nbsp;Palette: <strong style={{ color: 'var(--text-1)' }}>{project.concept?.art_direction?.palette ?? '–'}</strong>
+        Style: <strong style={{ color: 'var(--cat-asset)' }}>{g?.art_direction?.style ?? '–'}</strong>
+        &nbsp;·&nbsp;Palette: <strong style={{ color: 'var(--text-1)' }}>{g?.art_direction?.palette ?? '–'}</strong>
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
         {chars.map((c, i) => {
@@ -409,13 +420,25 @@ function SpritesDetail({ project }: { project: Project }) {
   )
 }
 
-function LevelsDetail({ project }: { project: Project }) {
-  const levels = project.concept?.levels ?? []
+type LevelItem = {
+  name: string; order: number | string; description: string
+  expanded_description?: string; difficulty: string
+  environment: string | EnvObj
+  pacing?: { start?: string; mid?: string; end?: string }
+  enemy_placements?: { enemy_name?: string; zone?: string; behavior?: string }[]
+  collectibles?: { name?: string; effect?: string }[]
+  hazards?: { name?: string; type?: string; effect?: string }[]
+  background_prompt?: string; preview_url?: string
+}
+
+function LevelsDetail({ project, pendingData }: { project: Project; pendingData?: unknown }) {
+  const levels: LevelItem[] = (Array.isArray(pendingData) ? pendingData as LevelItem[] : null)
+    ?? (project.concept?.pipeline?.gdd?.levels as LevelItem[] | undefined) ?? []
+
   const DIFFICULTY_COLOR: Record<string, string> = {
     easy: 'var(--cat-code)', medium: 'var(--cat-gate)',
     hard: 'var(--cat-output)', boss: 'oklch(0.65 0.25 340)',
   }
-  // Background images from the backgrounds pipeline step (if approved)
   type BgItem = { level_name: string; preview_url: string }
   const pipeline = (project.concept as Record<string, unknown>)?.pipeline as Record<string, unknown> | undefined
   const bgItems = (pipeline?.backgrounds as { items?: BgItem[] } | undefined)?.items ?? []
@@ -425,34 +448,112 @@ function LevelsDetail({ project }: { project: Project }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {levels.map((l, i) => {
-        // Use background from pipeline.backgrounds if available, otherwise fall back to concept.levels[i].preview_url
-        const bgUrl = bgByLevel[l.name] ?? (l as unknown as Record<string, string>).preview_url
+        const bgUrl = bgByLevel[l.name] ?? l.preview_url
         const imgUrl = bgUrl ? assetUrl(bgUrl) : null
+        const envObj = typeof l.environment === 'object' && l.environment != null ? l.environment as EnvObj : null
+
         return (
           <Card key={i}>
             {imgUrl && (
               <div style={{ margin: '-12px -14px 12px', borderRadius: '8px 8px 0 0', overflow: 'hidden', height: 180, position: 'relative' }}>
-                <img
-                  src={imgUrl} alt={l.name}
+                <img src={imgUrl} alt={l.name}
                   style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                   onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }}
                 />
               </div>
             )}
+
+            {/* Header row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <span style={{
-                fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700,
-                color: 'var(--text-3)', minWidth: 32,
-              }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: 'var(--text-3)', minWidth: 32 }}>
                 {String(l.order).padStart(2, '0')}
               </span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-0)' }}>{l.name}</div>
               </div>
               <Badge label={l.difficulty} color={DIFFICULTY_COLOR[l.difficulty] ?? 'var(--text-3)'} />
-              <Badge label={l.environment} color="var(--cat-level)" />
+              <Badge label={envLabel(l.environment)} color="var(--cat-level)" />
             </div>
-            <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.65, marginBottom: 10 }}>{l.description}</p>
+
+            {/* Environment detail badges */}
+            {envObj && (
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 8 }}>
+                {envObj.type && <Badge label={envObj.type} color="var(--text-3)" />}
+                {envObj.lighting && <Badge label={envObj.lighting} color="var(--cat-audio)" />}
+              </div>
+            )}
+
+            {/* Description */}
+            <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.65, marginBottom: l.expanded_description ? 6 : 10 }}>{l.description}</p>
+
+            {/* Expanded description */}
+            {l.expanded_description && (
+              <p style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.65, marginBottom: 10, fontStyle: 'italic' }}>{l.expanded_description}</p>
+            )}
+
+            {/* Pacing */}
+            {l.pacing && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 10 }}>
+                {(['start', 'mid', 'end'] as const).map(phase => l.pacing![phase] ? (
+                  <div key={phase} style={{ background: 'var(--bg-1)', borderRadius: 5, padding: '5px 8px', border: '1px solid var(--line)' }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 3 }}>{phase}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>{l.pacing![phase]}</div>
+                  </div>
+                ) : null)}
+              </div>
+            )}
+
+            {/* Enemies */}
+            {l.enemy_placements && l.enemy_placements.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 5 }}>enemies</div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {l.enemy_placements.map((ep, j) => (
+                    <div key={j} style={{
+                      background: 'var(--bg-1)', borderRadius: 5, padding: '3px 8px',
+                      border: '1px solid color-mix(in oklch, var(--cat-output) 25%, transparent)',
+                      display: 'flex', gap: 5, alignItems: 'center',
+                    }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--cat-output)' }}>{ep.enemy_name}</span>
+                      {ep.zone && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>{ep.zone}</span>}
+                      {ep.behavior && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>· {ep.behavior}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Collectibles + Hazards */}
+            {((l.collectibles?.length ?? 0) > 0 || (l.hazards?.length ?? 0) > 0) && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                {l.collectibles && l.collectibles.length > 0 && (
+                  <div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--cat-code)', textTransform: 'uppercase', marginBottom: 5 }}>collectibles</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      {l.collectibles.map((c, j) => (
+                        <div key={j} style={{ fontSize: 10, color: 'var(--text-2)' }}>
+                          <span style={{ color: 'var(--cat-code)' }}>+</span> {c.name}{c.effect ? ` — ${c.effect}` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {l.hazards && l.hazards.length > 0 && (
+                  <div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--cat-output)', textTransform: 'uppercase', marginBottom: 5 }}>hazards</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      {l.hazards.map((h, j) => (
+                        <div key={j} style={{ fontSize: 10, color: 'var(--text-2)' }}>
+                          <span style={{ color: 'var(--cat-output)' }}>!</span> {h.name}{h.effect ? ` — ${h.effect}` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Background prompt */}
             {l.background_prompt && (
               <div style={{
                 fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', lineHeight: 1.6,
@@ -471,7 +572,7 @@ function LevelsDetail({ project }: { project: Project }) {
 }
 
 function AudioDetail({ project }: { project: Project }) {
-  const ad = project.concept?.audio_direction
+  const ad = project.concept?.pipeline?.gdd?.audio_direction
   return (
     <div>
       <Section title="Music Direction">
@@ -497,14 +598,14 @@ function AudioDetail({ project }: { project: Project }) {
       )}
       <Section title="Per-Level Music">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {(project.concept?.levels ?? []).map((l, i) => (
+          {(project.concept?.pipeline?.gdd?.levels ?? []).map((l, i) => (
             <Card key={i}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)' }}>
                   Level {l.order}
                 </span>
                 <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-0)', flex: 1 }}>{l.name}</span>
-                <Badge label={l.environment} color="var(--cat-audio)" />
+                <Badge label={envLabel(l.environment)} color="var(--cat-audio)" />
               </div>
               <p style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
                 Mood: <span style={{ color: 'var(--text-2)' }}>{ad?.music_mood}</span>
@@ -519,6 +620,7 @@ function AudioDetail({ project }: { project: Project }) {
 }
 
 function CodeDetail({ project }: { project: Project }) {
+  const g = project.concept?.pipeline?.gdd
   return (
     <div>
       <Section title="Architecture Overview">
@@ -530,14 +632,14 @@ function CodeDetail({ project }: { project: Project }) {
             </div>
             <div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 8 }}>SCOPE</div>
-              <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{project.concept?.development?.estimated_scope ?? '–'}</span>
+              <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{g?.development?.estimated_scope ?? '–'}</span>
             </div>
           </div>
         </Card>
       </Section>
       <Section title="Core Features to Implement">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {(project.concept?.development?.core_features ?? []).map((f, i) => {
+          {(g?.development?.core_features ?? []).map((f, i) => {
             const label = typeof f === 'string' ? f : (f as Record<string, string>).name ?? (f as Record<string, string>).description ?? JSON.stringify(f)
             const sub   = typeof f === 'string' ? null : (f as Record<string, string>).description
             return (
@@ -556,7 +658,7 @@ function CodeDetail({ project }: { project: Project }) {
       </Section>
       <Section title="Mechanics Reference">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {(project.concept?.mechanics ?? []).map((m, i) => (
+          {(g?.mechanics ?? []).map((m, i) => (
             <Card key={i}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 4 }}>
                 <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-0)', flex: 1 }}>{toStr(m.name)}</span>
@@ -572,8 +674,9 @@ function CodeDetail({ project }: { project: Project }) {
 }
 
 function ExportDetail({ project }: { project: Project }) {
-  const chars = project.concept?.characters ?? []
-  const levels = project.concept?.levels ?? []
+  const g = project.concept?.pipeline?.gdd
+  const chars = g?.characters ?? []
+  const levels = g?.levels ?? []
   return (
     <div>
       <Section title="Package Contents">
@@ -595,12 +698,12 @@ function ExportDetail({ project }: { project: Project }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
             {[
               ['name', project.name],
-              ['genre', project.concept?.project?.genre ?? '–'],
+              ['genre', g?.project?.genre ?? '–'],
               ['engine', project.target_engine ?? 'godot'],
-              ['scope', project.concept?.development?.estimated_scope ?? '–'],
+              ['scope', g?.development?.estimated_scope ?? '–'],
               ['characters', String(chars.length)],
               ['levels', String(levels.length)],
-              ['mechanics', String(project.concept?.mechanics?.length ?? 0)],
+              ['mechanics', String(g?.mechanics?.length ?? 0)],
               ['status', project.status],
             ].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
@@ -862,7 +965,7 @@ function PipelineNodeDetail({ stepKey, project, pendingData }: { stepKey: string
   )
 }
 
-export default function DetailModal({ stepKey, project, pendingData, onClose }: Props) {
+export default function DetailModal({ stepKey, project, pendingData, onClose, nodeContext }: Props) {
   // Close on Escape
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
@@ -872,14 +975,16 @@ export default function DetailModal({ stepKey, project, pendingData, onClose }: 
 
   const contentKey   = stepKey.replace('-gate', '')
   const hasOutput    = stepHasOutput(stepKey, project, pendingData)
-  const hasSources   = getInputSources(stepKey, project).length > 0
+  const hasSources   = nodeContext != null
+    ? Object.keys(nodeContext).length > 0
+    : getInputSources(stepKey, project).length > 0
   const [tab, setTab] = useState<'output' | 'context'>(hasOutput ? 'output' : 'context')
 
   function renderContent() {
     switch (contentKey) {
       case 'gdd':     return <GDDDetail project={project} />
       case 'sprites': return <SpritesDetail project={project} />
-      case 'levels':  return <LevelsDetail project={project} />
+      case 'levels':  return <LevelsDetail project={project} pendingData={pendingData} />
       case 'audio':   return <AudioDetail project={project} />
       case 'code':    return <CodeDetail project={project} />
       case 'export':       return <ExportDetail project={project} />
@@ -946,9 +1051,9 @@ export default function DetailModal({ stepKey, project, pendingData, onClose }: 
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>
             {project.name}
           </div>
-          {(contentKey === 'gdd') && project.concept && (
+          {(contentKey === 'gdd') && project.concept?.pipeline?.gdd && (
             <button
-              onClick={() => exportGDDToPDF(project.concept)}
+              onClick={() => exportGDDToPDF(project.concept.pipeline!.gdd!)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 5,
                 background: 'var(--bg-3)', border: '1px solid var(--line-2)',
@@ -995,7 +1100,7 @@ export default function DetailModal({ stepKey, project, pendingData, onClose }: 
         {/* Modal body — scrollable */}
         <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px' }}>
           {tab === 'context'
-            ? <InputContext stepKey={stepKey} project={project} />
+            ? <InputContext stepKey={stepKey} project={project} nodeContext={nodeContext} />
             : renderContent()
           }
         </div>

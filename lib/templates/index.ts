@@ -28,12 +28,14 @@ export interface Template {
   edges: TemplateCatalogEdge[]
 }
 
-import template2dRaw from './template_2d.json'
-import template3dRaw from './template_3d.json'
+import template2dRaw  from './template_2d.json'
+import template3dRaw  from './template_3d.json'
+import template2dtRaw from './template_2d_t.json'
 
 export const TEMPLATES: Template[] = [
-  template2dRaw as Template,
-  template3dRaw as Template,
+  template2dRaw  as Template,
+  template3dRaw  as Template,
+  template2dtRaw as Template,
 ]
 
 export function getTemplate(id: string): Template | undefined {
@@ -42,7 +44,10 @@ export function getTemplate(id: string): Template | undefined {
 
 export const CATALOG_ALL: TemplateCatalogNode[] = Array.from(
   new Map(
-    [...(template2dRaw as Template).nodes, ...(template3dRaw as Template).nodes]
-      .map(n => [n.id, n as TemplateCatalogNode])
+    [
+      ...(template2dRaw  as Template).nodes,
+      ...(template3dRaw  as Template).nodes,
+      ...(template2dtRaw as Template).nodes,
+    ].map(n => [n.id, n as TemplateCatalogNode])
   ).values()
 )

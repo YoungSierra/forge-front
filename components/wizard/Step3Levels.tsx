@@ -101,7 +101,7 @@ export default function Step3Levels({ project, onApproved, invalidated }: Props)
           <div>
             <h2 className="text-white font-bold text-xl mb-2">Level design</h2>
             <p className="text-slate-500 text-sm">
-              {project.concept?.levels?.length ?? 0} levels ready to expand
+              {project.concept?.pipeline?.gdd?.levels?.length ?? 0} levels ready to expand
             </p>
           </div>
           {error && <p className="text-red-400 text-sm">{error}</p>}

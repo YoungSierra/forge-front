@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import UserMenu from '@/components/layout/UserMenu'
 import { useAuth } from '@/lib/auth-context'
@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth-context'
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { member, loading } = useAuth()
   const router = useRouter()
+  const pathname = usePathname()
 
   useEffect(() => {
     if (!loading && member?.role !== 'admin') router.replace('/')
@@ -45,15 +46,30 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         <div style={{ width: 1, height: 16, background: 'var(--line-2)' }} />
 
-        <Link href="/admin/users" className="admin-nav-link" style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', textDecoration: 'none', transition: 'color 120ms' }}>
-          Users
-        </Link>
-        <Link href="/admin/feedback" className="admin-nav-link" style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', textDecoration: 'none', transition: 'color 120ms' }}>
-          Feedback
-        </Link>
-        <Link href="/admin/integrations" className="admin-nav-link" style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', textDecoration: 'none', transition: 'color 120ms' }}>
-          Integrations
-        </Link>
+        {[
+          { href: '/admin/users',        label: 'Users'        },
+          { href: '/admin/integrations', label: 'Integrations' },
+          { href: '/admin/prompts',      label: 'Prompts'      },
+          { href: '/admin/feedback',     label: 'Feedback'     },
+        ].map(({ href, label }) => {
+          const active = pathname === href
+          return (
+            <Link key={href} href={href}
+              className="admin-nav-link"
+              style={{
+                fontSize: 11, fontFamily: 'monospace', textDecoration: 'none', transition: 'color 120ms',
+                color: active ? 'var(--text-0)' : 'var(--text-3)',
+                fontWeight: active ? 600 : 400,
+                display: 'inline-flex', alignItems: 'center',
+                height: 44, boxSizing: 'border-box',
+                borderBottom: `2px solid ${active ? 'var(--cat-code)' : 'transparent'}`,
+                paddingTop: 2,
+              }}
+            >
+              {label}
+            </Link>
+          )
+        })}
 
         <div style={{ flex: 1 }} />
 

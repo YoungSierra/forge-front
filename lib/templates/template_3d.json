@@ -1,7 +1,7 @@
 {
   "id": "3d_game",
   "name": "3D Game",
-  "description": "Pipeline para juegos 3D. Incluye fase 2D obligatoria (concept art) que alimenta toda la producción 3D.",
+  "description": "Pipeline for 3D games. Includes mandatory 2D phase (concept art) that feeds into all 3D production.",
 
   "nodes": [
     { "id": "visual_guide",  "label": "Visual Guide",  "category": "design", "icon": "VG", "stepKey": "visual_guide",  "comingSoon": false, "x": 680,  "y": 200,  "description": "Art direction, palette & style rules",       "inputLabel": "GDD Draft",      "outputLabel": "Style Sheet"    },

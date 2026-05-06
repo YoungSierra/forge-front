@@ -44,6 +44,7 @@ export interface ForgeNodeData {
   compact?: boolean
   stepKey?: string
   approved?: boolean
+  stale?: boolean
 }
 
 const BADGE: React.CSSProperties = {
@@ -188,6 +189,18 @@ function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean 
       className={stateClass}
       style={{ '--node-color': color, '--socket-color': color } as React.CSSProperties}
     >
+      {/* Stale warning overlay */}
+      {data.stale && (
+        <div style={{
+          position: 'absolute', top: 4, right: 4, zIndex: 10,
+          background: 'color-mix(in oklch, var(--cat-gate) 15%, var(--bg-2))',
+          border: '1px solid color-mix(in oklch, var(--cat-gate) 45%, transparent)',
+          borderRadius: 4, padding: '1px 5px',
+          fontFamily: 'var(--font-mono)', fontSize: 8,
+          color: 'var(--cat-gate)', pointerEvents: 'none',
+        }}>⚠ stale</div>
+      )}
+
       {/* Header */}
       <div className="node-header">
         <div className="node-icon">{data.icon}</div>

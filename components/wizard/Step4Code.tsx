@@ -106,7 +106,7 @@ export default function Step4Code({ project, onApproved, invalidated }: Props) {
     }
   }
 
-  const mechanics = project.concept?.mechanics ?? []
+  const mechanics = project.concept?.pipeline?.gdd?.mechanics ?? []
 
   function activeContent(): string {
     if (!result) return ''

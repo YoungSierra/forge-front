@@ -112,8 +112,8 @@ function renderContent(
 ) {
   switch (stepKey) {
     case 'gdd':
-      return project.concept ? (
-        <GDDCanvas gdd={project.concept} />
+      return project.concept?.pipeline?.gdd ? (
+        <GDDCanvas gdd={project.concept.pipeline.gdd} />
       ) : (
         <EmptyState message="GDD not generated yet." />
       )

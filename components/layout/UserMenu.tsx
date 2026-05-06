@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
-import { getMemberByAuth, updateAdminUser } from '@/lib/api'
+import { getMemberByAuth, updateAdminUser, invalidateMemberCache } from '@/lib/api'
 import { createClient } from '@/lib/supabase'
 import { useTheme } from '@/lib/theme'
 
@@ -85,7 +85,10 @@ export default function UserMenu() {
       if (pw) updates.password = pw
       const { error } = await supabase.auth.updateUser(updates as Parameters<typeof supabase.auth.updateUser>[0])
       if (error) throw error
-      if (profileName && user?.id) await updateAdminUser(user.id, { display_name: profileName })
+      if (profileName && user?.id) {
+        await updateAdminUser(user.id, { display_name: profileName })
+        invalidateMemberCache(user.id)
+      }
       setPwSuccess(true)
       setTimeout(() => setProfileModal(false), 1500)
     } catch (err: unknown) {

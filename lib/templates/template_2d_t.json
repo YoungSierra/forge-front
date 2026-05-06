@@ -1,0 +1,28 @@
+{
+  "id": "2d_traditional",
+  "name": "2D Traditional",
+  "description": "Traditional 2D production pipeline: art direction → asset production → export.",
+
+  "nodes": [
+    { "id": "art_direction_intake", "label": "Art Direction Intake", "category": "design", "icon": "AD", "stepKey": "art_direction_intake", "comingSoon": false, "x": 680,  "y": 280,  "description": "Art intake brief, references & style directives", "inputLabel": "GDD Draft",           "outputLabel": "Art Brief"    },
+    { "id": "uiux",                 "label": "UI / User Interface",  "category": "asset",  "icon": "UI", "stepKey": "uiux",                 "comingSoon": false, "x": 1200, "y": 60,   "description": "Menus, buttons & user flows",                "inputLabel": "Art Brief",           "outputLabel": "UI Kit"       },
+    { "id": "hud",                  "label": "HUD",                  "category": "asset",  "icon": "HD", "stepKey": "hud",                  "comingSoon": false, "x": 1200, "y": 220,  "description": "Health bars, score & overlays",             "inputLabel": "Art Brief",           "outputLabel": "HUD Assets"   },
+    { "id": "icons",                "label": "Icons",                "category": "asset",  "icon": "IC", "stepKey": "icons",                "comingSoon": false, "x": 1200, "y": 380,  "description": "Items, pickups & status icons",             "inputLabel": "Art Brief",           "outputLabel": "Icon Set"     },
+    { "id": "splash_art",           "label": "Splash Art",           "category": "asset",  "icon": "SP", "stepKey": "splash_art",           "comingSoon": false, "x": 1200, "y": 540,  "description": "Title screen, loading & key art",           "inputLabel": "Art Brief",           "outputLabel": "Splash Assets"},
+    { "id": "marketing",            "label": "Marketing",            "category": "asset",  "icon": "MK", "stepKey": "marketing",            "comingSoon": false, "x": 1200, "y": 700,  "description": "Store banners, social & promotional art",   "inputLabel": "Art Brief",           "outputLabel": "Promo Pack"   }
+  ],
+
+  "edges": [
+    { "id": "e-t-gdd-adi",         "source": "gdd",                  "target": "art_direction_intake" },
+    { "id": "e-t-adi-uiux",        "source": "art_direction_intake", "target": "uiux"                 },
+    { "id": "e-t-adi-hud",         "source": "art_direction_intake", "target": "hud"                  },
+    { "id": "e-t-adi-icons",       "source": "art_direction_intake", "target": "icons"                },
+    { "id": "e-t-adi-splash",      "source": "art_direction_intake", "target": "splash_art"           },
+    { "id": "e-t-adi-marketing",   "source": "art_direction_intake", "target": "marketing"            },
+    { "id": "e-t-uiux-export",     "source": "uiux",                 "target": "export"               },
+    { "id": "e-t-hud-export",      "source": "hud",                  "target": "export"               },
+    { "id": "e-t-icons-export",    "source": "icons",                "target": "export"               },
+    { "id": "e-t-splash-export",   "source": "splash_art",           "target": "export"               },
+    { "id": "e-t-marketing-export","source": "marketing",            "target": "export"               }
+  ]
+}

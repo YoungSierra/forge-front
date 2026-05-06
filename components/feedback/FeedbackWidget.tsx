@@ -2,9 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '@/lib/auth-context'
-import { getMemberByAuth, submitFeedback } from '@/lib/api'
+import { getMemberByAuth, submitFeedback, BACKEND_URL } from '@/lib/api'
 import type { FeedbackCategory, FeedbackSeverity } from '@/lib/types'
-import { createClient } from '@/lib/supabase'
 
 const CATEGORIES: { value: FeedbackCategory; label: string; color: string }[] = [
   { value: 'bug',         label: 'Bug',         color: 'var(--cat-output)' },
@@ -73,13 +72,25 @@ export default function FeedbackWidget() {
   }
 
   async function uploadScreenshot(file: File): Promise<string | undefined> {
-    const supabase = createClient()
-    const ext = file.name.split('.').pop() || 'png'
-    const path = `feedback/${Date.now()}.${ext}`
-    const { error } = await supabase.storage.from('feedback-screenshots').upload(path, file, { upsert: false })
-    if (error) { console.warn('Screenshot upload failed:', error.message); return undefined }
-    const { data } = supabase.storage.from('feedback-screenshots').getPublicUrl(path)
-    return data.publicUrl
+    try {
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve((reader.result as string).split(',')[1])
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      const res = await fetch(`${BACKEND_URL}/api/feedback/upload-screenshot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: b64, mimeType: file.type || 'image/png' }),
+      })
+      const json = await res.json()
+      if (!json.success) { console.warn('Screenshot upload failed:', json.error); return undefined }
+      return json.url
+    } catch (e) {
+      console.warn('Screenshot upload failed:', e)
+      return undefined
+    }
   }
 
   async function handleSubmit() {

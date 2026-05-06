@@ -22,7 +22,7 @@ export default function Step2Sprites({ project, onApproved, invalidated }: Props
   const [error, setError] = useState<string | null>(null)
   const [approving, setApproving] = useState(false)
 
-  const characters = project.concept?.characters ?? []
+  const characters = project.concept?.pipeline?.gdd?.characters ?? []
 
   async function generate() {
     setError(null)

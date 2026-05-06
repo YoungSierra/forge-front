@@ -12,6 +12,35 @@ type InputSource = {
   data: unknown
 }
 
+/* ─── Canvas-driven source metadata ─── */
+
+const SOURCE_META: Record<string, { label: string; color: string }> = {
+  gdd:                  { label: 'Game Design Doc',       color: 'var(--cat-design)' },
+  art_direction_intake: { label: 'Art Direction Intake',  color: 'var(--cat-design)' },
+  visual_guide:         { label: 'Visual Guide',          color: 'var(--cat-asset)'  },
+  concept_art:          { label: 'Concept Art',           color: 'var(--cat-design)' },
+  sprites:              { label: 'Sprites',               color: 'var(--cat-asset)'  },
+  levels:               { label: 'Levels',                color: 'var(--cat-level)'  },
+  code:                 { label: 'Code',                  color: 'var(--cat-code)'   },
+  audio:                { label: 'Audio',                 color: 'var(--cat-audio)'  },
+  sfx:                  { label: 'SFX',                   color: 'var(--cat-audio)'  },
+  backgrounds:          { label: 'Backgrounds',           color: 'var(--cat-asset)'  },
+  uiux:                 { label: 'UI/UX',                 color: 'var(--cat-design)' },
+  icons:                { label: 'Icons',                 color: 'var(--cat-asset)'  },
+  hud:                  { label: 'HUD',                   color: 'var(--cat-asset)'  },
+  splash_art:           { label: 'Splash Art',            color: 'var(--cat-output)' },
+  marketing:            { label: 'Marketing',             color: 'var(--cat-output)' },
+  modeling:             { label: 'Modeling',              color: 'var(--cat-asset)'  },
+  charaters:            { label: 'Characters',            color: 'var(--cat-design)' },
+  vfx:                  { label: 'VFX',                   color: 'var(--cat-asset)'  },
+  texturing:            { label: 'Texturing',             color: 'var(--cat-asset)'  },
+  rigging:              { label: 'Rigging',               color: 'var(--cat-level)'  },
+  lighting:             { label: 'Lighting',              color: 'var(--cat-asset)'  },
+  animation:            { label: 'Animation',             color: 'var(--cat-level)'  },
+  cinematics:           { label: 'Cinematics',            color: 'var(--cat-output)' },
+  voice:                { label: 'Voice',                 color: 'var(--cat-audio)'  },
+}
+
 /* ─── Helpers ─── */
 
 function getPipeline(project: Project, key: string): unknown {
@@ -19,11 +48,26 @@ function getPipeline(project: Project, key: string): unknown {
   return pipeline?.[key]
 }
 
+/** Returns true if the current canvas layout contains a node with the given stepKey */
+function hasCanvasStep(project: Project, stepKey: string): boolean {
+  const layout = project.canvas_layout as { nodes?: { data?: { stepKey?: string } }[] } | undefined
+  return layout?.nodes?.some(n => n.data?.stepKey === stepKey) ?? false
+}
+
+/** Returns the art guide source (art_direction_intake for 2D Traditional, visual_guide for 2D Game) */
+function getArtGuide(project: Project): { label: string; data: unknown; color: string } {
+  const use2dT = hasCanvasStep(project, 'art_direction_intake')
+  return use2dT
+    ? { label: 'Art Direction Intake', color: 'var(--cat-design)', data: getPipeline(project, 'art_direction_intake') }
+    : { label: 'Visual Guide',         color: 'var(--cat-asset)',  data: getPipeline(project, 'visual_guide') }
+}
+
 /* ─── Input sources map ─── */
 
 export function getInputSources(stepKey: string, project: Project): InputSource[] {
   const key = stepKey.replace('-gate', '')
   const p   = project
+  const g   = p.concept?.pipeline?.gdd  // GDD data accessor
 
   switch (key) {
     case 'export':
@@ -45,138 +89,163 @@ export function getInputSources(stepKey: string, project: Project): InputSource[
 
     case 'sprites':
       return [
-        { label: 'Characters (GDD)',  color: 'var(--cat-design)', data: p.concept?.characters },
-        { label: 'Art Direction',     color: 'var(--cat-asset)',  data: p.concept?.art_direction },
+        { label: 'Characters (GDD)',  color: 'var(--cat-design)', data: g?.characters },
+        { label: 'Art Direction',     color: 'var(--cat-asset)',  data: g?.art_direction },
       ]
 
     case 'levels':
       return [
-        { label: 'Levels (GDD)',  color: 'var(--cat-level)', data: p.concept?.levels },
-        { label: 'Mechanics',     color: 'var(--cat-gate)',  data: p.concept?.mechanics },
+        { label: 'Levels (GDD)',  color: 'var(--cat-level)', data: g?.levels },
+        { label: 'Mechanics',     color: 'var(--cat-gate)',  data: g?.mechanics },
       ]
 
     case 'code':
       return [
-        { label: 'Development',   color: 'var(--cat-code)',    data: p.concept?.development },
-        { label: 'Mechanics',     color: 'var(--cat-gate)',    data: p.concept?.mechanics },
-        { label: 'Characters',    color: 'var(--cat-design)',  data: p.concept?.characters },
-        { label: 'Levels',        color: 'var(--cat-level)',   data: p.concept?.levels },
+        { label: 'Development',   color: 'var(--cat-code)',    data: g?.development },
+        { label: 'Mechanics',     color: 'var(--cat-gate)',    data: g?.mechanics },
+        { label: 'Characters',    color: 'var(--cat-design)',  data: g?.characters },
+        { label: 'Levels',        color: 'var(--cat-level)',   data: g?.levels },
       ]
 
     case 'audio':
     case 'sfx':
       return [
-        { label: 'Audio Direction', color: 'var(--cat-audio)', data: p.concept?.audio_direction },
-        { label: 'Levels',          color: 'var(--cat-level)', data: p.concept?.levels },
-        { label: 'Mechanics',       color: 'var(--cat-gate)',  data: p.concept?.mechanics },
+        { label: 'Audio Direction', color: 'var(--cat-audio)', data: g?.audio_direction },
+        { label: 'Levels',          color: 'var(--cat-level)', data: g?.levels },
+        { label: 'Mechanics',       color: 'var(--cat-gate)',  data: g?.mechanics },
       ]
 
     case 'concept_art':
       return [
-        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: p.concept?.characters },
-        { label: 'Art Direction',    color: 'var(--cat-asset)',  data: p.concept?.art_direction },
-        { label: 'Levels',           color: 'var(--cat-level)', data: p.concept?.levels },
+        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: g?.characters },
+        { label: 'Art Direction',    color: 'var(--cat-asset)',  data: g?.art_direction },
+        { label: 'Levels',           color: 'var(--cat-level)', data: g?.levels },
       ]
 
     case 'visual_guide':
       return [
-        { label: 'Art Direction', color: 'var(--cat-asset)',  data: p.concept?.art_direction },
+        { label: 'Art Direction', color: 'var(--cat-asset)',  data: g?.art_direction },
         { label: 'Concept Art',   color: 'var(--cat-design)', data: getPipeline(p, 'concept_art') },
       ]
 
     case 'backgrounds':
       return [
-        { label: 'Levels (GDD)',  color: 'var(--cat-level)',  data: p.concept?.levels },
-        { label: 'Art Direction', color: 'var(--cat-asset)',  data: p.concept?.art_direction },
+        { label: 'Levels (GDD)',  color: 'var(--cat-level)',  data: g?.levels },
+        { label: 'Art Direction', color: 'var(--cat-asset)',  data: g?.art_direction },
         { label: 'Visual Guide',  color: 'var(--cat-design)', data: getPipeline(p, 'visual_guide') },
       ]
 
-    case 'uiux':
+    case 'uiux': {
+      const ag = getArtGuide(p)
       return [
-        { label: 'Project Overview', color: 'var(--cat-design)', data: p.concept?.project },
-        { label: 'Mechanics',        color: 'var(--cat-gate)',   data: p.concept?.mechanics },
-        { label: 'Visual Guide',     color: 'var(--cat-asset)',  data: getPipeline(p, 'visual_guide') },
+        { label: ag.label,           color: ag.color,             data: ag.data },
+        { label: 'Project Overview', color: 'var(--cat-design)',  data: g?.project },
+        { label: 'Mechanics',        color: 'var(--cat-gate)',    data: g?.mechanics },
       ]
+    }
 
-    case 'icons':
+    case 'icons': {
+      const ag = getArtGuide(p)
       return [
-        { label: 'Visual Guide', color: 'var(--cat-asset)',  data: getPipeline(p, 'visual_guide') },
-        { label: 'UI/UX',        color: 'var(--cat-design)', data: getPipeline(p, 'uiux') },
+        { label: ag.label,        color: ag.color,            data: ag.data },
+        { label: 'Art Direction', color: 'var(--cat-asset)',  data: g?.art_direction },
+        { label: 'Mechanics',     color: 'var(--cat-gate)',   data: g?.mechanics },
       ]
+    }
 
-    case 'hud':
+    case 'hud': {
+      const ag = getArtGuide(p)
       return [
-        { label: 'Mechanics', color: 'var(--cat-gate)',   data: p.concept?.mechanics },
-        { label: 'UI/UX',     color: 'var(--cat-design)', data: getPipeline(p, 'uiux') },
+        { label: ag.label,    color: ag.color,           data: ag.data },
+        { label: 'Mechanics', color: 'var(--cat-gate)',  data: g?.mechanics },
       ]
+    }
 
     case 'charaters':
       return [
-        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: p.concept?.characters },
+        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: g?.characters },
         { label: 'Concept Art',      color: 'var(--cat-asset)',  data: getPipeline(p, 'concept_art') },
       ]
 
     case 'modeling':
       return [
-        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: p.concept?.characters },
-        { label: 'Art Direction',    color: 'var(--cat-asset)',  data: p.concept?.art_direction },
+        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: g?.characters },
+        { label: 'Art Direction',    color: 'var(--cat-asset)',  data: g?.art_direction },
         { label: 'Concept Art',      color: 'var(--cat-design)', data: getPipeline(p, 'concept_art') },
       ]
 
     case 'texturing':
       return [
-        { label: 'Art Direction', color: 'var(--cat-asset)',  data: p.concept?.art_direction },
+        { label: 'Art Direction', color: 'var(--cat-asset)',  data: g?.art_direction },
         { label: 'Visual Guide',  color: 'var(--cat-design)', data: getPipeline(p, 'visual_guide') },
         { label: 'Concept Art',   color: 'var(--cat-asset)',  data: getPipeline(p, 'concept_art') },
       ]
 
     case 'lighting':
       return [
-        { label: 'Art Direction', color: 'var(--cat-asset)',  data: p.concept?.art_direction },
-        { label: 'Levels',        color: 'var(--cat-level)',  data: p.concept?.levels },
+        { label: 'Art Direction', color: 'var(--cat-asset)',  data: g?.art_direction },
+        { label: 'Levels',        color: 'var(--cat-level)',  data: g?.levels },
         { label: 'Concept Art',   color: 'var(--cat-design)', data: getPipeline(p, 'concept_art') },
       ]
 
     case 'rigging':
       return [
-        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: p.concept?.characters },
+        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: g?.characters },
         { label: '3D Characters',    color: 'var(--cat-asset)',  data: getPipeline(p, 'charaters') },
         { label: 'Modeling',         color: 'var(--cat-level)',  data: getPipeline(p, 'modeling') },
       ]
 
     case 'animation':
       return [
-        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: p.concept?.characters },
+        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: g?.characters },
         { label: '3D Characters',    color: 'var(--cat-asset)',  data: getPipeline(p, 'charaters') },
         { label: 'Rigging',          color: 'var(--cat-level)',  data: getPipeline(p, 'rigging') },
       ]
 
     case 'cinematics':
       return [
-        { label: 'Project Overview', color: 'var(--cat-design)', data: p.concept?.project },
-        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: p.concept?.characters },
+        { label: 'Project Overview', color: 'var(--cat-design)', data: g?.project },
+        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: g?.characters },
         { label: 'Animation',        color: 'var(--cat-level)',  data: getPipeline(p, 'animation') },
       ]
 
     case 'vfx':
       return [
-        { label: 'Art Direction', color: 'var(--cat-asset)',  data: p.concept?.art_direction },
-        { label: 'Levels',        color: 'var(--cat-level)',  data: p.concept?.levels },
+        { label: 'Art Direction', color: 'var(--cat-asset)',  data: g?.art_direction },
+        { label: 'Levels',        color: 'var(--cat-level)',  data: g?.levels },
         { label: 'Concept Art',   color: 'var(--cat-design)', data: getPipeline(p, 'concept_art') },
       ]
 
     case 'voice':
       return [
-        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: p.concept?.characters },
-        { label: 'Project Overview', color: 'var(--cat-design)', data: p.concept?.project },
+        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: g?.characters },
+        { label: 'Project Overview', color: 'var(--cat-design)', data: g?.project },
+      ]
+
+    case 'art_direction_intake':
+      return [
+        { label: 'Project Overview', color: 'var(--cat-design)', data: g?.project },
+        { label: 'Art Direction',    color: 'var(--cat-asset)',  data: g?.art_direction },
+        { label: 'Characters',       color: 'var(--cat-design)', data: g?.characters },
+        { label: 'Levels',           color: 'var(--cat-level)',  data: g?.levels },
+        { label: 'Mechanics',        color: 'var(--cat-gate)',   data: g?.mechanics },
+        { label: 'UI/UX Direction',  color: 'var(--cat-asset)',  data: g?.uiux_direction },
+        { label: 'Narrative',        color: 'var(--cat-audio)',  data: g?.narrative },
+      ]
+
+    case 'splash_art':
+    case 'marketing':
+      return [
+        { label: 'Art Direction Intake', color: 'var(--cat-design)', data: getPipeline(p, 'art_direction_intake') },
+        { label: 'Project Overview',     color: 'var(--cat-asset)',  data: g?.project },
       ]
 
     default:
       return [
         { label: 'GDD', color: 'var(--cat-design)', data: {
-          name:  p.concept?.project?.name,
-          genre: p.concept?.project?.genre,
-          tone:  p.concept?.project?.tone,
+          name:  g?.project?.name,
+          genre: g?.project?.genre,
+          tone:  g?.project?.tone,
         }},
       ]
   }
@@ -346,8 +415,15 @@ function renderSourceData(data: unknown): React.ReactNode {
 
 /* ─── Main component ─── */
 
-export function InputContext({ stepKey, project }: { stepKey: string; project: Project }) {
-  const sources = getInputSources(stepKey, project)
+export function InputContext({ stepKey, project, nodeContext }: { stepKey: string; project: Project; nodeContext?: Record<string, unknown> }) {
+  // Canvas-driven: use actual connected parents. Fall back to hardcoded only when no nodeContext provided.
+  const sources: InputSource[] = nodeContext != null
+    ? Object.entries(nodeContext).map(([key, data]) => ({
+        label: SOURCE_META[key]?.label ?? key.replace(/_/g, ' '),
+        color: SOURCE_META[key]?.color ?? 'var(--cat-design)',
+        data,
+      }))
+    : getInputSources(stepKey, project)
 
   if (!sources.length) return null
 

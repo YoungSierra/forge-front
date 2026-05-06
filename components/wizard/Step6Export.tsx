@@ -17,8 +17,8 @@ export default function Step6Export({ project }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
 
-  const characters = project.concept?.characters ?? []
-  const levels = project.concept?.levels ?? []
+  const characters = project.concept?.pipeline?.gdd?.characters ?? []
+  const levels = project.concept?.pipeline?.gdd?.levels ?? []
 
   async function handleExport() {
     setLoading(true)

@@ -13,9 +13,12 @@ export type GDDMechanic = {
   name: string
   description: string
   type: 'core' | 'secondary' | 'progression'
+  player_fantasy?: string
   gameplay_tags?: string[]
   inputs?: string[]
   outputs?: string[]
+  failure_state?: string
+  tuning_levers?: string[]
   related_systems?: string[]
 }
 
@@ -57,6 +60,8 @@ export type GDD = {
     tone: string
     target_platform?: string
     camera?: string
+    design_pillars?: string[]
+    player_motivation?: string
   }
   mechanics: GDDMechanic[]
   levels: GDDLevel[]
@@ -80,8 +85,11 @@ export type GDD = {
   systems?: {
     progression?: string
     economy?: string
+    economy_sources?: string[]
+    economy_sinks?: string[]
     combat?: string
     ui_flow?: string
+    onboarding?: string
   }
   narrative?: Record<string, unknown>
   world?: Record<string, unknown>
@@ -231,12 +239,24 @@ export type StepConfig = {
   is_active: boolean
   updated_at: string
   comfyui_workflows?: { id: string; name: string } | null
+  image_enabled: boolean
+  image_integration_type: 'llm' | 'comfyui' | 'n8n' | null
+  image_model: string | null
+  image_workflow_id: string | null
+  image_webhook_url: string | null
 }
 
 export type ModelsConfig = {
   default: string
   available_providers: Record<string, boolean>
   [stepKey: string]: unknown
+}
+
+export type PromptConfig = {
+  key: string
+  r2_path: string | null
+  description: string | null
+  updated_at: string
 }
 
 export type GameFormData = {

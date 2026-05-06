@@ -13,10 +13,12 @@ interface Props {
   project: Project
   phase: PipelinePhase
   onRefresh: () => void
+  onRunPipeline?: () => void
+  runProgress?: { done: number; total: number }
   nodes?: Node[]
 }
 
-export default function ForgeToolbar({ project, phase, onRefresh, nodes = [] }: Props) {
+export default function ForgeToolbar({ project, phase, onRefresh, onRunPipeline, runProgress, nodes = [] }: Props) {
   const approvable = nodes.filter(n => {
     if (n.type === 'forgeGroup') return false
     const d = n.data as unknown as ForgeNodeData
@@ -24,6 +26,8 @@ export default function ForgeToolbar({ project, phase, onRefresh, nodes = [] }: 
   })
   const approvedCount = approvable.filter(n => (n.data as unknown as ForgeNodeData).approved).length
   const totalCount    = approvable.length
+  const idleCount     = approvable.filter(n => (n.data as unknown as ForgeNodeData).status === 'idle').length
+  const hasProject    = !!project.id
 
   return (
     <header className="forge-toolbar">
@@ -57,16 +61,37 @@ export default function ForgeToolbar({ project, phase, onRefresh, nodes = [] }: 
         ↻ Refresh
       </button>
 
+      {/* Run All button — only when project exists and there are idle nodes */}
+      {hasProject && onRunPipeline && idleCount > 0 && phase !== 'running' && (
+        <button
+          className="tb-btn"
+          onClick={onRunPipeline}
+          title={`Auto-generate and approve ${idleCount} idle node${idleCount !== 1 ? 's' : ''}`}
+          style={{ color: 'var(--cat-code)', borderColor: 'color-mix(in oklch, var(--cat-code) 35%, transparent)' }}
+        >
+          ▶ Run {idleCount} idle
+        </button>
+      )}
+
       <div className="tb-spacer" />
 
-      {/* Dynamic progress */}
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>
-        {approvedCount}/{totalCount} approved
-      </span>
+      {/* Progress during execution */}
+      {phase === 'running' && runProgress && (
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)' }}>
+          {runProgress.done}/{runProgress.total} nodes
+        </span>
+      )}
+
+      {/* Static progress */}
+      {phase !== 'running' && (
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>
+          {approvedCount}/{totalCount} approved
+        </span>
+      )}
 
       <div className="tb-divider" />
 
-      {/* Status pill — only when something is happening */}
+      {/* Status pill */}
       {phase !== 'idle' && (
         <div className={`tb-status-pill${phase === 'running' ? ' running' : ' error'}`}>
           <div className="dot" />

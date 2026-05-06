@@ -53,20 +53,31 @@ const btnStyle = (active = true, accent = false): React.CSSProperties => ({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function stepConfigHint(s: StepConfig): string {
+function stepConfigHint(s: StepConfig, workflows: ComfyUIWorkflow[]): string {
+  let main = ''
   if (s.integration_type === 'llm') {
-    if (!s.model_name) return 'default model'
-    const [provider, ...rest] = s.model_name.split(':')
-    return `${provider} / ${rest.join(':')}`
+    main = s.model_name ? (() => { const [p, ...r] = s.model_name!.split(':'); return `${p} / ${r.join(':')}` })() : 'default model'
+  } else if (s.integration_type === 'comfyui') {
+    main = s.comfyui_workflows?.name || 'no workflow'
+  } else if (s.integration_type === 'n8n') {
+    main = s.webhook_url ? (() => { try { return new URL(s.webhook_url!).hostname } catch { return s.webhook_url!.slice(0, 28) } })() : 'no webhook'
   }
-  if (s.integration_type === 'comfyui') {
-    return s.comfyui_workflows?.name || 'no workflow'
+
+  if (!s.image_enabled) return main
+
+  let img = ''
+  if (s.image_integration_type === 'llm') {
+    img = s.image_model ? (() => { const [p, ...r] = s.image_model!.split(':'); return `img:${p}/${r.join(':')}` })() : 'img:default'
+  } else if (s.image_integration_type === 'comfyui') {
+    const wf = workflows.find(w => w.id === s.image_workflow_id)
+    img = wf ? `img:${wf.name}` : 'img:no workflow'
+  } else if (s.image_integration_type === 'n8n') {
+    img = s.image_webhook_url ? `img:n8n` : 'img:no webhook'
+  } else {
+    img = 'img:not set'
   }
-  if (s.integration_type === 'n8n') {
-    if (!s.webhook_url) return 'no webhook'
-    try { return new URL(s.webhook_url).hostname } catch { return s.webhook_url.slice(0, 28) }
-  }
-  return ''
+
+  return `${main}  ·  ${img}`
 }
 
 type WorkflowNode = { id: string; class_type: string; title: string; fields: string[] }
@@ -199,17 +210,26 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
   availableProviders: Record<string, boolean>
   onSaved: (c: StepConfig) => void
 }) {
-  const [type, setType]     = useState(config.integration_type)
-  const [model, setModel]   = useState<string | null>(config.model_name)
-  const [wfId, setWfId]     = useState<string | null>(config.comfyui_workflow_id)
-  const [url, setUrl]       = useState(config.webhook_url || '')
-  const [saving, setSaving] = useState(false)
-  const [error, setError]   = useState('')
-  const [success, setSuccess] = useState('')
+  const [type, setType]         = useState(config.integration_type)
+  const [model, setModel]       = useState<string | null>(config.model_name)
+  const [wfId, setWfId]         = useState<string | null>(config.comfyui_workflow_id)
+  const [url, setUrl]           = useState(config.webhook_url || '')
+  const [imgEnabled, setImgEnabled]   = useState(config.image_enabled)
+  const [imgType, setImgType]         = useState<'llm' | 'comfyui' | 'n8n'>(config.image_integration_type || 'comfyui')
+  const [imgModel, setImgModel]       = useState<string | null>(config.image_model)
+  const [imgWfId, setImgWfId]         = useState<string | null>(config.image_workflow_id)
+  const [imgUrl, setImgUrl]           = useState(config.image_webhook_url || '')
+  const [saving, setSaving]     = useState(false)
+  const [error, setError]       = useState('')
+  const [success, setSuccess]   = useState('')
 
   useEffect(() => {
     setType(config.integration_type); setModel(config.model_name)
     setWfId(config.comfyui_workflow_id); setUrl(config.webhook_url || '')
+    setImgEnabled(config.image_enabled)
+    setImgType(config.image_integration_type || 'comfyui')
+    setImgModel(config.image_model); setImgWfId(config.image_workflow_id)
+    setImgUrl(config.image_webhook_url || '')
     setError(''); setSuccess('')
   }, [config.step_key])
 
@@ -219,8 +239,15 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
     try {
       const payload: Partial<StepConfig> = { integration_type: type }
       if (type === 'llm')     { payload.model_name = model }
-      if (type === 'comfyui') { payload.comfyui_workflow_id = wfId; payload.model_name = model }
+      if (type === 'comfyui') { payload.comfyui_workflow_id = wfId }
       if (type === 'n8n')     { payload.webhook_url = url || null }
+      payload.image_enabled = imgEnabled
+      if (imgEnabled) {
+        payload.image_integration_type = imgType
+        if (imgType === 'llm')     { payload.image_model = imgModel }
+        if (imgType === 'comfyui') { payload.image_workflow_id = imgWfId }
+        if (imgType === 'n8n')     { payload.image_webhook_url = imgUrl || null }
+      }
       onSaved(await updateAdminStepConfig(config.step_key, payload))
       setSuccess('Saved.')
     } catch (err: unknown) {
@@ -281,6 +308,63 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
           <input style={inputStyle} type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..." />
         </div>
       )}
+
+      {/* ── Preview images ── */}
+      <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: imgEnabled ? 12 : 0 }}>
+          <label style={labelStyle}>Preview images</label>
+          <button type="button" onClick={() => setImgEnabled(v => !v)} style={{
+            padding: '3px 10px', borderRadius: 5, fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
+            border: `1px solid ${imgEnabled ? 'var(--cat-code)' : 'var(--line-2)'}`,
+            background: imgEnabled ? 'color-mix(in srgb, var(--cat-code) 15%, var(--bg-1))' : 'transparent',
+            color: imgEnabled ? 'var(--cat-code)' : 'var(--text-3)',
+          }}>{imgEnabled ? 'enabled' : 'disabled'}</button>
+        </div>
+
+        {imgEnabled && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div>
+              <label style={labelStyle}>Image integration</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {(['llm', 'comfyui', 'n8n'] as const).map(t => (
+                  <button key={t} type="button" onClick={() => setImgType(t)} style={{
+                    flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11, fontFamily: 'monospace', cursor: 'pointer',
+                    border: `1px solid ${imgType === t ? TYPE_COLOR[t] : 'var(--line-2)'}`,
+                    background: imgType === t ? `color-mix(in srgb, ${TYPE_COLOR[t]} 15%, var(--bg-1))` : 'transparent',
+                    color: imgType === t ? TYPE_COLOR[t] : 'var(--text-3)',
+                  }}>{t}</button>
+                ))}
+              </div>
+            </div>
+
+            {imgType === 'llm' && (
+              <div>
+                <label style={labelStyle}>Image model <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(empty = default)</span></label>
+                <ModelSelector value={imgModel} onChange={setImgModel} availableProviders={availableProviders} />
+              </div>
+            )}
+
+            {imgType === 'comfyui' && (
+              <div>
+                <label style={labelStyle}>Image workflow</label>
+                <select style={selectStyle} value={imgWfId || ''} onChange={e => setImgWfId(e.target.value || null)}>
+                  <option value="">— not assigned —</option>
+                  {workflows.filter(w => w.is_active).map(w => (
+                    <option key={w.id} value={w.id}>{w.name}{w.description ? ` — ${w.description}` : ''}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {imgType === 'n8n' && (
+              <div>
+                <label style={labelStyle}>Image webhook URL</label>
+                <input style={inputStyle} type="url" value={imgUrl} onChange={e => setImgUrl(e.target.value)} placeholder="https://..." />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
       {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-code)', padding: '4px 0' }}>{success}</div>}
@@ -521,7 +605,7 @@ export default function IntegrationsPage() {
         {/* Step Configs tab */}
         {tab === 'steps' && (
           <>
-            <div style={{ width: 240, borderRight: '1px solid var(--line-2)', overflowY: 'auto', flexShrink: 0 }}>
+            <div style={{ width: 400, borderRight: '1px solid var(--line-2)', overflowY: 'auto', flexShrink: 0 }}>
               {stepConfigs.map(s => (
                 <div key={s.step_key} onClick={() => setSelectedStep(s)} style={{
                   padding: '9px 16px', cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
@@ -536,7 +620,7 @@ export default function IntegrationsPage() {
                     }}>{s.integration_type}</span>
                   </div>
                   <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {stepConfigHint(s)}
+                    {stepConfigHint(s, workflows)}
                   </div>
                 </div>
               ))}
@@ -553,7 +637,7 @@ export default function IntegrationsPage() {
         {/* Workflows tab */}
         {tab === 'workflows' && (
           <>
-            <div style={{ width: 240, borderRight: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+            <div style={{ width: 400, borderRight: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line-2)' }}>
                 <button onClick={() => { setNewWorkflow(true); setSelectedWf(null) }} style={btnStyle(true, true)}>+ New workflow</button>
               </div>

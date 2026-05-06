@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ReactFlow, ReactFlowProvider,
@@ -27,6 +27,8 @@ import type { Project } from '@/lib/types'
 import { getTemplate, type TemplateCatalogNode } from '@/lib/templates'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
 import type { CanvasLayout } from '@/lib/canvas-storage'
+import { executePipeline } from '@/lib/pipelineExecutor'
+import { getNodeExecutionContext } from '@/lib/nodeExecutionContext'
 
 const FIXED_NODE_IDS = new Set(['gdd', 'export'])
 
@@ -41,12 +43,15 @@ function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []
   }
 
   // Build approved + pending_review sets
+  // step_1_concept is the DB key for the GDD wizard job — it must resolve to node id 'gdd'
+  const STEP_ALIASES: Record<string, string> = { 'step_1_concept': 'gdd' }
+
   const approved = new Set<string>()
   const pendingReview = new Set<string>()
   if (project) {
     if ((project.current_wizard_step ?? 0) > 1) approved.add('gdd')
     for (const job of project.generation_jobs ?? []) {
-      const nodeId = stepKeyToNodeId.get(job.current_step) ?? job.current_step
+      const nodeId = stepKeyToNodeId.get(job.current_step) ?? STEP_ALIASES[job.current_step] ?? job.current_step
       if (job.status === 'approved') approved.add(nodeId)
       else if (job.status === 'review' && job.review_status === 'pending') pendingReview.add(nodeId)
     }
@@ -69,6 +74,12 @@ function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []
     if (data.comingSoon) return n
 
     const nodeApproved = approved.has(n.id)
+
+    // Export is an output node — always available regardless of upstream state
+    if (n.id === 'export') {
+      return { ...n, data: { ...n.data, status: 'idle' as const, approved: false } }
+    }
+
     const parents = parentMap.get(n.id) ?? []
 
     let status: ForgeNodeData['status']
@@ -76,8 +87,11 @@ function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []
       status = 'complete'
     } else if (pendingReview.has(n.id)) {
       status = 'pending_review'
-    } else if (parents.length === 0 || parents.every(pid => approved.has(pid))) {
-      status = project ? 'idle' : (n.id === 'gdd' ? 'idle' : 'locked')
+    } else if (parents.length === 0) {
+      // No incoming edges → locked until the user connects a parent (GDD is the only self-sufficient node)
+      status = n.id === 'gdd' ? 'idle' : 'locked'
+    } else if (parents.every(pid => approved.has(pid))) {
+      status = 'idle'
     } else {
       status = 'locked'
     }
@@ -100,7 +114,7 @@ const EDGE_TYPES = { forgeEdge: ForgeEdge }
 
 /* ─── Fixed nodes: GDD + Export ─── */
 function buildFixedNodes(project: Project | null): Node[] {
-  const gdd = project?.concept
+  const gdd = project?.concept?.pipeline?.gdd
   return [
     {
       id: 'gdd', type: 'forgeNode', position: { x: 60, y: 300 },
@@ -108,12 +122,12 @@ function buildFixedNodes(project: Project | null): Node[] {
         label: 'Game Design Doc', category: 'design', icon: 'GD', num: '01',
         status: 'idle', stepKey: 'gdd',
         rows: [
-          { key: 'genre',  value: gdd?.project.genre ?? '–', accent: true },
-          { key: 'tone',   value: gdd?.project.tone  ?? '–' },
-          { key: 'engine', value: gdd?.development.suggested_engine ?? '–' },
+          { key: 'genre',  value: gdd?.project?.genre ?? '–', accent: true },
+          { key: 'tone',   value: gdd?.project?.tone  ?? '–' },
+          { key: 'engine', value: gdd?.development?.suggested_engine ?? '–' },
         ],
         inputs: [], outputs: [{ id: 'o', label: 'GDD Draft' }],
-        previewType: 'text', previewContent: gdd?.project.elevator_pitch,
+        previewType: 'text', previewContent: gdd?.project?.elevator_pitch,
         approved: false,
       } satisfies ForgeNodeData,
     },
@@ -272,6 +286,8 @@ function PipelineApp({
   const [zoom, setZoom] = useState(0.85)
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
   const [framePrompt, setFramePrompt] = useState<XYPosition | null>(null)
+  const [phase, setPhase] = useState<'idle' | 'running' | 'error'>('idle')
+  const [runProgress, setRunProgress] = useState<{ done: number; total: number } | undefined>()
 
   const initialState = (() => {
     if (initialProject?.id) {
@@ -281,10 +297,8 @@ function PipelineApp({
       }
       const saved = loadLayout(initialProject.id)
       if (saved) return { nodes: hydrateNodes(saved.nodes, initialProject, saved.edges), edges: saved.edges }
-      // Existing project with no saved layout → auto-apply 2D template
       const fixed = buildFixedNodes(initialProject)
-      const { nodes, edges } = applyTemplate('2d_game', fixed)
-      return { nodes: hydrateNodes(nodes, initialProject, edges), edges }
+      return { nodes: hydrateNodes(fixed, initialProject), edges: [] as Edge[] }
     }
     return { nodes: buildFixedNodes(initialProject), edges: [] as Edge[] }
   })()
@@ -317,12 +331,17 @@ function PipelineApp({
       const saved = loadLayout(initialProject.id)
       if (saved) { setFlowNodes(hydrateNodes(saved.nodes, initialProject, saved.edges)); setFlowEdges(saved.edges); return }
       const fixed = buildFixedNodes(initialProject)
-      const { nodes, edges } = applyTemplate('2d_game', fixed)
-      setFlowNodes(hydrateNodes(nodes, initialProject, edges)); setFlowEdges(edges); return
+      setFlowNodes(hydrateNodes(fixed, initialProject)); setFlowEdges([]); return
     }
     setFlowNodes(buildFixedNodes(initialProject))
     setFlowEdges([])
   }, [initialProject]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-hydrate node statuses whenever canvas connections change
+  useEffect(() => {
+    if (!liveProject) return
+    setFlowNodes(ns => hydrateNodes(ns, liveProject, flowEdges))
+  }, [flowEdges, liveProject]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { getViewport, screenToFlowPosition, fitView } = useReactFlow()
 
@@ -423,6 +442,18 @@ function PipelineApp({
 
   function handleDeleteNode(nodeId: string) {
     if (FIXED_NODE_IDS.has(nodeId)) return
+    const outgoing = flowEdges.filter(e => e.source === nodeId)
+    const edgesAfter = flowEdges.filter(e => e.source !== nodeId && e.target !== nodeId)
+    if (outgoing.length > 0) {
+      setFlowNodes(ns => ns.map(n => {
+        if (!outgoing.some(e => e.target === n.id)) return n
+        const d = n.data as unknown as ForgeNodeData
+        const stillHasParent = edgesAfter.some(e => e.target === n.id)
+        if (d.approved) return { ...n, data: { ...n.data, stale: true } }
+        if (!stillHasParent) return { ...n, data: { ...n.data, status: 'locked' as const } }
+        return n
+      }))
+    }
     setFlowNodes(ns => ns.filter(n => n.id !== nodeId))
     setFlowEdges(es => es.filter(e => e.source !== nodeId && e.target !== nodeId))
     if (selectedId === nodeId) setSelectedId(null)
@@ -430,6 +461,20 @@ function PipelineApp({
   }
 
   function handleDeleteEdge(edgeId: string) {
+    const edge = flowEdges.find(e => e.id === edgeId)
+    if (edge) {
+      const targetNode = flowNodes.find(n => n.id === edge.target)
+      if (targetNode && targetNode.id !== 'gdd') {
+        const d = targetNode.data as unknown as ForgeNodeData
+        const remainingIncoming = flowEdges.filter(e => e.id !== edgeId && e.target === edge.target)
+        setFlowNodes(ns => ns.map(n => {
+          if (n.id !== edge.target) return n
+          if (d.approved) return { ...n, data: { ...n.data, stale: true } }
+          if (remainingIncoming.length === 0) return { ...n, data: { ...n.data, status: 'locked' as const } }
+          return n
+        }))
+      }
+    }
     setFlowEdges(es => es.filter(e => e.id !== edgeId))
     setLog('Edge deleted')
   }
@@ -464,6 +509,13 @@ function PipelineApp({
 
   const selectedNode = flowNodes.find(n => n.id === selectedId) ?? null
 
+  const nodeContext = useMemo(() => {
+    if (!selectedNode) return {}
+    const stepKey = (selectedNode.data as unknown as ForgeNodeData).stepKey
+    if (!stepKey) return {}
+    return getNodeExecutionContext(stepKey, flowNodes, flowEdges, liveProject)
+  }, [selectedNode, flowNodes, flowEdges, liveProject])
+
   // Edge glow only when source node is approved
   const approvedIds = new Set(
     flowNodes
@@ -483,7 +535,7 @@ function PipelineApp({
   function handleNodeApproved(stepKey: string) {
     setFlowNodes(ns => ns.map(n => {
       const d = n.data as unknown as ForgeNodeData
-      if (d.stepKey === stepKey) return { ...n, data: { ...d, status: 'complete' as const, approved: true } }
+      if (d.stepKey === stepKey) return { ...n, data: { ...d, status: 'complete' as const, approved: true, stale: false } }
       return n
     }))
     setLiveProject(prev => {
@@ -502,16 +554,84 @@ function PipelineApp({
     onRefresh()
   }
 
+  async function handleRunPipeline() {
+    if (!liveProject?.id || phase === 'running') return
+    const idleNodes = flowNodes.filter(n => {
+      if (n.type === 'forgeGroup') return false
+      const d = n.data as unknown as ForgeNodeData
+      return d.status === 'idle' && !d.comingSoon
+    })
+    if (idleNodes.length === 0) { setLog('No idle nodes to run'); return }
+    setPhase('running')
+    setRunProgress({ done: 0, total: idleNodes.length })
+    setLog(`Running pipeline — ${idleNodes.length} node${idleNodes.length !== 1 ? 's' : ''}…`)
+
+    await executePipeline(liveProject.id, flowNodes, flowEdges, {
+      onNodeStart: (stepKey) => {
+        setFlowNodes(ns => ns.map(n => {
+          const d = n.data as unknown as ForgeNodeData
+          if (d.stepKey === stepKey || n.id === stepKey)
+            return { ...n, data: { ...d, status: 'running' as const } }
+          return n
+        }))
+        setLog(`Generating ${stepKey}…`)
+      },
+      onNodeDone: (stepKey) => {
+        setFlowNodes(ns => ns.map(n => {
+          const d = n.data as unknown as ForgeNodeData
+          if (d.stepKey === stepKey || n.id === stepKey)
+            return { ...n, data: { ...d, status: 'complete' as const, approved: true } }
+          return n
+        }))
+        setLiveProject(prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            generation_jobs: [
+              ...(prev.generation_jobs ?? []),
+              { id: `run-${stepKey}`, project_id: prev.id, current_step: stepKey, status: 'approved' },
+            ],
+          }
+        })
+        setRunProgress(p => p ? { done: p.done + 1, total: p.total } : undefined)
+      },
+      onNodeError: (stepKey, error) => {
+        setFlowNodes(ns => ns.map(n => {
+          const d = n.data as unknown as ForgeNodeData
+          if (d.stepKey === stepKey || n.id === stepKey)
+            return { ...n, data: { ...d, status: 'error' as const } }
+          return n
+        }))
+        setPhase('error')
+        setLog(`Error in "${stepKey}": ${error}`)
+        setRunProgress(undefined)
+        onRefresh()
+      },
+      onDone: () => {
+        setPhase('idle')
+        setRunProgress(undefined)
+        setLog('Pipeline complete — all nodes generated and approved')
+        onRefresh()
+      },
+    }, liveProject)
+  }
+
   function handleProjectCreated(p: Project) {
-    setLiveProject(p)
-    // Auto-apply 2D template so the full pipeline is visible immediately
-    const fixed = buildFixedNodes(p)
-    const { nodes, edges } = applyTemplate('2d_game', fixed)
-    setFlowNodes(hydrateNodes(nodes, p, edges))
-    setFlowEdges(edges)
+    // GDD is always approved at creation — inject so hydrateNodes marks it green immediately
+    const pWithGdd: typeof p = {
+      ...p,
+      generation_jobs: [
+        ...(p.generation_jobs ?? []),
+        { id: 'optimistic-gdd', project_id: p.id, current_step: 'step_1_concept', status: 'approved' } as never,
+      ],
+    }
+    setLiveProject(pWithGdd)
+    const fixed = buildFixedNodes(pWithGdd)
+    setFlowNodes(hydrateNodes(fixed, pWithGdd))
+    setFlowEdges([])
     prevRef.current = p
-    setSelectedId('sprites')       // focus the next active node
-    setLog(`Project "${p.name}" created! Pipeline ready — start with Sprites.`)
+    setSelectedId('gdd')
+    setLog(`Project "${p.name}" created! Apply a template or add nodes manually.`)
     onProjectCreated?.(p)
     if (typeof window !== 'undefined') {
       window.history.replaceState(null, '', `/projects/${p.id}`)
@@ -530,7 +650,14 @@ function PipelineApp({
       className="forge-app"
       style={{ gridTemplateColumns: `${libraryOpen ? libraryWidth : 32}px 1fr 280px` }}
     >
-      <ForgeToolbar project={toolbarProject} phase="idle" onRefresh={handleRefresh} nodes={flowNodes} />
+      <ForgeToolbar
+        project={toolbarProject}
+        phase={phase}
+        onRefresh={handleRefresh}
+        onRunPipeline={liveProject?.id ? handleRunPipeline : undefined}
+        runProgress={runProgress}
+        nodes={flowNodes}
+      />
 
       <LibraryPanel
         nodes={flowNodes}
@@ -610,6 +737,7 @@ function PipelineApp({
         onLog={setLog}
         onProjectCreated={handleProjectCreated}
         onApproveNode={handleApproveNode}
+        nodeContext={nodeContext}
       />
 
       <ForgeStatusBar

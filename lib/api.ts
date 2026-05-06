@@ -1,4 +1,4 @@
-import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser, StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig } from './types'
+import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser, StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig, PromptConfig } from './types'
 import type { InputContext } from './nodeExecutionContext'
 
 export type { ScriptFile, CodeGenerationResult }
@@ -522,6 +522,21 @@ export async function updateAdminWorkflow(id: string, payload: Partial<ComfyUIWo
 
 export async function deleteAdminWorkflow(id: string): Promise<void> {
   await request(`/api/admin/comfyui-workflows/${id}`, { method: 'DELETE' })
+}
+
+// ─── Admin: prompt configs ────────────────────────────────────────────────────
+
+export async function getAdminPromptConfigs(): Promise<PromptConfig[]> {
+  const data = await request<{ success: boolean; prompt_configs: PromptConfig[] }>('/api/admin/prompt-configs')
+  return data.prompt_configs
+}
+
+export async function updateAdminPromptConfig(key: string, payload: { r2_path?: string | null; description?: string | null }): Promise<PromptConfig> {
+  const data = await request<{ success: boolean; prompt_config: PromptConfig }>(`/api/admin/prompt-configs/${key}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+  return data.prompt_config
 }
 
 export async function saveCanvasLayout(projectId: string, layout: unknown): Promise<void> {

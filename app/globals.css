@@ -312,6 +312,7 @@ html, body {
   transition: border-color 150ms, box-shadow 150ms;
   cursor: default;
   user-select: none;
+  position: relative;
 }
 .forge-node:hover {
   border-color: color-mix(in oklch, var(--node-color) 40%, var(--line-2));

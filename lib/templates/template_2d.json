@@ -1,7 +1,7 @@
 {
   "id": "2d_game",
   "name": "2D Game",
-  "description": "Pipeline para juegos 2D. Flujo real de producción: dirección visual → arte → audio → código → test.",
+  "description": "Pipeline for 2D games. Actual production flow: visual direction → art → audio → code → testing.",
 
   "nodes": [
     { "id": "visual_guide",  "label": "Visual Guide",  "category": "design", "icon": "VG", "stepKey": "visual_guide",  "comingSoon": false,  "x": 680,  "y": 280,  "description": "Art direction, palette & style rules",       "inputLabel": "GDD Draft",    "outputLabel": "Style Sheet"   },
@@ -28,10 +28,14 @@
     { "id": "e-gdd-level",      "source": "gdd",         "target": "level_design"  },
     { "id": "e-sprites-code",   "source": "sprites",      "target": "source_code"  },
     { "id": "e-level-code",     "source": "level_design", "target": "source_code"  },
+    { "id": "e-uiux-code",      "source": "uiux",         "target": "source_code"  },
+    { "id": "e-hud-code",       "source": "hud",          "target": "source_code"  },
     { "id": "e-code-sfx",       "source": "source_code",  "target": "sfx"          },
     { "id": "e-gdd-sfx",        "source": "gdd",         "target": "sfx"           },
     { "id": "e-code-play",      "source": "source_code",  "target": "playtesting"  },
     { "id": "e-code-export",    "source": "source_code",  "target": "export"       },
+    { "id": "e-bg-export",      "source": "backgrounds",  "target": "export"       },
+    { "id": "e-icons-export",   "source": "icons",        "target": "export"       },
     { "id": "e-music-export",   "source": "music",        "target": "export"       },
     { "id": "e-sfx-export",     "source": "sfx",          "target": "export"       }
   ]

@@ -12,19 +12,22 @@ import type {
 import {
   validateIdea, generateGDD, approveStep1,
   generateSprites, approveStep2,
-  generateLevels, approveStep3,
+  generateLevels,
   generateCode, approveStep4,
   generateAudio, approveStep5,
   exportProject,
   generateVisualGuide, generateBackgrounds, generateSfx, generateConceptArt,
-  generateUIUX, generateIcons, generateHUD, approveNode,
+  generateUIUX, generateIcons, generateHUD, generateArtDirectionIntake, approveNode,
+  generateSplashArt, generateMarketing,
   generateModeling, generateCharaters, generateVfx, generateTexturing,
   generateRigging, generateLighting, generateAnimation, generateCinematics, generateVoice,
   assetUrl, getProjectMembers, requestNodeReview, submitReview, getMemberByAuth,
   type VisualGuide, type BackgroundPreview, type SfxEntry, type ConceptArtResult,
-  type UIUXResult, type IconsResult, type HUDResult,
+  type UIUXResult, type IconsResult, type HUDResult, type ArtDirectionIntakeResult,
+  type SplashArtResult, type MarketingResult,
 } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
+import type { InputContext } from '@/lib/nodeExecutionContext'
 
 /* ─── Review actions (approve / request peer review / reviewer view) ─── */
 
@@ -94,9 +97,7 @@ function ReviewActions({
     setShowPicker(true)
   }
 
-  if (approved) return (
-    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
-  )
+  if (approved) return null
 
   if (isReviewer && pendingJob?.review_status === 'pending') return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -174,13 +175,24 @@ function ReviewActions({
 
 /* ─── Shared sub-components ─── */
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function SectionTitle({ children, approved }: { children: React.ReactNode; approved?: boolean }) {
   return (
-    <div style={{
-      fontFamily: 'var(--font-mono)', fontSize: 10,
-      textTransform: 'uppercase', letterSpacing: '0.08em',
-      color: 'var(--text-3)', marginBottom: 6,
-    }}>{children}</div>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+      <div style={{
+        fontFamily: 'var(--font-mono)', fontSize: 10,
+        textTransform: 'uppercase', letterSpacing: '0.08em',
+        color: 'var(--text-3)',
+      }}>{children}</div>
+      {approved && (
+        <span style={{
+          fontFamily: 'var(--font-mono)', fontSize: 9,
+          color: 'var(--cat-code)',
+          background: 'color-mix(in oklch, var(--cat-code) 12%, transparent)',
+          border: '1px solid color-mix(in oklch, var(--cat-code) 30%, transparent)',
+          borderRadius: 99, padding: '2px 7px',
+        }}>✓ approved</span>
+      )}
+    </div>
   )
 }
 
@@ -229,11 +241,24 @@ function ActionBtn({
   )
 }
 
-function MonoRow({ k, v, accent }: { k: string; v: string; accent?: boolean }) {
+/** Safe coerce: renders any LLM value as a string. Objects become their most useful scalar field. */
+function ss(v: unknown): string {
+  if (v == null) return '–'
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  if (Array.isArray(v)) return v.map(ss).join(', ')
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    return String(o.name ?? o.label ?? o.description ?? o.title ?? o.value ?? JSON.stringify(v))
+  }
+  return String(v)
+}
+
+function MonoRow({ k, v, accent }: { k: string; v: unknown; accent?: boolean }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: 10, gap: 6 }}>
       <span style={{ color: 'var(--text-3)' }}>{k}</span>
-      <span style={{ color: accent ? 'var(--node-color, var(--text-1))' : 'var(--text-1)', textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{v}</span>
+      <span style={{ color: accent ? 'var(--node-color, var(--text-1))' : 'var(--text-1)', textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{ss(v)}</span>
     </div>
   )
 }
@@ -676,7 +701,7 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
                 <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-0)' }}>{l.name}</span>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: DIFF_COLOR[l.difficulty] ?? 'var(--text-3)', background: `color-mix(in oklch, ${DIFF_COLOR[l.difficulty] ?? 'var(--text-3)'} 10%, var(--bg-3))`, padding: '2px 7px', borderRadius: 3 }}>{l.difficulty}</span>
               </div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 4 }}>{l.environment}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 4 }}>{typeof l.environment === 'object' && l.environment != null ? (l.environment as Record<string,string>).theme ?? (l.environment as Record<string,string>).type ?? '' : l.environment}</div>
               <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>{l.description}</div>
               {l.objectives && l.objectives.length > 0 && (
                 <div style={{ marginTop: 5 }}>
@@ -827,9 +852,10 @@ type NewGamePhase = 'form' | 'validating' | 'generating' | 'review'
 interface NewGamePanelProps {
   onProjectCreated: (project: Project) => void
   onLog: (msg: string) => void
+  memberId?: string | null
 }
 
-function NewGamePanel({ onProjectCreated, onLog }: NewGamePanelProps) {
+function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) {
   const [phase, setPhase] = useState<NewGamePhase>('form')
   const [approving, setApproving] = useState(false)
   const [showGDDPreview, setShowGDDPreview] = useState(false)
@@ -903,7 +929,7 @@ function NewGamePanel({ onProjectCreated, onLog }: NewGamePanelProps) {
     if (!gdd) return
     setApproving(true)
     setError(null)
-    const payload = { gdd, prompt: buildFullPrompt(), meta }
+    const payload = { gdd, prompt: buildFullPrompt(), meta, member_id: memberId ?? undefined }
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         if (attempt > 1) {
@@ -1067,16 +1093,17 @@ function SpriteCard({ name, role, prompt, url }: { name: string; role: string; p
   )
 }
 
-function SpritesPanel({ project, onRefresh, onLog, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean }) {
+function SpritesPanel({ project, onRefresh, onLog, locked, memberId, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean; memberId?: string | null; nodeContext?: InputContext }) {
   const [busy, setBusy] = useState(false)
   const [sprites, setSprites] = useState<SpritePreview[] | null>(null)
-  const approved = (project.current_wizard_step ?? 0) > 2
+  const stored = (project.concept as unknown as { pipeline?: { sprites?: { approved?: boolean } } } | null)?.pipeline?.sprites
+  const approved = !!stored?.approved
 
   async function generate() {
     setBusy(true)
     try {
       onLog('Generating sprites… (this may take 30–60s)')
-      const res = await generateSprites(project.id)
+      const res = await generateSprites(project.id, nodeContext)
       setSprites(res)
       onLog('Sprites ready — review and approve')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1084,22 +1111,22 @@ function SpritesPanel({ project, onRefresh, onLog, locked }: { project: Project;
   }
 
   async function approve() {
-    if (!sprites && !project.concept?.characters) return
+    if (!sprites && !project.concept?.pipeline?.gdd?.characters) return
     setBusy(true)
     try {
-      const chars = project.concept?.characters ?? []
+      const chars = project.concept?.pipeline?.gdd?.characters ?? []
       const payload = sprites ?? chars.map(c => ({
         character_name: c.name, character_role: c.role,
         sprite_prompt: c.sprite_prompt, preview_url: '', placeholder: true,
       }))
-      await approveStep2(project.id, payload)
+      await approveStep2(project.id, payload, memberId ?? undefined)
       onRefresh()
       onLog('Sprites approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
     finally { setBusy(false) }
   }
 
-  const list = sprites ?? (approved ? project.concept?.characters?.map(c => ({
+  const list = sprites ?? (approved ? project.concept?.pipeline?.gdd?.characters?.map(c => ({
     character_name: c.name, character_role: c.role, sprite_prompt: c.sprite_prompt,
     preview_url: c.preview_url ?? '',
     placeholder: !c.preview_url,
@@ -1107,10 +1134,10 @@ function SpritesPanel({ project, onRefresh, onLog, locked }: { project: Project;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>Sprites</SectionTitle>
-      <MonoRow k="art style" v={project.concept?.art_direction?.style ?? '–'} accent />
-      <MonoRow k="resolution" v={project.concept?.art_direction?.sprite_resolution ?? '–'} />
-      <MonoRow k="characters" v={String(project.concept?.characters?.length ?? 0)} />
+      <SectionTitle approved={approved}>Sprites</SectionTitle>
+      <MonoRow k="art style" v={project.concept?.pipeline?.gdd?.art_direction?.style ?? '–'} accent />
+      <MonoRow k="resolution" v={project.concept?.pipeline?.gdd?.art_direction?.sprite_resolution ?? '–'} />
+      <MonoRow k="characters" v={String(project.concept?.pipeline?.gdd?.characters?.length ?? 0)} />
       <Divider />
       {list && list.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1166,7 +1193,11 @@ function LevelCard({ level, mechNames }: { level: LevelItem; mechNames: Record<s
           )}
         </div>
         {level.environment && (
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 4 }}>{level.environment}</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 4 }}>
+            {typeof level.environment === 'object'
+              ? `${(level.environment as Record<string,string>).theme ?? ''} · ${(level.environment as Record<string,string>).type ?? ''} · ${(level.environment as Record<string,string>).lighting ?? ''}`
+              : level.environment}
+          </div>
         )}
         {level.introduced_mechanics && level.introduced_mechanics.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3 }}>
@@ -1182,21 +1213,23 @@ function LevelCard({ level, mechNames }: { level: LevelItem; mechNames: Record<s
   )
 }
 
-function LevelsPanel({ project, onRefresh, onLog, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean }) {
+function LevelsPanel({ project, onRefresh, onLog, locked, memberId, nodeContext, onResult }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean; memberId?: string | null; nodeContext?: InputContext; onResult?: (d: unknown) => void }) {
   const [busy, setBusy] = useState(false)
   const [levels, setLevels] = useState<LevelItem[] | null>(null)
-  const approved = (project.current_wizard_step ?? 0) > 3
+  const stored = (project.concept as unknown as { pipeline?: { levels?: { approved?: boolean } } } | null)?.pipeline?.levels
+  const approved = !!stored?.approved
 
   const mechNames: Record<string, string> = Object.fromEntries(
-    (project.concept?.mechanics ?? []).map((m: { id: string; name: string }) => [m.id, m.name])
+    (project.concept?.pipeline?.gdd?.mechanics ?? []).map((m: { id: string; name: string }) => [m.id, m.name])
   )
 
   async function generate() {
     setBusy(true)
     try {
       onLog('Generating levels… (this may take 30–90s)')
-      const res = await generateLevels(project.id)
+      const res = await generateLevels(project.id, nodeContext)
       setLevels(res as LevelItem[])
+      onResult?.(res)
       onLog('Levels ready — review and approve')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
     finally { setBusy(false) }
@@ -1205,20 +1238,25 @@ function LevelsPanel({ project, onRefresh, onLog, locked }: { project: Project; 
   async function approve() {
     setBusy(true)
     try {
-      await approveStep3(project.id, levels ?? project.concept?.levels ?? [])
+      const levelsToApprove = levels ?? (project.concept?.pipeline?.gdd?.levels as LevelItem[] ?? [])
+      await approveNode(project.id, 'levels', { levels: levelsToApprove }, memberId ?? undefined)
       onRefresh()
       onLog('Levels approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
     finally { setBusy(false) }
   }
 
-  const displayList: LevelItem[] = levels ?? (project.concept?.levels ?? [])
+  const pipelineLevels = (project.concept as Record<string, unknown> | null)?.pipeline as Record<string, unknown> | undefined
+  const displayList: LevelItem[] = levels
+    ?? (pipelineLevels?.levels as { levels?: LevelItem[] } | undefined)?.levels
+    ?? (project.concept?.pipeline?.gdd?.levels as LevelItem[] | undefined)
+    ?? []
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>Level Design</SectionTitle>
+      <SectionTitle approved={approved}>Level Design</SectionTitle>
       <MonoRow k="total levels" v={String(displayList.length)} accent />
-      <MonoRow k="camera" v={project.concept?.project?.camera ?? '–'} />
+      <MonoRow k="camera" v={project.concept?.pipeline?.gdd?.project?.camera ?? '–'} />
       <Divider />
       {displayList.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1230,21 +1268,22 @@ function LevelsPanel({ project, onRefresh, onLog, locked }: { project: Project; 
       {!approved && !locked && (
         <ActionBtn label={busy ? '⟳ Generating levels…' : '▶ Generate levels'} onClick={generate} variant="run" disabled={busy} />
       )}
-      <ReviewActions project={project} stepKey="levels" nodeData={levels} hasData={!!levels} approved={approved} busy={busy} approveLabel="✓ Approve levels" onApprove={approve} />
+      <ReviewActions project={project} stepKey="levels" nodeData={levels ? { levels } : null} hasData={!!levels} approved={approved} busy={busy} approveLabel="✓ Approve levels" onApprove={approve} />
     </div>
   )
 }
 
-function AudioPanel({ project, onRefresh, onLog, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean }) {
+function AudioPanel({ project, onRefresh, onLog, locked, memberId, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean; memberId?: string | null; nodeContext?: InputContext }) {
   const [busy, setBusy] = useState(false)
   const [audio, setAudio] = useState<{ sfx: unknown[]; music: unknown[] } | null>(null)
-  const approved = (project.current_wizard_step ?? 0) > 5
+  const stored = (project.concept as unknown as { pipeline?: { audio?: { approved?: boolean } } } | null)?.pipeline?.audio
+  const approved = !!stored?.approved
 
   async function generate() {
     setBusy(true)
     try {
       onLog('Generating audio…')
-      const res = await generateAudio(project.id)
+      const res = await generateAudio(project.id, nodeContext)
       setAudio(res)
       onLog('Audio ready — review and approve')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1254,7 +1293,7 @@ function AudioPanel({ project, onRefresh, onLog, locked }: { project: Project; o
   async function approve() {
     setBusy(true)
     try {
-      await approveStep5(project.id, audio ?? { sfx: [], music: [] })
+      await approveStep5(project.id, audio ?? { sfx: [], music: [] }, memberId ?? undefined)
       onRefresh()
       onLog('Audio approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1266,10 +1305,10 @@ function AudioPanel({ project, onRefresh, onLog, locked }: { project: Project; o
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>Audio Pack</SectionTitle>
-      <MonoRow k="mood"  v={project.concept?.audio_direction?.music_mood  ?? '–'} accent />
-      <MonoRow k="style" v={project.concept?.audio_direction?.music_style ?? '–'} />
-      <MonoRow k="adaptive" v={project.concept?.audio_direction?.adaptive_audio ?? '–'} />
+      <SectionTitle approved={approved}>Audio Pack</SectionTitle>
+      <MonoRow k="mood"  v={project.concept?.pipeline?.gdd?.audio_direction?.music_mood  ?? '–'} accent />
+      <MonoRow k="style" v={project.concept?.pipeline?.gdd?.audio_direction?.music_style ?? '–'} />
+      <MonoRow k="adaptive" v={project.concept?.pipeline?.gdd?.audio_direction?.adaptive_audio ?? '–'} />
       <Divider />
       {audio && (
         <>
@@ -1313,21 +1352,21 @@ function AudioPanel({ project, onRefresh, onLog, locked }: { project: Project; o
   )
 }
 
-function CodePanel({ project, onRefresh, onLog, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean }) {
+function CodePanel({ project, onRefresh, onLog, locked, memberId, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; locked?: boolean; memberId?: string | null; nodeContext?: InputContext }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ engine: string; files: ScriptFile[]; architecture_md: string } | null>(null)
-  const [engine, setEngine] = useState(project.target_engine ?? project.concept?.development?.suggested_engine?.toLowerCase() ?? 'godot')
-  const approved = (project.current_wizard_step ?? 0) > 4
+  const [engine, setEngine] = useState(project.target_engine ?? project.concept?.pipeline?.gdd?.development?.suggested_engine?.toLowerCase() ?? 'godot')
 
-  const mechanics = project.concept?.mechanics ?? []
-  const suggested = project.concept?.development?.suggested_engine
+  const mechanics = project.concept?.pipeline?.gdd?.mechanics ?? []
+  const suggested = project.concept?.pipeline?.gdd?.development?.suggested_engine
   const storedCode = project.concept?.pipeline?.code as ({ engine: string; files: ScriptFile[]; architecture_md: string; approved?: boolean }) | undefined
+  const approved = !!storedCode?.approved
 
   async function generate() {
     setBusy(true)
     try {
       onLog('Generating code…')
-      const res = await generateCode(project.id)
+      const res = await generateCode(project.id, nodeContext)
       setResult(res)
       onLog(`Code generated (${res.files.length} files) — review and approve`)
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1339,7 +1378,7 @@ function CodePanel({ project, onRefresh, onLog, locked }: { project: Project; on
     if (!data) return
     setBusy(true)
     try {
-      await approveStep4(project.id, data)
+      await approveStep4(project.id, data, memberId ?? undefined)
       onRefresh()
       onLog('Code approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1348,7 +1387,7 @@ function CodePanel({ project, onRefresh, onLog, locked }: { project: Project; on
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>Source Code</SectionTitle>
+      <SectionTitle approved={approved}>Source Code</SectionTitle>
       {!approved && (
         <Field label="Target Engine">
           <select value={engine} onChange={e => setEngine(e.target.value)} style={SELECT_STYLE} disabled={busy}>
@@ -1448,27 +1487,30 @@ function ExportPanel({ project, onRefresh, onLog }: { project: Project; onRefres
 }
 
 function GDDSummaryPanel({ project }: { project: Project }) {
-  const gdd = project.concept
+  const gdd = project.concept?.pipeline?.gdd
   const [showInput, setShowInput] = useState(false)
   const saved = loadGDDInput(project.id)
 
   if (!gdd) return null
 
+  const gddApproved = (project.current_wizard_step ?? 0) > 1
+    || (project.generation_jobs ?? []).some(j => j.current_step === 'step_1_concept' && j.status === 'approved')
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>Game Design Doc</SectionTitle>
-      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-0)' }}>{gdd.project.name}</div>
-      <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55 }}>{gdd.project.elevator_pitch}</div>
+      <SectionTitle approved={gddApproved}>Game Design Doc</SectionTitle>
+      <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-0)' }}>{gdd.project?.name}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55 }}>{gdd.project?.elevator_pitch}</div>
       <Divider />
-      <MonoRow k="genre"  v={gdd.project.genre} accent />
-      <MonoRow k="tone"   v={gdd.project.tone} />
-      <MonoRow k="engine" v={gdd.development.suggested_engine} />
-      <MonoRow k="scope"  v={gdd.development.estimated_scope} />
+      <MonoRow k="genre"  v={gdd.project?.genre ?? '–'} accent />
+      <MonoRow k="tone"   v={gdd.project?.tone ?? '–'} />
+      <MonoRow k="engine" v={gdd.development?.suggested_engine ?? '–'} />
+      <MonoRow k="scope"  v={gdd.development?.estimated_scope ?? '–'} />
       <Divider />
-      <MonoRow k="mechanics"  v={String(gdd.mechanics.length)} />
-      <MonoRow k="levels"     v={String(gdd.levels.length)} />
-      <MonoRow k="characters" v={String(gdd.characters.length)} />
-      {gdd.project.core_loop && (
+      <MonoRow k="mechanics"  v={String(gdd.mechanics?.length ?? 0)} />
+      <MonoRow k="levels"     v={String(gdd.levels?.length ?? 0)} />
+      <MonoRow k="characters" v={String(gdd.characters?.length ?? 0)} />
+      {gdd.project?.core_loop && (
         <>
           <Divider />
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 2 }}>CORE LOOP</div>
@@ -1528,33 +1570,251 @@ function ColorSwatch({ hex, name, usage }: { hex: string; name: string; usage: s
   )
 }
 
-function RuleList({ rules }: { rules: string[] }) {
+function RuleList({ rules }: { rules: unknown[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {rules.map((r, i) => (
         <div key={i} style={{ fontSize: 10, color: 'var(--text-1)', lineHeight: 1.5, display: 'flex', gap: 5 }}>
           <span style={{ color: 'var(--node-color, var(--text-3))', flexShrink: 0 }}>›</span>
-          <span>{r}</span>
+          <span>{ss(r)}</span>
         </div>
       ))}
     </div>
   )
 }
 
-function VisualGuidePanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
+/* ─── Art Direction Intake Panel ─── */
+function ArtDirectionIntakePanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<ArtDirectionIntakeResult | null>(null)
+  const [tab, setTab] = useState<'world' | 'visual' | 'ui'>('world')
+
+  const stored = project.concept?.pipeline?.art_direction_intake as (ArtDirectionIntakeResult & { approved?: boolean }) | undefined
+  const [localApproved, setLocalApproved] = useState(false)
+  const approved = localApproved || !!stored?.approved
+  const display = result ?? (stored ?? null)
+
+  async function generate() {
+    setBusy(true)
+    setLocalApproved(false)
+    try {
+      onLog('Generating art direction intake…')
+      const data = await generateArtDirectionIntake(project.id, nodeContext)
+      setResult(data)
+      onResult?.(data)
+      onLog('Art direction intake ready — review and approve')
+    } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
+    finally { setBusy(false) }
+  }
+
+  async function approve() {
+    const data = result ?? stored
+    if (!data) return
+    setBusy(true)
+    try {
+      await approveNode(project.id, 'art_direction_intake', data)
+      setLocalApproved(true)
+      onRefresh()
+      onLog('Art direction intake approved')
+    } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
+    finally { setBusy(false) }
+  }
+
+  const TABS = [
+    { id: 'world' as const, label: 'World' },
+    { id: 'visual' as const, label: 'Direction' },
+    { id: 'ui'    as const, label: 'UI & Mkt' },
+  ]
+
+  const gddCtx = project.concept?.pipeline?.gdd
+  const hasGDD = !!(gddCtx?.project?.name)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <SectionTitle approved={approved}>Art Direction Intake</SectionTitle>
+
+      {hasGDD ? (
+        <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>GDD Context</div>
+          <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-0)' }}>{gddCtx?.project?.name}</div>
+          <MonoRow k="genre"  v={gddCtx?.project?.genre ?? '–'} accent />
+          <MonoRow k="tone"   v={(gddCtx?.project?.tone ?? '–').slice(0, 100)} />
+          <MonoRow k="style"  v={gddCtx?.art_direction?.style ?? '–'} />
+          <MonoRow k="palette" v={gddCtx?.art_direction?.palette ?? '–'} />
+          <Divider />
+          <div style={{ display: 'flex', gap: 12 }}>
+            <MonoRow k="chars"     v={String(gddCtx?.characters?.length ?? 0)} />
+            <MonoRow k="levels"    v={String(gddCtx?.levels?.length ?? 0)} />
+            <MonoRow k="mechanics" v={String(gddCtx?.mechanics?.length ?? 0)} />
+          </div>
+        </div>
+      ) : (
+        <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>GDD not found — approve GDD first</div>
+      )}
+      <Divider />
+
+      {display && (
+        <>
+          {display.description && (
+            <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.6, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '8px 10px' }}>
+              {display.description}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--line)' }}>
+            {TABS.map(t => {
+              const active = tab === t.id
+              return (
+                <button key={t.id} onClick={() => setTab(t.id)} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  padding: '5px 10px', fontFamily: 'var(--font-sans)', fontSize: 10,
+                  fontWeight: active ? 600 : 400,
+                  color: active ? 'var(--text-0)' : 'var(--text-3)',
+                  borderBottom: active ? '2px solid var(--node-color, var(--cat-design))' : '2px solid transparent',
+                  marginBottom: -1,
+                }}>{t.label}</button>
+              )
+            })}
+          </div>
+
+          {tab === 'world' && display.world_summary && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {display.world_summary.core_fantasy && (
+                <div style={{ fontSize: 10, color: 'var(--text-1)', lineHeight: 1.6, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '8px 10px' }}>
+                  {display.world_summary.core_fantasy}
+                </div>
+              )}
+              {display.world_summary.tone?.length > 0 && (
+                <>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Tone</div>
+                  <RuleList rules={display.world_summary.tone} />
+                </>
+              )}
+              {display.world_summary.themes?.length > 0 && (
+                <>
+                  <Divider />
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Themes</div>
+                  <RuleList rules={display.world_summary.themes} />
+                </>
+              )}
+              {display.world_summary.contradictions?.length > 0 && (
+                <>
+                  <Divider />
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Contradictions</div>
+                  <RuleList rules={display.world_summary.contradictions} />
+                </>
+              )}
+            </div>
+          )}
+
+          {tab === 'visual' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {display.art_direction_pillars?.length > 0 && (
+                <>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Pillars</div>
+                  {display.art_direction_pillars.map((p, i) => (
+                    <div key={i} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '7px 10px' }}>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, color: 'var(--cat-design)', marginBottom: 3 }}>{p.name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>{p.description}</div>
+                    </div>
+                  ))}
+                </>
+              )}
+              {display.visual_keywords && (
+                <>
+                  <Divider />
+                  {(Object.entries(display.visual_keywords) as [string, string[]][]).map(([cat, tags]) =>
+                    tags?.length > 0 ? (
+                      <div key={cat}>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>{cat}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {tags.map((tag, i) => (
+                            <span key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--cat-design)', background: 'color-mix(in oklch, var(--cat-design) 10%, var(--bg-3))', border: '1px solid color-mix(in oklch, var(--cat-design) 25%, transparent)', padding: '2px 7px', borderRadius: 3 }}>{tag}</span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null
+                  )}
+                </>
+              )}
+              {display.visual_references?.titles?.length > 0 && (
+                <>
+                  <Divider />
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>References</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {display.visual_references.titles.map((r, i) => (
+                      <span key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-1)', background: 'var(--bg-2)', border: '1px solid var(--line-2)', padding: '2px 7px', borderRadius: 3 }}>{r}</span>
+                    ))}
+                  </div>
+                  {display.visual_references.rationale && <MonoRow k="why" v={display.visual_references.rationale} />}
+                </>
+              )}
+            </div>
+          )}
+
+          {tab === 'ui' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {display.ui_visual_direction && (
+                <>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>UI Direction</div>
+                  <MonoRow k="style"       v={display.ui_visual_direction.style} />
+                  <MonoRow k="palette"     v={display.ui_visual_direction.palette_notes} />
+                  <MonoRow k="typography"  v={display.ui_visual_direction.typography_direction} />
+                  <MonoRow k="iconography" v={display.ui_visual_direction.iconography_style} />
+                  <MonoRow k="hud"         v={display.ui_visual_direction.hud_philosophy} />
+                  <MonoRow k="menu feel"   v={display.ui_visual_direction.menu_feel} />
+                </>
+              )}
+              {display.splash_and_marketing && (
+                <>
+                  <Divider />
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Splash & Marketing</div>
+                  <MonoRow k="key art"    v={display.splash_and_marketing.key_art_direction} />
+                  <MonoRow k="composition" v={display.splash_and_marketing.composition_notes} />
+                  <MonoRow k="brand"      v={display.splash_and_marketing.brand_identity} />
+                  <MonoRow k="social"     v={display.splash_and_marketing.social_format_guidance} />
+                </>
+              )}
+              {display.risks?.length > 0 && (
+                <>
+                  <Divider />
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--cat-output)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Risks</div>
+                  {display.risks.map((r, i) => (
+                    <div key={i} style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>
+                      <span style={{ color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 9 }}>[{r.type}] </span>{r.risk}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {!approved && !locked && (
+        <ActionBtn label={busy ? '⟳ Generating…' : '▶ Generate art direction'} onClick={generate} variant="run" disabled={busy} />
+      )}
+      <ReviewActions project={project} stepKey="art_direction_intake" nodeData={result} hasData={!!result || !!stored} approved={approved} busy={busy} approveLabel="✓ Approve art direction" onApprove={approve} />
+    </div>
+  )
+}
+
+function VisualGuidePanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
   const [busy, setBusy] = useState(false)
   const [guide, setGuide] = useState<VisualGuide | null>(null)
   const [tab, setTab] = useState<'palette' | 'rules' | 'refs'>('palette')
 
   const stored = project.concept?.pipeline?.visual_guide as (VisualGuide & { approved?: boolean }) | undefined
-  const approved = !!stored?.approved
+  const [localApproved, setLocalApproved] = useState(false)
+  const approved = localApproved || !!stored?.approved
   const display = guide ?? (stored ? stored as VisualGuide : null)
 
   async function generate() {
     setBusy(true)
+    setLocalApproved(false)
     try {
       onLog('Generating visual style guide…')
-      const result = await generateVisualGuide(project.id)
+      const result = await generateVisualGuide(project.id, nodeContext)
       setGuide(result)
       onResult?.(result)
       onLog('Visual guide ready — review and approve')
@@ -1568,6 +1828,7 @@ function VisualGuidePanel({ project, onRefresh, onLog, onResult, locked }: { pro
     setBusy(true)
     try {
       await approveNode(project.id, 'visual_guide', data)
+      setLocalApproved(true)
       onRefresh()
       onLog('Visual guide approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1582,9 +1843,9 @@ function VisualGuidePanel({ project, onRefresh, onLog, onResult, locked }: { pro
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>Visual Style Guide</SectionTitle>
-      <MonoRow k="art style" v={project.concept?.art_direction?.style ?? '–'} accent />
-      <MonoRow k="palette" v={project.concept?.art_direction?.palette ?? '–'} />
+      <SectionTitle approved={approved}>Visual Style Guide</SectionTitle>
+      <MonoRow k="art style" v={project.concept?.pipeline?.gdd?.art_direction?.style ?? '–'} accent />
+      <MonoRow k="palette" v={project.concept?.pipeline?.gdd?.art_direction?.palette ?? '–'} />
       <Divider />
 
       {display && (
@@ -1715,8 +1976,8 @@ function BgCard({ bg }: { bg: BackgroundPreview }) {
         />
       )}
       <div style={{ padding: '6px 10px' }}>
-        <div style={{ fontWeight: 600, fontSize: 11, color: 'var(--text-0)' }}>{bg.level_name}</div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', marginTop: 2 }}>{bg.environment}</div>
+        <div style={{ fontWeight: 600, fontSize: 11, color: 'var(--text-0)' }}>{ss(bg.level_name)}</div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', marginTop: 2 }}>{ss(bg.environment)}</div>
         {bg.layers && bg.layers.length > 0 && (
           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 4 }}>
             {bg.layers.map((l, i) => (
@@ -1729,19 +1990,21 @@ function BgCard({ bg }: { bg: BackgroundPreview }) {
   )
 }
 
-function BackgroundsPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
+function BackgroundsPanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
   const [busy, setBusy] = useState(false)
   const [backgrounds, setBackgrounds] = useState<BackgroundPreview[] | null>(null)
 
   const stored = project.concept?.pipeline?.backgrounds as ({ items?: BackgroundPreview[]; approved?: boolean }) | undefined
-  const approved = !!stored?.approved
+  const [localApproved, setLocalApproved] = useState(false)
+  const approved = localApproved || !!stored?.approved
   const display = backgrounds ?? (stored ? stored.items ?? null : null)
 
   async function generate() {
     setBusy(true)
+    setLocalApproved(false)
     try {
       onLog('Generating backgrounds… (may take 30–60s)')
-      const result = await generateBackgrounds(project.id)
+      const result = await generateBackgrounds(project.id, nodeContext)
       setBackgrounds(result)
       onResult?.({ items: result })
       onLog('Backgrounds ready — review and approve')
@@ -1755,19 +2018,20 @@ function BackgroundsPanel({ project, onRefresh, onLog, onResult, locked }: { pro
     setBusy(true)
     try {
       await approveNode(project.id, 'backgrounds', { items })
+      setLocalApproved(true)
       onRefresh()
       onLog('Backgrounds approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
     finally { setBusy(false) }
   }
 
-  const levels = project.concept?.levels ?? []
+  const levels = project.concept?.pipeline?.gdd?.levels ?? []
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>Backgrounds</SectionTitle>
+      <SectionTitle approved={approved}>Backgrounds</SectionTitle>
       <MonoRow k="levels" v={String(levels.length)} accent />
-      <MonoRow k="style" v={project.concept?.art_direction?.style ?? '–'} />
+      <MonoRow k="style" v={project.concept?.pipeline?.gdd?.art_direction?.style ?? '–'} />
       <Divider />
       {display && display.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1812,20 +2076,22 @@ function ConceptCard({ item, size = 'char' }: { item: { name: string; prompt: st
   )
 }
 
-function ConceptArtPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
+function ConceptArtPanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ConceptArtResult | null>(null)
   const [tab, setTab] = useState<'chars' | 'envs'>('chars')
 
   const stored = project.concept?.pipeline?.concept_art as (ConceptArtResult & { approved?: boolean }) | undefined
-  const approved = !!stored?.approved
+  const [localApproved, setLocalApproved] = useState(false)
+  const approved = localApproved || !!stored?.approved
   const display = result ?? (stored ? stored as ConceptArtResult : null)
 
   async function generate() {
     setBusy(true)
+    setLocalApproved(false)
     try {
       onLog('Generating concept art… (may take 30–60s)')
-      const res = await generateConceptArt(project.id)
+      const res = await generateConceptArt(project.id, nodeContext)
       setResult(res)
       onResult?.(res)
       onLog(`Concept art ready (${res.character_concepts.length} chars, ${res.environment_concepts.length} envs) — review and approve`)
@@ -1839,6 +2105,7 @@ function ConceptArtPanel({ project, onRefresh, onLog, onResult, locked }: { proj
     setBusy(true)
     try {
       await approveNode(project.id, 'concept_art', data)
+      setLocalApproved(true)
       onRefresh()
       onLog('Concept art approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1852,9 +2119,9 @@ function ConceptArtPanel({ project, onRefresh, onLog, onResult, locked }: { proj
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>Concept Art</SectionTitle>
-      <MonoRow k="characters" v={String(project.concept?.characters?.length ?? 0)} accent />
-      <MonoRow k="environments" v={String(project.concept?.levels?.length ?? 0)} />
+      <SectionTitle approved={approved}>Concept Art</SectionTitle>
+      <MonoRow k="characters" v={String(project.concept?.pipeline?.gdd?.characters?.length ?? 0)} accent />
+      <MonoRow k="environments" v={String(project.concept?.pipeline?.gdd?.levels?.length ?? 0)} />
       <Divider />
 
       {display && (
@@ -1909,19 +2176,21 @@ const SFX_CAT_COLOR: Record<string, string> = {
   environment: 'var(--cat-gate)',
 }
 
-function SfxPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
+function SfxPanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ sfx_pack: SfxEntry[]; implementation_notes: string } | null>(null)
 
   const stored = project.concept?.pipeline?.sfx as ({ sfx_pack?: SfxEntry[]; implementation_notes?: string; approved?: boolean }) | undefined
-  const approved = !!stored?.approved
+  const [localApproved, setLocalApproved] = useState(false)
+  const approved = localApproved || !!stored?.approved
   const display = result ?? (stored ? { sfx_pack: stored.sfx_pack ?? [], implementation_notes: stored.implementation_notes ?? '' } : null)
 
   async function generate() {
     setBusy(true)
+    setLocalApproved(false)
     try {
       onLog('Generating SFX design…')
-      const res = await generateSfx(project.id)
+      const res = await generateSfx(project.id, nodeContext)
       setResult(res)
       onResult?.(res)
       onLog(`SFX pack ready (${res.sfx_pack.length} sounds) — review and approve`)
@@ -1935,6 +2204,7 @@ function SfxPanel({ project, onRefresh, onLog, onResult, locked }: { project: Pr
     setBusy(true)
     try {
       await approveNode(project.id, 'sfx', data)
+      setLocalApproved(true)
       onRefresh()
       onLog('SFX approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -1943,9 +2213,9 @@ function SfxPanel({ project, onRefresh, onLog, onResult, locked }: { project: Pr
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>SFX Pack</SectionTitle>
-      <MonoRow k="genre" v={project.concept?.project?.genre ?? project.genre ?? '–'} accent />
-      <MonoRow k="sfx notes" v={project.concept?.audio_direction?.sfx_notes ?? '–'} />
+      <SectionTitle approved={approved}>SFX Pack</SectionTitle>
+      <MonoRow k="genre" v={project.concept?.pipeline?.gdd?.project?.genre ?? project.genre ?? '–'} accent />
+      <MonoRow k="sfx notes" v={project.concept?.pipeline?.gdd?.audio_direction?.sfx_notes ?? '–'} />
       <Divider />
 
       {display && display.sfx_pack.length > 0 && (
@@ -1959,15 +2229,15 @@ function SfxPanel({ project, onRefresh, onLog, onResult, locked }: { project: Pr
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 2 }}>
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-audio)' }}>♪</span>
-                    <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ss(s.name)}</span>
                     <span style={{
                       fontFamily: 'var(--font-mono)', fontSize: 8,
-                      color: SFX_CAT_COLOR[s.category] ?? 'var(--text-3)',
-                      background: `color-mix(in oklch, ${SFX_CAT_COLOR[s.category] ?? 'var(--text-3)'} 10%, var(--bg-3))`,
+                      color: SFX_CAT_COLOR[ss(s.category)] ?? 'var(--text-3)',
+                      background: `color-mix(in oklch, ${SFX_CAT_COLOR[ss(s.category)] ?? 'var(--text-3)'} 10%, var(--bg-3))`,
                       padding: '1px 5px', borderRadius: 2, flexShrink: 0
-                    }}>{s.category}</span>
+                    }}>{ss(s.category)}</span>
                   </div>
-                  <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>{s.trigger}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>{ss(s.trigger)}</div>
                 </div>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', flexShrink: 0, marginTop: 2 }}>
                   {s.duration_ms}ms{s.loop ? ' ∞' : ''}
@@ -1978,7 +2248,7 @@ function SfxPanel({ project, onRefresh, onLog, onResult, locked }: { project: Pr
           {display.implementation_notes && (
             <>
               <Divider />
-              <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, fontFamily: 'var(--font-sans)' }}>{display.implementation_notes}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, fontFamily: 'var(--font-sans)' }}>{ss(display.implementation_notes)}</div>
             </>
           )}
         </>
@@ -1989,9 +2259,6 @@ function SfxPanel({ project, onRefresh, onLog, onResult, locked }: { project: Pr
       )}
       {result && !approved && (
         <ActionBtn label={busy ? '⟳ Approving…' : '✓ Approve SFX'} onClick={approve} variant="approve" disabled={busy} />
-      )}
-      {approved && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ Approved</div>
       )}
     </div>
   )
@@ -2060,30 +2327,33 @@ function JsonDocRenderer({ data }: { data: unknown }) {
 }
 
 function JsonDocPanel({
-  title, stepKey, project, onRefresh, onLog, generateFn, summaryRows, onResult, locked,
+  title, stepKey, project, onRefresh, onLog, generateFn, summaryRows, onResult, locked, nodeContext,
 }: {
   title: string
   stepKey: string
   project: Project
   onRefresh: () => void
   onLog: (m: string) => void
-  generateFn: (id: string) => Promise<unknown>
+  generateFn: (id: string, ctx?: InputContext) => Promise<unknown>
   summaryRows: { k: string; v: string; accent?: boolean }[]
   onResult?: (d: unknown) => void
   locked?: boolean
+  nodeContext?: InputContext
 }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<unknown | null>(null)
+  const [localApproved, setLocalApproved] = useState(false)
 
   const stored = project.concept?.pipeline?.[stepKey] as ({ approved?: boolean } & Record<string, unknown>) | undefined
-  const approved = !!stored?.approved
+  const approved = localApproved || !!stored?.approved
   const display = result ?? (stored ? stored : null)
 
   async function generate() {
     setBusy(true)
+    setLocalApproved(false)
     try {
       onLog(`Generating ${title.toLowerCase()}…`)
-      const res = await generateFn(project.id)
+      const res = await generateFn(project.id, nodeContext)
       setResult(res)
       onResult?.(res)
       onLog(`${title} ready — review and approve`)
@@ -2097,6 +2367,7 @@ function JsonDocPanel({
     setBusy(true)
     try {
       await approveNode(project.id, stepKey, data)
+      setLocalApproved(true)
       onRefresh()
       onLog(`${title} approved`)
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -2105,7 +2376,7 @@ function JsonDocPanel({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>{title}</SectionTitle>
+      <SectionTitle approved={approved}>{title}</SectionTitle>
       {summaryRows.map(r => <MonoRow key={r.k} k={r.k} v={r.v} accent={r.accent} />)}
       <Divider />
       {display && <JsonDocRenderer data={display} />}
@@ -2121,7 +2392,7 @@ function JsonDocPanel({
 
 function DocPanel<T>({
   title, project, onRefresh, onLog,
-  storedKey, summaryRows, generateFn, renderContent, onResult, locked,
+  storedKey, summaryRows, generateFn, renderContent, onResult, locked, nodeContext,
 }: {
   title: string
   project: Project
@@ -2129,23 +2400,26 @@ function DocPanel<T>({
   onLog: (m: string) => void
   storedKey: string
   summaryRows: { k: string; v: string; accent?: boolean }[]
-  generateFn: (project_id: string) => Promise<T>
+  generateFn: (project_id: string, ctx?: InputContext) => Promise<T>
   renderContent: (data: T) => React.ReactNode
   onResult?: (d: unknown) => void
   locked?: boolean
+  nodeContext?: InputContext
 }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<T | null>(null)
+  const [localApproved, setLocalApproved] = useState(false)
 
   const stored = project.concept?.pipeline?.[storedKey] as (T & { approved?: boolean }) | undefined
-  const approved = !!stored?.approved
+  const approved = localApproved || !!stored?.approved
   const display = result ?? (stored ? stored as T : null)
 
   async function generate() {
     setBusy(true)
+    setLocalApproved(false)
     try {
       onLog(`Generating ${title.toLowerCase()}…`)
-      const res = await generateFn(project.id)
+      const res = await generateFn(project.id, nodeContext)
       setResult(res)
       onResult?.(res)
       onLog(`${title} ready — review and approve`)
@@ -2159,6 +2433,7 @@ function DocPanel<T>({
     setBusy(true)
     try {
       await approveNode(project.id, storedKey, data)
+      setLocalApproved(true)
       onRefresh()
       onLog(`${title} approved`)
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
@@ -2167,7 +2442,7 @@ function DocPanel<T>({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <SectionTitle>{title}</SectionTitle>
+      <SectionTitle approved={approved}>{title}</SectionTitle>
       {summaryRows.map(r => <MonoRow key={r.k} k={r.k} v={r.v} accent={r.accent} />)}
       <Divider />
       {display && renderContent(display)}
@@ -2179,7 +2454,7 @@ function DocPanel<T>({
   )
 }
 
-function UIUXPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
+function UIUXPanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
   return (
     <DocPanel<UIUXResult>
       title="UI/UX"
@@ -2190,10 +2465,11 @@ function UIUXPanel({ project, onRefresh, onLog, onResult, locked }: { project: P
       locked={locked}
       storedKey="uiux"
       summaryRows={[
-        { k: 'platform', v: project.concept?.project?.target_platform ?? 'PC', accent: true },
-        { k: 'style', v: project.concept?.art_direction?.ui_style ?? '–' },
+        { k: 'platform', v: project.concept?.pipeline?.gdd?.project?.target_platform ?? 'PC', accent: true },
+        { k: 'style', v: project.concept?.pipeline?.gdd?.art_direction?.ui_style ?? '–' },
       ]}
       generateFn={generateUIUX}
+      nodeContext={nodeContext}
       renderContent={(data) => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {data.design_system && (
@@ -2213,13 +2489,23 @@ function UIUXPanel({ project, onRefresh, onLog, onResult, locked }: { project: P
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Screens ({data.screens.length})</div>
               {data.screens.map((s, i) => (
                 <div key={i} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '7px 9px' }}>
-                  <div style={{ fontWeight: 600, fontSize: 11, color: 'var(--text-0)', marginBottom: 3 }}>{s.name}</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>{s.description}</div>
+                  <div style={{ fontWeight: 600, fontSize: 11, color: 'var(--text-0)', marginBottom: 3 }}>{ss(s.name)}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>{ss(s.description)}</div>
                   {s.elements && s.elements.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 5 }}>
-                      {s.elements.map((el, j) => (
-                        <span key={j} style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)', background: 'var(--bg-3)', padding: '1px 5px', borderRadius: 2 }}>{el}</span>
-                      ))}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 5 }}>
+                      {s.elements.map((el, j) => {
+                        if (typeof el === 'string') return (
+                          <span key={j} style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)', background: 'var(--bg-3)', padding: '1px 5px', borderRadius: 2 }}>{el}</span>
+                        )
+                        const obj = el as Record<string, unknown>
+                        return (
+                          <div key={j} style={{ display: 'flex', gap: 4, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--cat-design)', background: 'color-mix(in oklch, var(--cat-design) 10%, var(--bg-3))', border: '1px solid color-mix(in oklch, var(--cat-design) 20%, transparent)', padding: '1px 5px', borderRadius: 2, flexShrink: 0 }}>{String(obj.type ?? '?')}</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-1)' }}>{String(obj.name ?? '')}</span>
+                            {obj.position != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)' }}>{String(obj.position)}</span>}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -2227,7 +2513,7 @@ function UIUXPanel({ project, onRefresh, onLog, onResult, locked }: { project: P
             </>
           )}
           {data.navigation_flow && (
-            <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>{data.navigation_flow}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>{ss(data.navigation_flow)}</div>
           )}
         </div>
       )}
@@ -2235,7 +2521,7 @@ function UIUXPanel({ project, onRefresh, onLog, onResult, locked }: { project: P
   )
 }
 
-function IconsPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
+function IconsPanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
   return (
     <DocPanel<IconsResult>
       title="Icons"
@@ -2246,17 +2532,33 @@ function IconsPanel({ project, onRefresh, onLog, onResult, locked }: { project: 
       locked={locked}
       storedKey="icons"
       summaryRows={[
-        { k: 'art style', v: project.concept?.art_direction?.style ?? '–', accent: true },
-        { k: 'mechanics', v: String(project.concept?.mechanics?.length ?? 0) },
+        { k: 'art style', v: project.concept?.pipeline?.gdd?.art_direction?.style ?? '–', accent: true },
+        { k: 'mechanics', v: String(project.concept?.pipeline?.gdd?.mechanics?.length ?? 0) },
       ]}
       generateFn={generateIcons}
+      nodeContext={nodeContext}
       renderContent={(data) => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {data.icon_style && (
-            <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '7px 9px' }}>
-              <MonoRow k="shape" v={data.icon_style.shape} accent />
-              <MonoRow k="size" v={data.icon_style.size_base} />
-              <MonoRow k="style" v={data.icon_style.color_scheme} />
+            <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '7px 9px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <MonoRow k="shape"  v={(data.icon_style as Record<string,unknown>).shape}   accent />
+              <MonoRow k="size"   v={(data.icon_style as Record<string,unknown>).base_size ?? (data.icon_style as Record<string,unknown>).size_base} />
+              <MonoRow k="shadow" v={(data.icon_style as Record<string,unknown>).shadow} />
+              <MonoRow k="border" v={(data.icon_style as Record<string,unknown>).border} />
+              {Array.isArray((data.icon_style as Record<string,unknown>).style_keywords) && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 2 }}>
+                  {((data.icon_style as Record<string,unknown>).style_keywords as unknown[]).map((kw, i) => (
+                    <span key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)', background: 'var(--bg-3)', padding: '1px 5px', borderRadius: 2 }}>{ss(kw)}</span>
+                  ))}
+                </div>
+              )}
+              {Array.isArray((data.icon_style as Record<string,unknown>).color_palette) && (
+                <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                  {((data.icon_style as Record<string,unknown>).color_palette as string[]).map((hex, i) => (
+                    <div key={i} title={ss(hex)} style={{ width: 14, height: 14, borderRadius: 2, background: ss(hex), border: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -2264,10 +2566,22 @@ function IconsPanel({ project, onRefresh, onLog, onResult, locked }: { project: 
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             {(data.icons ?? []).map((icon, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 4, padding: '4px 8px' }}>
-                <div style={{ width: 12, height: 12, borderRadius: 2, background: icon.color_hint || 'var(--bg-3)', flexShrink: 0, border: '1px solid rgba(255,255,255,0.08)' }} />
-                <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{icon.name}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)', flexShrink: 0 }}>{icon.category}</span>
+              <div key={i} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 4, padding: '5px 8px' }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={{ width: 12, height: 12, borderRadius: 2, background: ss(icon.color_hint) || 'var(--bg-3)', flexShrink: 0, border: '1px solid rgba(255,255,255,0.08)' }} />
+                  <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{ss(icon.name)}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)', flexShrink: 0 }}>{ss(icon.category)}</span>
+                </div>
+                {!!(icon as Record<string,unknown>).usage && (
+                  <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginTop: 3 }}>{ss((icon as Record<string,unknown>).usage)}</div>
+                )}
+                {!!(icon as Record<string,unknown>).image_url && (
+                  <img
+                    src={ss((icon as Record<string,unknown>).image_url)}
+                    alt={ss(icon.name)}
+                    style={{ width: '100%', borderRadius: 3, marginTop: 5, display: 'block', border: '1px solid var(--line-2)' }}
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -2277,7 +2591,7 @@ function IconsPanel({ project, onRefresh, onLog, onResult, locked }: { project: 
   )
 }
 
-function HUDPanel({ project, onRefresh, onLog, onResult, locked }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean }) {
+function HUDPanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
   return (
     <DocPanel<HUDResult>
       title="HUD"
@@ -2288,23 +2602,43 @@ function HUDPanel({ project, onRefresh, onLog, onResult, locked }: { project: Pr
       locked={locked}
       storedKey="hud"
       summaryRows={[
-        { k: 'platform', v: project.concept?.project?.target_platform ?? 'PC', accent: true },
-        { k: 'genre', v: project.concept?.project?.genre ?? '–' },
+        { k: 'platform', v: project.concept?.pipeline?.gdd?.project?.target_platform ?? 'PC', accent: true },
+        { k: 'genre', v: project.concept?.pipeline?.gdd?.project?.genre ?? '–' },
       ]}
       generateFn={generateHUD}
+      nodeContext={nodeContext}
       renderContent={(data) => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {data.layout && (
-            <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '7px 9px' }}>
-              {data.layout}
+            <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '7px 9px' }}>
+              {typeof data.layout === 'object' && data.layout !== null ? (
+                <>
+                  <MonoRow k="structure" v={(data.layout as Record<string,unknown>).structure} accent />
+                  {(data.layout as Record<string,unknown>).description && (
+                    <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, marginTop: 5 }}>{ss((data.layout as Record<string,unknown>).description)}</div>
+                  )}
+                </>
+              ) : (
+                <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>{ss(data.layout)}</div>
+              )}
             </div>
           )}
           {data.style && (
             <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '7px 9px' }}>
-              <MonoRow k="theme" v={data.style.theme} accent />
-              <MonoRow k="opacity" v={data.style.opacity} />
+              <MonoRow k="theme"     v={data.style.theme} accent />
+              <MonoRow k="opacity"   v={data.style.opacity} />
               <MonoRow k="animation" v={data.style.animation} />
+              {Array.isArray((data.style as Record<string,unknown>).color_palette) && (
+                <div style={{ display: 'flex', gap: 4, marginTop: 5 }}>
+                  {((data.style as Record<string,unknown>).color_palette as string[]).map((hex, i) => (
+                    <div key={i} title={hex} style={{ width: 14, height: 14, borderRadius: 2, background: hex, border: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }} />
+                  ))}
+                </div>
+              )}
             </div>
+          )}
+          {!!(data as unknown as Record<string,unknown>).responsive_notes && (
+            <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>{ss((data as unknown as Record<string,unknown>).responsive_notes)}</div>
           )}
           {data.elements && data.elements.length > 0 && (
             <>
@@ -2314,11 +2648,11 @@ function HUDPanel({ project, onRefresh, onLog, onResult, locked }: { project: Pr
               {data.elements.map((el, i) => (
                 <div key={i} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 4, padding: '5px 8px' }}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 2 }}>
-                    <span style={{ fontWeight: 600, fontSize: 10, color: 'var(--text-0)' }}>{el.name}</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--cat-design)', background: 'color-mix(in oklch, var(--cat-design) 10%, var(--bg-3))', padding: '1px 5px', borderRadius: 2 }}>{el.type}</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)', marginLeft: 'auto' }}>{el.position}</span>
+                    <span style={{ fontWeight: 600, fontSize: 10, color: 'var(--text-0)' }}>{ss(el.name)}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--cat-design)', background: 'color-mix(in oklch, var(--cat-design) 10%, var(--bg-3))', padding: '1px 5px', borderRadius: 2 }}>{ss(el.type)}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)', marginLeft: 'auto' }}>{ss(el.position)}</span>
                   </div>
-                  <div style={{ fontSize: 9, color: 'var(--text-3)' }}>{el.data_source}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-3)' }}>{ss(el.data_source)}</div>
                 </div>
               ))}
             </>
@@ -2326,9 +2660,110 @@ function HUDPanel({ project, onRefresh, onLog, onResult, locked }: { project: Pr
           {data.implementation_notes && (
             <>
               <Divider />
-              <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>{data.implementation_notes}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>{ss(data.implementation_notes)}</div>
             </>
           )}
+        </div>
+      )}
+    />
+  )
+}
+
+function SplashArtPanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
+  return (
+    <DocPanel<SplashArtResult>
+      title="Splash Art"
+      project={project}
+      onRefresh={onRefresh}
+      onLog={onLog}
+      onResult={onResult}
+      locked={locked}
+      storedKey="splash_art"
+      summaryRows={[
+        { k: 'style', v: project.concept?.pipeline?.gdd?.art_direction?.style ?? '–', accent: true },
+        { k: 'format', v: '1792 × 1024 — cinematic' },
+      ]}
+      generateFn={generateSplashArt}
+      nodeContext={nodeContext}
+      renderContent={(data) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {!!(data as unknown as Record<string,unknown>).image_url && (
+            <img
+              src={ss((data as unknown as Record<string,unknown>).image_url)}
+              alt={ss((data as unknown as Record<string,unknown>).title)}
+              style={{ width: '100%', borderRadius: 4, display: 'block', border: '1px solid var(--line-2)' }}
+            />
+          )}
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '7px 9px' }}>
+            <MonoRow k="title"       v={(data as unknown as Record<string,unknown>).title} accent />
+            <MonoRow k="mood"        v={(data as unknown as Record<string,unknown>).mood} />
+            <MonoRow k="focal point" v={(data as unknown as Record<string,unknown>).focal_point} />
+            <MonoRow k="composition" v={(data as unknown as Record<string,unknown>).composition} />
+            <MonoRow k="colors"      v={(data as unknown as Record<string,unknown>).color_treatment} />
+            <MonoRow k="style ref"   v={(data as unknown as Record<string,unknown>).style_reference} />
+          </div>
+          {!!(data as unknown as Record<string,unknown>).image_prompt && (
+            <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', lineHeight: 1.6, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 4, padding: '6px 8px' }}>
+              {ss((data as unknown as Record<string,unknown>).image_prompt)}
+            </div>
+          )}
+        </div>
+      )}
+    />
+  )
+}
+
+function MarketingPanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
+  return (
+    <DocPanel<MarketingResult>
+      title="Marketing"
+      project={project}
+      onRefresh={onRefresh}
+      onLog={onLog}
+      onResult={onResult}
+      locked={locked}
+      storedKey="marketing"
+      summaryRows={[
+        { k: 'assets', v: String((project.concept?.pipeline?.marketing as Record<string,unknown>)?.total_count ?? 7), accent: true },
+        { k: 'formats', v: 'Steam · itch.io · Social · Press' },
+      ]}
+      generateFn={generateMarketing}
+      nodeContext={nodeContext}
+      renderContent={(data) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {!!(data as unknown as Record<string,unknown>).campaign_concept && (
+            <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 4, padding: '6px 9px' }}>
+              {ss((data as unknown as Record<string,unknown>).campaign_concept)}
+            </div>
+          )}
+          {!!(data as unknown as Record<string,unknown>).tagline && (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--cat-asset)', textAlign: 'center', padding: '4px 0' }}>
+              "{ss((data as unknown as Record<string,unknown>).tagline)}"
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {(data.assets ?? []).map((asset, i) => (
+              <div key={i} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 4, overflow: 'hidden' }}>
+                {!!(asset as unknown as Record<string,unknown>).image_url && (
+                  <img
+                    src={ss((asset as unknown as Record<string,unknown>).image_url)}
+                    alt={ss(asset.name)}
+                    style={{ width: '100%', display: 'block' }}
+                  />
+                )}
+                <div style={{ padding: '5px 8px' }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, fontSize: 10, color: 'var(--text-0)', flex: 1 }}>{ss(asset.name)}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-3)' }}>{asset.width}×{asset.height}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--cat-design)', background: 'color-mix(in oklch, var(--cat-design) 10%, var(--bg-3))', padding: '1px 5px', borderRadius: 2 }}>{ss(asset.platform)}</span>
+                  </div>
+                  {!!asset.copy && (
+                    <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>"{ss(asset.copy)}"</div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     />
@@ -2345,9 +2780,10 @@ interface Props {
   onLog: (msg: string) => void
   onProjectCreated?: (project: Project) => void
   onApproveNode?: (nodeId: string) => void
+  nodeContext?: import('@/lib/nodeExecutionContext').InputContext
 }
 
-export default function InspectorPanel({ node, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode }: Props) {
+export default function InspectorPanel({ node, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode, nodeContext }: Props) {
 
   /* No selection */
   if (!node) {
@@ -2398,6 +2834,7 @@ export default function InspectorPanel({ node, project, onRefresh, onApproved, o
           onLog={onLog}
           onProjectCreated={onProjectCreated}
           onApproveNode={onApproveNode}
+          nodeContext={nodeContext}
         />
       </div>
     </aside>
@@ -2448,7 +2885,7 @@ function ApproveRow({ approved, nodeId, onApproveNode }: {
 }
 
 function NodeContent({
-  node, data, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode,
+  node, data, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode, nodeContext,
 }: {
   node: Node
   data: ForgeNodeData
@@ -2458,7 +2895,12 @@ function NodeContent({
   onLog: (m: string) => void
   onProjectCreated?: (p: Project) => void
   onApproveNode?: (nodeId: string) => void
+  nodeContext?: import('@/lib/nodeExecutionContext').InputContext
 }) {
+  const { user } = useAuth()
+  const [memberId, setMemberId] = useState<string | null>(null)
+  useEffect(() => { if (user?.id) getMemberByAuth(user.id).then(m => setMemberId(m?.id ?? null)) }, [user?.id])
+
   const [modalOpen, setModalOpen] = useState(false)
   const [pendingResult, setPendingResult] = useState<unknown>(null)
   const stepKey = data.stepKey ?? node.id
@@ -2473,6 +2915,7 @@ function NodeContent({
         <NewGamePanel
           onProjectCreated={p => { onProjectCreated?.(p); onRefresh() }}
           onLog={onLog}
+          memberId={memberId}
         />
       )
     }
@@ -2480,7 +2923,7 @@ function NodeContent({
       <>
         <GDDSummaryPanel project={project} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
@@ -2497,7 +2940,7 @@ function NodeContent({
           {gddApproved && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ GDD approved — pipeline unlocked</div>}
           <ViewDetailBtn onClick={() => setModalOpen(true)} />
         </div>
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
@@ -2514,36 +2957,36 @@ function NodeContent({
   if (stepKey === 'sprites' || stepKey === 'sprites-gate') {
     return (
       <>
-        <SpritesPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} />
+        <SpritesPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
   if (stepKey === 'levels' || stepKey === 'levels-gate') {
     return (
       <>
-        <LevelsPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} />
+        <LevelsPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} onResult={setPendingResult} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
   if (stepKey === 'audio' || stepKey === 'audio-gate') {
     return (
       <>
-        <AudioPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} />
+        <AudioPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
   if (stepKey === 'code' || stepKey === 'code-gate') {
     return (
       <>
-        <CodePanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} />
+        <CodePanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
@@ -2552,22 +2995,22 @@ function NodeContent({
       <>
         <ExportPanel project={project} onRefresh={onRefresh} onLog={onLog} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
 
   // 3D pipeline nodes using JsonDocPanel
-  const doc3dNodes: Record<string, { title: string; fn: (id: string) => Promise<unknown>; rows: { k: string; v: string; accent?: boolean }[] }> = {
-    modeling:   { title: 'Modeling',    fn: generateModeling,   rows: [{ k: 'engine', v: project.target_engine ?? '–', accent: true }, { k: 'characters', v: String(project.concept?.characters?.length ?? 0) }] },
-    charaters:  { title: 'Characters',  fn: generateCharaters,  rows: [{ k: 'characters', v: String(project.concept?.characters?.length ?? 0), accent: true }] },
-    vfx:        { title: 'VFX',         fn: generateVfx,        rows: [{ k: 'genre', v: project.concept?.project?.genre ?? '–', accent: true }, { k: 'engine', v: project.target_engine ?? '–' }] },
-    texturing:  { title: 'Texturing',   fn: generateTexturing,  rows: [{ k: 'style', v: project.concept?.art_direction?.style ?? '–', accent: true }] },
-    rigging:    { title: 'Rigging',     fn: generateRigging,    rows: [{ k: 'characters', v: String(project.concept?.characters?.length ?? 0), accent: true }] },
-    lighting:   { title: 'Lighting',    fn: generateLighting,   rows: [{ k: 'levels', v: String(project.concept?.levels?.length ?? 0), accent: true }] },
-    animation:  { title: 'Animation',   fn: generateAnimation,  rows: [{ k: 'characters', v: String(project.concept?.characters?.length ?? 0), accent: true }] },
-    cinematics: { title: 'Cinematics',  fn: generateCinematics, rows: [{ k: 'levels', v: String(project.concept?.levels?.length ?? 0), accent: true }] },
-    voice:      { title: 'Voice Acting',fn: generateVoice,      rows: [{ k: 'characters', v: String(project.concept?.characters?.length ?? 0), accent: true }, { k: 'tone', v: project.concept?.project?.tone ?? '–' }] },
+  const doc3dNodes: Record<string, { title: string; fn: (id: string, ctx?: InputContext) => Promise<unknown>; rows: { k: string; v: string; accent?: boolean }[] }> = {
+    modeling:   { title: 'Modeling',    fn: generateModeling,   rows: [{ k: 'engine', v: project.target_engine ?? '–', accent: true }, { k: 'characters', v: String(project.concept?.pipeline?.gdd?.characters?.length ?? 0) }] },
+    charaters:  { title: 'Characters',  fn: generateCharaters,  rows: [{ k: 'characters', v: String(project.concept?.pipeline?.gdd?.characters?.length ?? 0), accent: true }] },
+    vfx:        { title: 'VFX',         fn: generateVfx,        rows: [{ k: 'genre', v: project.concept?.pipeline?.gdd?.project?.genre ?? '–', accent: true }, { k: 'engine', v: project.target_engine ?? '–' }] },
+    texturing:  { title: 'Texturing',   fn: generateTexturing,  rows: [{ k: 'style', v: project.concept?.pipeline?.gdd?.art_direction?.style ?? '–', accent: true }] },
+    rigging:    { title: 'Rigging',     fn: generateRigging,    rows: [{ k: 'characters', v: String(project.concept?.pipeline?.gdd?.characters?.length ?? 0), accent: true }] },
+    lighting:   { title: 'Lighting',    fn: generateLighting,   rows: [{ k: 'levels', v: String(project.concept?.pipeline?.gdd?.levels?.length ?? 0), accent: true }] },
+    animation:  { title: 'Animation',   fn: generateAnimation,  rows: [{ k: 'characters', v: String(project.concept?.pipeline?.gdd?.characters?.length ?? 0), accent: true }] },
+    cinematics: { title: 'Cinematics',  fn: generateCinematics, rows: [{ k: 'levels', v: String(project.concept?.pipeline?.gdd?.levels?.length ?? 0), accent: true }] },
+    voice:      { title: 'Voice Acting',fn: generateVoice,      rows: [{ k: 'characters', v: String(project.concept?.pipeline?.gdd?.characters?.length ?? 0), accent: true }, { k: 'tone', v: project.concept?.pipeline?.gdd?.project?.tone ?? '–' }] },
   }
 
   const ar = (sk: string) => onApproved ? () => onApproved(sk) : onRefresh
@@ -2576,9 +3019,9 @@ function NodeContent({
     const cfg = doc3dNodes[stepKey]
     return (
       <>
-        <JsonDocPanel title={cfg.title} stepKey={stepKey} project={project} onRefresh={ar(stepKey)} onLog={onLog} generateFn={cfg.fn} summaryRows={cfg.rows} onResult={setPendingResult} locked={locked} />
+        <JsonDocPanel title={cfg.title} stepKey={stepKey} project={project} onRefresh={ar(stepKey)} onLog={onLog} generateFn={cfg.fn} summaryRows={cfg.rows} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
@@ -2586,9 +3029,39 @@ function NodeContent({
   if (stepKey === 'concept_art') {
     return (
       <>
-        <ConceptArtPanel project={project} onRefresh={ar('concept_art')} onLog={onLog} onResult={setPendingResult} locked={locked} />
+        <ConceptArtPanel project={project} onRefresh={ar('concept_art')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
+      </>
+    )
+  }
+
+  if (stepKey === 'art_direction_intake') {
+    return (
+      <>
+        <ArtDirectionIntakePanel project={project} onRefresh={ar('art_direction_intake')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
+        <ViewDetailBtn onClick={() => setModalOpen(true)} />
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
+      </>
+    )
+  }
+
+  if (stepKey === 'splash_art') {
+    return (
+      <>
+        <SplashArtPanel project={project} onRefresh={ar('splash_art')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
+        <ViewDetailBtn onClick={() => setModalOpen(true)} />
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
+      </>
+    )
+  }
+
+  if (stepKey === 'marketing') {
+    return (
+      <>
+        <MarketingPanel project={project} onRefresh={ar('marketing')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
+        <ViewDetailBtn onClick={() => setModalOpen(true)} />
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
@@ -2596,9 +3069,9 @@ function NodeContent({
   if (stepKey === 'visual_guide') {
     return (
       <>
-        <VisualGuidePanel project={project} onRefresh={ar('visual_guide')} onLog={onLog} onResult={setPendingResult} locked={locked} />
+        <VisualGuidePanel project={project} onRefresh={ar('visual_guide')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
@@ -2606,9 +3079,9 @@ function NodeContent({
   if (stepKey === 'backgrounds') {
     return (
       <>
-        <BackgroundsPanel project={project} onRefresh={ar('backgrounds')} onLog={onLog} onResult={setPendingResult} locked={locked} />
+        <BackgroundsPanel project={project} onRefresh={ar('backgrounds')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
@@ -2616,9 +3089,9 @@ function NodeContent({
   if (stepKey === 'uiux') {
     return (
       <>
-        <UIUXPanel project={project} onRefresh={ar('uiux')} onLog={onLog} onResult={setPendingResult} locked={locked} />
+        <UIUXPanel project={project} onRefresh={ar('uiux')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
@@ -2626,9 +3099,9 @@ function NodeContent({
   if (stepKey === 'icons') {
     return (
       <>
-        <IconsPanel project={project} onRefresh={ar('icons')} onLog={onLog} onResult={setPendingResult} locked={locked} />
+        <IconsPanel project={project} onRefresh={ar('icons')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
@@ -2636,9 +3109,9 @@ function NodeContent({
   if (stepKey === 'hud') {
     return (
       <>
-        <HUDPanel project={project} onRefresh={ar('hud')} onLog={onLog} onResult={setPendingResult} locked={locked} />
+        <HUDPanel project={project} onRefresh={ar('hud')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
@@ -2646,9 +3119,9 @@ function NodeContent({
   if (stepKey === 'sfx') {
     return (
       <>
-        <SfxPanel project={project} onRefresh={ar('sfx')} onLog={onLog} onResult={setPendingResult} locked={locked} />
+        <SfxPanel project={project} onRefresh={ar('sfx')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} />}
+        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
