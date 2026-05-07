@@ -23,6 +23,7 @@ import InspectorPanel from './InspectorPanel'
 import ForgeToolbar from './ForgeToolbar'
 import ForgeStatusBar from './ForgeStatusBar'
 import ContextMenu, { type ContextMenuState } from './ContextMenu'
+import NewProjectModal from './NewProjectModal'
 import type { Project } from '@/lib/types'
 import { getTemplate, type TemplateCatalogNode } from '@/lib/templates'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
@@ -288,6 +289,12 @@ function PipelineApp({
   const [framePrompt, setFramePrompt] = useState<XYPosition | null>(null)
   const [phase, setPhase] = useState<'idle' | 'running' | 'error'>('idle')
   const [runProgress, setRunProgress] = useState<{ done: number; total: number } | undefined>()
+  const isDraft = (p: Project | null) => !p?.concept?.pipeline?.gdd
+  const [modalOpen, setModalOpen]           = useState(isDraft(initialProject))
+  const [regenProjectId, setRegenProjectId] = useState<string | null>(
+    initialProject && isDraft(initialProject) ? initialProject.id : null
+  )
+  const [regenInitialInput, setRegenInitialInput] = useState<{ ideaPrompt: string; params: Record<string, string | string[]> } | null>(null)
 
   const initialState = (() => {
     if (initialProject?.id) {
@@ -617,12 +624,12 @@ function PipelineApp({
   }
 
   function handleProjectCreated(p: Project) {
-    // GDD is always approved at creation — inject so hydrateNodes marks it green immediately
+    // GDD saved — inject pending_review job so hydrateNodes marks it for review in the Inspector Panel
     const pWithGdd: typeof p = {
       ...p,
       generation_jobs: [
         ...(p.generation_jobs ?? []),
-        { id: 'optimistic-gdd', project_id: p.id, current_step: 'step_1_concept', status: 'approved' } as never,
+        { id: 'optimistic-gdd', project_id: p.id, current_step: 'gdd', status: 'review', review_status: 'pending' } as never,
       ],
     }
     setLiveProject(pWithGdd)
@@ -639,7 +646,7 @@ function PipelineApp({
   }
 
   const toolbarProject = liveProject ?? {
-    id: '', name: 'New game', description: '', genre: '',
+    id: '', name: 'New project', description: '', genre: '',
     target_engine: '', status: 'draft', owner_member_id: '',
     concept: null as unknown as Project['concept'],
     created_at: '',
@@ -739,6 +746,26 @@ function PipelineApp({
         onProjectCreated={handleProjectCreated}
         onApproveNode={handleApproveNode}
         nodeContext={nodeContext}
+        onRequestNewProject={() => setModalOpen(true)}
+        onRequestRegenerate={projectId => {
+          try {
+            const raw = localStorage.getItem(`forge:gdd-input:${projectId}`)
+            setRegenInitialInput(raw ? JSON.parse(raw) : null)
+          } catch { setRegenInitialInput(null) }
+          setRegenProjectId(projectId)
+          setModalOpen(true)
+        }}
+      />
+
+      <NewProjectModal
+        open={modalOpen}
+        projectId={regenProjectId}
+        projectName={regenProjectId ? (liveProject?.name ?? '') : undefined}
+        initialIdea={regenInitialInput?.ideaPrompt}
+        initialParams={regenInitialInput?.params}
+        memberId={null}
+        onProjectCreated={p => { setModalOpen(false); setRegenProjectId(null); setRegenInitialInput(null); handleProjectCreated(p) }}
+        onClose={() => { setModalOpen(false); setRegenProjectId(null); setRegenInitialInput(null) }}
       />
 
       <ForgeStatusBar

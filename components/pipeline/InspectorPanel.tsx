@@ -111,15 +111,16 @@ function ReviewActions({
     const rs = sentForReview ? 'pending' : pendingJob.review_status
     const statusText  = rs === 'reviewed' ? '✓ Reviewed — ready to approve' : rs === 'changes_requested' ? '↺ Changes requested by reviewer' : '⏳ Awaiting review…'
     const statusColor = rs === 'reviewed' ? 'var(--cat-code)' : rs === 'changes_requested' ? 'var(--cat-output)' : 'var(--cat-gate)'
+    const canSendReview = rs === 'pending' || rs === 'changes_requested'
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: statusColor, textAlign: 'center', padding: '4px 0' }}>{statusText}</div>
-        {effectiveHasData && (rs === 'reviewed' || rs === 'changes_requested') && (
+        {effectiveHasData && (
           <ActionBtn label={busy ? '⟳ Approving…' : approveLabel ?? '✓ Approve'} onClick={onApprove} variant="approve" disabled={busy} />
         )}
-        {rs === 'changes_requested' && (
+        {canSendReview && (
           <>
-            <ActionBtn label="↺ Re-send for review" onClick={openPicker} variant="ghost" disabled={busy} />
+            <ActionBtn label={rs === 'changes_requested' ? '↺ Re-send for review' : '⊕ Request review'} onClick={openPicker} variant="ghost" disabled={busy} />
             {showPicker && (
               <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Assign reviewer</div>
@@ -937,7 +938,7 @@ function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) 
     if (!gdd) return
     setApproving(true)
     setError(null)
-    const payload = { gdd, prompt: buildFullPrompt(), meta, member_id: memberId ?? undefined }
+    const payload = { project_id: '', gdd, prompt: buildFullPrompt(), meta, member_id: memberId ?? undefined }
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         if (attempt > 1) {
@@ -2789,9 +2790,11 @@ interface Props {
   onProjectCreated?: (project: Project) => void
   onApproveNode?: (nodeId: string) => void
   nodeContext?: import('@/lib/nodeExecutionContext').InputContext
+  onRequestNewProject?: () => void
+  onRequestRegenerate?: (projectId: string) => void
 }
 
-export default function InspectorPanel({ node, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode, nodeContext }: Props) {
+export default function InspectorPanel({ node, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode, nodeContext, onRequestNewProject, onRequestRegenerate }: Props) {
 
   /* No selection */
   if (!node) {
@@ -2843,6 +2846,8 @@ export default function InspectorPanel({ node, project, onRefresh, onApproved, o
           onProjectCreated={onProjectCreated}
           onApproveNode={onApproveNode}
           nodeContext={nodeContext}
+          onRequestNewProject={onRequestNewProject}
+          onRequestRegenerate={onRequestRegenerate}
         />
       </div>
     </aside>
@@ -2894,6 +2899,7 @@ function ApproveRow({ approved, nodeId, onApproveNode }: {
 
 function NodeContent({
   node, data, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode, nodeContext,
+  onRequestNewProject, onRequestRegenerate,
 }: {
   node: Node
   data: ForgeNodeData
@@ -2904,6 +2910,8 @@ function NodeContent({
   onProjectCreated?: (p: Project) => void
   onApproveNode?: (nodeId: string) => void
   nodeContext?: import('@/lib/nodeExecutionContext').InputContext
+  onRequestNewProject?: () => void
+  onRequestRegenerate?: (projectId: string) => void
 }) {
   const { user } = useAuth()
   const [memberId, setMemberId] = useState<string | null>(null)
@@ -2911,6 +2919,7 @@ function NodeContent({
 
   const [modalOpen, setModalOpen] = useState(false)
   const [pendingResult, setPendingResult] = useState<unknown>(null)
+  const [busy, setBusy] = useState(false)
   const stepKey = data.stepKey ?? node.id
   const locked = data.status === 'locked' || data.status === 'pending_review'
 
@@ -2920,16 +2929,43 @@ function NodeContent({
   if (stepKey === 'gdd') {
     if (!project) {
       return (
-        <NewGamePanel
-          onProjectCreated={p => { onProjectCreated?.(p); onRefresh() }}
-          onLog={onLog}
-          memberId={memberId}
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '40px 0', textAlign: 'center' }}>
+          <div style={{ width: 40, height: 40, background: 'conic-gradient(from 45deg, var(--cat-asset), var(--cat-code), var(--cat-audio), var(--cat-gate), var(--cat-asset))', clipPath: 'polygon(50% 0,100% 50%,50% 100%,0 50%)', opacity: 0.5 }} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', marginBottom: 4 }}>No project yet</div>
+            <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>Create a project to generate the GDD</div>
+          </div>
+          <ActionBtn label="+ New project" onClick={() => onRequestNewProject?.()} variant="run" />
+        </div>
       )
     }
+    const handleApproveGDD = async () => {
+      setBusy(true)
+      try {
+        await approveNode(project.id, 'gdd', project.concept?.pipeline?.gdd, memberId ?? undefined)
+        onApproved?.('gdd')
+        onRefresh()
+        onLog('GDD approved')
+      } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
+      finally { setBusy(false) }
+    }
+
     return (
       <>
         <GDDSummaryPanel project={project} />
+        <ReviewActions
+          project={project}
+          stepKey="gdd"
+          nodeData={project.concept?.pipeline?.gdd}
+          hasData={!!(project.concept?.pipeline?.gdd)}
+          approved={!!data.approved}
+          busy={busy}
+          approveLabel="✓ Approve GDD"
+          onApprove={handleApproveGDD}
+        />
+        {!data.approved && (
+          <ActionBtn label="↺ Regenerate GDD" onClick={() => onRequestRegenerate?.(project.id)} variant="ghost" />
+        )}
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>

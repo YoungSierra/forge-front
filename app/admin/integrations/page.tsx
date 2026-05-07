@@ -26,7 +26,7 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
 
 // Auto-detection: class_type → { field }
 const AUTO_DETECT: Record<'prompt' | 'width' | 'height' | 'seed', Record<string, string>> = {
-  prompt: { CLIPTextEncode: 'text', CLIPLoader: 'text', WanTextEncode: 'text' },
+  prompt: { CLIPTextEncode: 'text', WanTextEncode: 'text' },
   width:  { EmptyLatentImage: 'width', EmptySD3LatentImage: 'width', EmptyHunyuanLatentVideo: 'width' },
   height: { EmptyLatentImage: 'height', EmptySD3LatentImage: 'height', EmptyHunyuanLatentVideo: 'height' },
   seed:   { KSampler: 'seed', KSamplerAdvanced: 'noise_seed', RandomNoise: 'noise_seed', SamplerCustomAdvanced: 'noise_seed' },
@@ -64,7 +64,8 @@ function stepConfigHint(s: StepConfig, workflows: ComfyUIWorkflow[]): string {
   if (s.integration_type === 'llm') {
     main = s.model_name ? (() => { const [p, ...r] = s.model_name!.split(':'); return `${p} / ${r.join(':')}` })() : 'default model'
   } else if (s.integration_type === 'comfyui') {
-    main = s.comfyui_workflows?.name || 'no workflow'
+    const wf = workflows.find(w => w.id === s.comfyui_workflow_id)
+    main = wf?.name || s.comfyui_workflows?.name || 'no workflow'
   } else if (s.integration_type === 'n8n') {
     main = s.webhook_url ? (() => { try { return new URL(s.webhook_url!).hostname } catch { return s.webhook_url!.slice(0, 28) } })() : 'no webhook'
   }

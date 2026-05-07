@@ -36,16 +36,23 @@ export async function checkHealth() {
   return request<{ status: string; supabase: string }>('/api/health')
 }
 
+export async function createProject(name: string, memberId?: string) {
+  return request<{ success: boolean; project_id: string; project: Project }>(
+    '/api/projects',
+    { method: 'POST', body: JSON.stringify({ name, member_id: memberId }) }
+  )
+}
+
 // Step 1
-export async function generateGDD(prompt: string) {
+export async function generateGDD(prompt: string, projectId?: string) {
   const data = await request<{ success: boolean; gdd: GDD; meta: unknown }>('/api/generate/gdd', {
     method: 'POST',
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, project_id: projectId }),
   })
   return { gdd: data.gdd, meta: data.meta }
 }
 
-export async function approveStep1(payload: { gdd: GDD; prompt: string; meta: unknown; member_id?: string }) {
+export async function approveStep1(payload: { project_id: string; gdd: GDD; prompt: string; meta: unknown; member_id?: string }) {
   const data = await request<{ success: boolean; project_id: string; project: Project }>(
     '/api/projects/approve-step1',
     { method: 'POST', body: JSON.stringify(payload) }

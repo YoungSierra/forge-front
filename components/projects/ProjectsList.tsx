@@ -67,7 +67,7 @@ export default function ProjectsList() {
           <p style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'monospace' }}>Start your first prototype</p>
         </div>
         <Link href="/projects/new" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 16px', background: 'var(--cat-code)', color: '#0a0a0c', borderRadius: 5, fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
-          + New game
+          + New project
         </Link>
       </div>
     )

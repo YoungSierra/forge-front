@@ -86,7 +86,7 @@ export default function NewProjectPage() {
     if (!gdd || !formData) return
     setApproving(true)
     try {
-      const res = await approveStep1({ gdd, prompt: enrichedPrompt, meta })
+      const res = await approveStep1({ project_id: '', gdd, prompt: enrichedPrompt, meta })
       router.push(`/projects/${res.project_id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al aprobar')

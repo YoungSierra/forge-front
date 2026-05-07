@@ -91,6 +91,15 @@ function Card({ children }: { children: React.ReactNode }) {
 
 function GDDDetail({ project }: { project: Project }) {
   const gdd = project.concept?.pipeline?.gdd
+  const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null)
+
+  React.useEffect(() => {
+    if (!lightbox) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopImmediatePropagation(); setLightbox(null) } }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [lightbox])
+
   if (!gdd) return <p style={{ color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>No GDD available.</p>
 
   const DIFFICULTY_COLOR: Record<string, string> = {
@@ -115,8 +124,8 @@ function GDDDetail({ project }: { project: Project }) {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           <Badge label={gdd.project.genre} color="var(--cat-design)" />
           <Badge label={gdd.project.tone} color="var(--cat-audio)" />
-          <Badge label={gdd.development.suggested_engine} color="var(--cat-code)" />
-          <Badge label={gdd.development.estimated_scope} color="var(--text-3)" />
+          {gdd.development?.suggested_engine && <Badge label={gdd.development.suggested_engine} color="var(--cat-code)" />}
+          {gdd.development?.estimated_scope && <Badge label={gdd.development.estimated_scope} color="var(--text-3)" />}
         </div>
         <p style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.65, fontStyle: 'italic' }}>
           {gdd.project.elevator_pitch}
@@ -141,15 +150,12 @@ function GDDDetail({ project }: { project: Project }) {
             {gdd.characters.map((c, i) => (
               <Card key={i}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <div style={{
-                    width: 32, height: 32, borderRadius: 6, flexShrink: 0,
-                    background: `color-mix(in oklch, ${ROLE_COLOR[c.role] ?? 'var(--text-3)'} 20%, var(--bg-3))`,
-                    border: `1px solid color-mix(in oklch, ${ROLE_COLOR[c.role] ?? 'var(--text-3)'} 35%, transparent)`,
-                    display: 'grid', placeItems: 'center',
-                    fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13,
-                    color: ROLE_COLOR[c.role] ?? 'var(--text-3)',
-                  }}>
-                    {c.name[0].toUpperCase()}
+                  <div
+                    onClick={() => c.preview_url && setLightbox({ url: assetUrl(c.preview_url), name: c.name })}
+                    style={{ cursor: c.preview_url ? 'zoom-in' : 'default', borderRadius: 8, flexShrink: 0 }}
+                    title={c.preview_url ? 'Click to enlarge' : undefined}
+                  >
+                    <SpriteImgBox url={c.preview_url} name={c.name} color={ROLE_COLOR[c.role] ?? 'var(--text-3)'} />
                   </div>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-0)' }}>{c.name}</div>
@@ -205,6 +211,14 @@ function GDDDetail({ project }: { project: Project }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {gdd.levels.map((l, i) => (
               <Card key={i}>
+                {l.preview_url && (
+                  <div style={{ margin: '-12px -14px 12px', borderRadius: '8px 8px 0 0', overflow: 'hidden', height: 160, position: 'relative' }}>
+                    <img src={assetUrl(l.preview_url)} alt={l.name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }}
+                    />
+                  </div>
+                )}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
                   <span style={{
                     fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)',
@@ -319,6 +333,34 @@ function GDDDetail({ project }: { project: Project }) {
           </Section>
         </div>
       </div>
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 2000,
+            background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14,
+            cursor: 'zoom-out',
+          }}
+        >
+          <img
+            src={lightbox.url}
+            alt={lightbox.name}
+            onClick={e => e.stopPropagation()}
+            style={{
+              maxWidth: '80vw', maxHeight: '75vh',
+              borderRadius: 12, objectFit: 'contain',
+              boxShadow: '0 32px 80px rgba(0,0,0,0.7)',
+              cursor: 'default',
+            }}
+          />
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-2)', letterSpacing: '0.04em' }}>
+            {lightbox.name} · <span style={{ color: 'var(--text-3)' }}>click anywhere or Esc to close</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

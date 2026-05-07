@@ -52,7 +52,7 @@ export default function HomePage() {
                 textDecoration: 'none',
               }}
             >
-              + New game
+              + New project
             </Link>
           )}
         </div>
