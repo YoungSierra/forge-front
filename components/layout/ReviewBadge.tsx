@@ -19,9 +19,9 @@ export default function ReviewBadge() {
 
   useEffect(() => {
     if (!memberId) return
-    getPendingReviews(memberId).then(setJobs)
-    const interval = setInterval(() => getPendingReviews(memberId).then(setJobs), 30000)
-    return () => clearInterval(interval)
+    // getPendingReviews(memberId).then(setJobs)
+    // const interval = setInterval(() => getPendingReviews(memberId).then(setJobs), 30000)
+    // return () => clearInterval(interval)
   }, [memberId])
 
   useEffect(() => {

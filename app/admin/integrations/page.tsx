@@ -12,7 +12,13 @@ import type { StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig } from '@/
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
   gemini:     ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
-  openai:     ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o3-mini'],
+  openai:     [
+    'gpt-5', 'gpt-5-mini', 'gpt-5-nano',
+    'o3', 'o3-pro', 'o4-mini',
+    'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+    'gpt-4o', 'gpt-4o-mini',
+    'o1', 'o1-mini', 'o3-mini',
+  ],
   groq:       ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
   together:   ['meta-llama/Llama-3-70b-chat-hf', 'mistralai/Mixtral-8x7B-Instruct-v0.1'],
   openrouter: ['meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-r1', 'anthropic/claude-3.5-sonnet'],

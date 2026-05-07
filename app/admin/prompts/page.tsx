@@ -167,7 +167,7 @@ export default function PromptsPage() {
                       }}
                     />
                     {row.error && (
-                      <div style={{ color: 'var(--red)', fontSize: 10, marginTop: 3 }}>{row.error}</div>
+                      <div style={{ color: '#ef4444', fontSize: 10, marginTop: 3 }}>{row.error}</div>
                     )}
                   </td>
 
