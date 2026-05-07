@@ -315,3 +315,31 @@ export type Asset = {
     model_used: string
   }
 }
+
+export type AssetVersion = {
+  id: string
+  asset_id: string
+  version_number: number
+  source: string
+  storage_url: string
+  storage_bucket?: string
+  model_used?: string
+  uploaded_by?: string
+  is_current: boolean
+  created_at: string
+  metadata?: Record<string, unknown>
+}
+
+export type AssetWithVersions = {
+  id: string
+  project_id: string
+  step_key: string
+  name: string
+  type?: string
+  discipline?: string
+  review_status: 'pending' | 'approved' | 'rejected' | 'invalidated'
+  created_at: string
+  job_id?: string
+  asset_versions: AssetVersion[]
+  projects?: { id: string; name: string }
+}

@@ -692,6 +692,7 @@ function PipelineApp({
             fitViewOptions={{ padding: 0.12, maxZoom: 0.8 }}
             minZoom={0.06}
             maxZoom={2}
+            deleteKeyCode={null}
             proOptions={{ hideAttribution: true }}
             style={{ background: 'transparent', width: '100%', height: '100%' }}
           >

@@ -528,6 +528,14 @@ function ValidationFeedback({ result }: { result: ValidationResult }) {
 
 type GDDTab = 'overview' | 'characters' | 'levels' | 'direction' | 'dev'
 
+function toStr(v: unknown): string {
+  if (v == null) return '–'
+  if (typeof v === 'string') return v
+  if (Array.isArray(v)) return v.map(toStr).join(', ')
+  if (typeof v === 'object') return Object.entries(v as Record<string, unknown>).map(([k, val]) => `${k}: ${toStr(val)}`).join(' · ')
+  return String(v)
+}
+
 function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
   const [tab, setTab] = useState<GDDTab>('overview')
 
@@ -540,12 +548,12 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
   const DIFF_COLOR: Record<string, string> = {
     easy: 'var(--cat-code)', medium: 'var(--cat-gate)', hard: 'var(--cat-output)', boss: 'oklch(0.65 0.25 340)',
   }
-  const mechNames: Record<string, string> = Object.fromEntries(gdd.mechanics.map(m => [m.id, m.name]))
+  const mechNames: Record<string, string> = Object.fromEntries((gdd.mechanics ?? []).map(m => [m.id, m.name]))
 
   const TABS: { id: GDDTab; label: string; count?: number }[] = [
     { id: 'overview',    label: 'Overview' },
-    { id: 'characters',  label: 'Characters', count: gdd.characters.length },
-    { id: 'levels',      label: 'Levels',     count: gdd.levels.length },
+    { id: 'characters',  label: 'Characters', count: gdd.characters?.length },
+    { id: 'levels',      label: 'Levels',     count: gdd.levels?.length },
     { id: 'direction',   label: 'Direction' },
     { id: 'dev',         label: 'Dev' },
   ]
@@ -620,7 +628,7 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {[
                   ['Genre', gdd.project.genre], ['Tone', gdd.project.tone],
-                  ['Engine', gdd.development.suggested_engine], ['Scope', gdd.development.estimated_scope],
+                  ['Engine', gdd.development?.suggested_engine], ['Scope', gdd.development?.estimated_scope],
                   ['Platform', gdd.project.target_platform ?? '–'], ['Camera', gdd.project.camera ?? '–'],
                 ].map(([k, v]) => (
                   <div key={k} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '8px 12px' }}>
@@ -636,15 +644,15 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
                 </div>
               )}
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', borderBottom: '1px solid var(--line)', paddingBottom: 6, marginTop: 4 }}>
-                Mechanics ({gdd.mechanics.length})
+                Mechanics ({gdd.mechanics?.length ?? 0})
               </div>
-              {gdd.mechanics.map((m, i) => (
+              {(gdd.mechanics ?? []).map((m, i) => (
                 <div key={i} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 14px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-0)' }}>{m.name}</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: TYPE_COLOR[m.type] ?? 'var(--text-3)', background: `color-mix(in oklch, ${TYPE_COLOR[m.type] ?? 'var(--text-3)'} 10%, var(--bg-3))`, padding: '2px 7px', borderRadius: 3 }}>{m.type}</span>
+                    <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-0)' }}>{toStr(m.name)}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: TYPE_COLOR[String(m.type)] ?? 'var(--text-3)', background: `color-mix(in oklch, ${TYPE_COLOR[String(m.type)] ?? 'var(--text-3)'} 10%, var(--bg-3))`, padding: '2px 7px', borderRadius: 3 }}>{toStr(m.type)}</span>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>{m.description}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>{toStr(m.description)}</div>
                   {m.gameplay_tags && m.gameplay_tags.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 6 }}>
                       {m.gameplay_tags.map((t, j) => (
@@ -658,15 +666,15 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
           )}
 
           {/* ── Characters ── */}
-          {tab === 'characters' && gdd.characters.map((c, i) => (
+          {tab === 'characters' && (gdd.characters ?? []).map((c, i) => (
             <div key={i} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 14px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-0)' }}>{c.name}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: ROLE_COLOR[c.role] ?? 'var(--text-3)', background: `color-mix(in oklch, ${ROLE_COLOR[c.role] ?? 'var(--text-3)'} 10%, var(--bg-3))`, padding: '2px 7px', borderRadius: 3 }}>{c.role}</span>
+                <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-0)' }}>{toStr(c.name)}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: ROLE_COLOR[String(c.role)] ?? 'var(--text-3)', background: `color-mix(in oklch, ${ROLE_COLOR[String(c.role)] ?? 'var(--text-3)'} 10%, var(--bg-3))`, padding: '2px 7px', borderRadius: 3 }}>{toStr(c.role)}</span>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, marginBottom: c.personality ? 4 : 6 }}>{c.description}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, marginBottom: c.personality ? 4 : 6 }}>{toStr(c.description)}</div>
               {c.personality && (
-                <div style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic', marginBottom: 6, lineHeight: 1.4 }}>{c.personality}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic', marginBottom: 6, lineHeight: 1.4 }}>{toStr(c.personality)}</div>
               )}
               {c.abilities && c.abilities.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
@@ -694,19 +702,19 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
           ))}
 
           {/* ── Levels ── */}
-          {tab === 'levels' && gdd.levels.map((l, i) => (
+          {tab === 'levels' && (gdd.levels ?? []).map((l, i) => (
             <div key={i} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 14px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)' }}>#{l.order ?? i + 1}</span>
-                <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-0)' }}>{l.name}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: DIFF_COLOR[l.difficulty] ?? 'var(--text-3)', background: `color-mix(in oklch, ${DIFF_COLOR[l.difficulty] ?? 'var(--text-3)'} 10%, var(--bg-3))`, padding: '2px 7px', borderRadius: 3 }}>{l.difficulty}</span>
+                <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-0)' }}>{toStr(l.name)}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: DIFF_COLOR[String(l.difficulty)] ?? 'var(--text-3)', background: `color-mix(in oklch, ${DIFF_COLOR[String(l.difficulty)] ?? 'var(--text-3)'} 10%, var(--bg-3))`, padding: '2px 7px', borderRadius: 3 }}>{toStr(l.difficulty)}</span>
               </div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 4 }}>{typeof l.environment === 'object' && l.environment != null ? (l.environment as Record<string,string>).theme ?? (l.environment as Record<string,string>).type ?? '' : l.environment}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>{l.description}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 4 }}>{toStr(l.environment)}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>{toStr(l.description)}</div>
               {l.objectives && l.objectives.length > 0 && (
                 <div style={{ marginTop: 5 }}>
                   {l.objectives.map((o, j) => (
-                    <div key={j} style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>› {o}</div>
+                    <div key={j} style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>› {toStr(o)}</div>
                   ))}
                 </div>
               )}
@@ -734,25 +742,25 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', borderBottom: '1px solid var(--line)', paddingBottom: 6 }}>Art Direction</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {[
-                  ['Style', gdd.art_direction.style],
-                  ['Palette', gdd.art_direction.palette],
-                  ['Sprite res.', gdd.art_direction.sprite_resolution ?? gdd.art_direction.resolution ?? '–'],
-                  ['Background res.', gdd.art_direction.background_resolution ?? '–'],
-                  ['Lighting', gdd.art_direction.lighting_style ?? '–'],
-                  ['UI style', gdd.art_direction.ui_style ?? '–'],
+                  ['Style', gdd.art_direction?.style],
+                  ['Palette', gdd.art_direction?.palette],
+                  ['Sprite res.', gdd.art_direction?.sprite_resolution ?? gdd.art_direction?.resolution ?? '–'],
+                  ['Background res.', gdd.art_direction?.background_resolution ?? '–'],
+                  ['Lighting', gdd.art_direction?.lighting_style ?? '–'],
+                  ['UI style', gdd.art_direction?.ui_style ?? '–'],
                 ].map(([k, v]) => (
                   <div key={k} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '8px 12px' }}>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{k}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-0)', fontWeight: 500 }}>{v}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-0)', fontWeight: 500 }}>{toStr(v)}</div>
                   </div>
                 ))}
               </div>
-              {gdd.art_direction.references && gdd.art_direction.references.length > 0 && (
+              {gdd.art_direction?.references && gdd.art_direction.references.length > 0 && (
                 <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '8px 12px' }}>
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>References</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                     {gdd.art_direction.references.map((r, i) => (
-                      <span key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-design)', background: 'color-mix(in oklch, var(--cat-design) 10%, var(--bg-3))', border: '1px solid color-mix(in oklch, var(--cat-design) 25%, transparent)', padding: '2px 8px', borderRadius: 3 }}>{r}</span>
+                      <span key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-design)', background: 'color-mix(in oklch, var(--cat-design) 10%, var(--bg-3))', border: '1px solid color-mix(in oklch, var(--cat-design) 25%, transparent)', padding: '2px 8px', borderRadius: 3 }}>{toStr(r)}</span>
                     ))}
                   </div>
                 </div>
@@ -761,14 +769,14 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', borderBottom: '1px solid var(--line)', paddingBottom: 6, marginTop: 8 }}>Audio Direction</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {[
-                  ['Mood', gdd.audio_direction.music_mood],
-                  ['Style', gdd.audio_direction.music_style],
-                  ['Adaptive', gdd.audio_direction.adaptive_audio ?? '–'],
-                  ['SFX notes', gdd.audio_direction.sfx_notes],
+                  ['Mood', gdd.audio_direction?.music_mood],
+                  ['Style', gdd.audio_direction?.music_style],
+                  ['Adaptive', gdd.audio_direction?.adaptive_audio ?? '–'],
+                  ['SFX notes', gdd.audio_direction?.sfx_notes],
                 ].map(([k, v]) => (
                   <div key={k} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '8px 12px' }}>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{k}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-0)', fontWeight: 500 }}>{v}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-0)', fontWeight: 500 }}>{toStr(v)}</div>
                   </div>
                 ))}
               </div>
@@ -778,7 +786,7 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
           {/* ── Dev ── */}
           {tab === 'dev' && (
             <>
-              {gdd.development.core_features && gdd.development.core_features.length > 0 && (
+              {gdd.development?.core_features && gdd.development.core_features.length > 0 && (
                 <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 14px' }}>
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--cat-code)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Core Features</div>
                   {gdd.development.core_features.map((f, i) => (
@@ -786,7 +794,7 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
                   ))}
                 </div>
               )}
-              {gdd.development.out_of_scope && gdd.development.out_of_scope.length > 0 && (
+              {gdd.development?.out_of_scope && gdd.development.out_of_scope.length > 0 && (
                 <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 14px' }}>
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--cat-output)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Out of Scope</div>
                   {gdd.development.out_of_scope.map((f, i) => (
@@ -794,7 +802,7 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
                   ))}
                 </div>
               )}
-              {gdd.development.technical_risks && gdd.development.technical_risks.length > 0 && (
+              {gdd.development?.technical_risks && gdd.development.technical_risks.length > 0 && (
                 <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 14px' }}>
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--cat-gate)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Technical Risks</div>
                   {gdd.development.technical_risks.map((r, i) => (
@@ -809,7 +817,7 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
                     {Object.entries(gdd.systems).filter(([, v]) => v).map(([k, v]) => (
                       <div key={k}>
                         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{k.replace(/_/g, ' ')}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.5 }}>{v}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.5 }}>{toStr(v)}</div>
                       </div>
                     ))}
                   </div>
@@ -963,15 +971,15 @@ function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) 
             <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-0)', marginBottom: 2 }}>{gdd.project.name}</div>
             <MonoRow k="genre"  v={gdd.project.genre} accent />
             <MonoRow k="tone"   v={gdd.project.tone} />
-            <MonoRow k="engine" v={gdd.development.suggested_engine} />
-            <MonoRow k="scope"  v={gdd.development.estimated_scope} />
+            <MonoRow k="engine" v={gdd.development?.suggested_engine} />
+            <MonoRow k="scope"  v={gdd.development?.estimated_scope} />
             <Divider />
             <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55 }}>{gdd.project.elevator_pitch}</div>
           </div>
           <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <MonoRow k="mechanics"  v={String(gdd.mechanics.length)} />
-            <MonoRow k="levels"     v={String(gdd.levels.length)} />
-            <MonoRow k="characters" v={String(gdd.characters.length)} />
+            <MonoRow k="mechanics"  v={String(gdd.mechanics?.length ?? 0)} />
+            <MonoRow k="levels"     v={String(gdd.levels?.length ?? 0)} />
+            <MonoRow k="characters" v={String(gdd.characters?.length ?? 0)} />
           </div>
           <ActionBtn label="◈ Ver GDD completo" onClick={() => setShowGDDPreview(true)} variant="ghost" disabled={approving} />
           {error && <div style={{ fontSize: 10, color: 'var(--cat-output)', fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>{error}</div>}

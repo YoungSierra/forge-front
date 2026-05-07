@@ -218,6 +218,15 @@ export async function removeProjectMember(project_id: string, member_id: string)
 }
 
 // Assets
+export async function getAssets(filters?: { project_id?: string; step_key?: string }) {
+  const params = new URLSearchParams()
+  if (filters?.project_id) params.set('project_id', filters.project_id)
+  if (filters?.step_key)   params.set('step_key', filters.step_key)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const data = await request<{ success: boolean; assets: import('./types').AssetWithVersions[] }>(`/api/assets${qs}`)
+  return data.assets || []
+}
+
 export async function reviewAsset(asset_id: string, action: 'approve' | 'reject', notes?: string) {
   const data = await request<{ success: boolean; asset: Asset }>(`/api/assets/${asset_id}/review`, {
     method: 'PATCH',

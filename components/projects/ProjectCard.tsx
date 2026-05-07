@@ -30,6 +30,8 @@ export default function ProjectCard({ project }: { project: Project }) {
   const { user } = useAuth()
   const [showMembers, setShowMembers] = useState(false)
   const [currentMemberId, setCurrentMemberId] = useState<string | null>(null)
+  const [tipVisible, setTipVisible] = useState(false)
+  const [tipPos, setTipPos] = useState({ x: 0, y: 0 })
 
   useEffect(() => {
     if (user?.id) getMemberByAuth(user.id).then(m => setCurrentMemberId(m?.id ?? null))
@@ -85,15 +87,25 @@ export default function ProjectCard({ project }: { project: Project }) {
         cursor: 'pointer',
       }}
         onMouseEnter={e => {
-          (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--line-2)'
-          ;(e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)'
+          const hoverColor = STATUS_COLOR[project.status] ?? 'var(--line)'
+          ;(e.currentTarget as HTMLDivElement).style.borderColor = hoverColor
+          ;(e.currentTarget as HTMLDivElement).style.boxShadow = `0 4px 20px rgba(0,0,0,0.3)`
         }}
         onMouseLeave={e => {
           (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--line-2)'
           ;(e.currentTarget as HTMLDivElement).style.boxShadow = 'none'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
+        <div
+          style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}
+          onMouseEnter={e => {
+            if (!project.description) return
+            const r = e.currentTarget.getBoundingClientRect()
+            setTipPos({ x: r.left, y: r.bottom + 6 })
+            setTipVisible(true)
+          }}
+          onMouseLeave={() => setTipVisible(false)}
+        >
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', lineHeight: 1.3 }}>
             {project.name}
           </span>
@@ -164,6 +176,19 @@ export default function ProjectCard({ project }: { project: Project }) {
         </div>
       </div>
     </Link>
+
+    {tipVisible && project.description && (
+      <div style={{
+        position: 'fixed', left: tipPos.x, top: tipPos.y, zIndex: 9999,
+        maxWidth: 300, background: 'var(--bg-3)', border: '1px solid var(--line)',
+        borderRadius: 6, padding: '8px 12px',
+        fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6,
+        fontFamily: 'var(--font-mono)', pointerEvents: 'none',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.45)',
+      }}>
+        {project.description}
+      </div>
+    )}
     </>
   )
 }
