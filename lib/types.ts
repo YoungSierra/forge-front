@@ -210,11 +210,15 @@ export type Feedback = {
   projects?: { id: string; name: string }
 }
 
+export type InjectPoint = { node: string; field: string }
+export type ExtraInjectPoint = { node: string; field: string; type: 'string' | 'int' | 'float' | 'image' }
+
 export type InjectConfig = {
-  prompt: { node: string; field: string }
-  width:  { node: string; field: string }
-  height: { node: string; field: string }
-  seed:   { node: string; field: string }
+  prompt?: InjectPoint
+  width?:  InjectPoint
+  height?: InjectPoint
+  seed?:   InjectPoint
+  extra?:  Record<string, ExtraInjectPoint>
 }
 
 export type ComfyUIWorkflow = {

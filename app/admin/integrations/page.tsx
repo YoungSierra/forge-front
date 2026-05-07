@@ -6,7 +6,7 @@ import {
   getAdminWorkflows, getAdminWorkflow, createAdminWorkflow, updateAdminWorkflow, deleteAdminWorkflow,
   getModelsConfig,
 } from '@/lib/api'
-import type { StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig } from '@/lib/types'
+import type { StepConfig, ComfyUIWorkflow, InjectConfig, ExtraInjectPoint, ModelsConfig } from '@/lib/types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -24,13 +24,20 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   openrouter: ['meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-r1', 'anthropic/claude-3.5-sonnet'],
 }
 
+const IMAGE_MODELS_BY_PROVIDER: Record<string, string[]> = {
+  openai: ['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1', 'dall-e-3', 'dall-e-2'],
+  fal:    ['flux/schnell', 'flux/dev', 'flux/pro', 'flux-lora'],
+}
+
 // Auto-detection: class_type → { field }
 const AUTO_DETECT: Record<'prompt' | 'width' | 'height' | 'seed', Record<string, string>> = {
   prompt: { CLIPTextEncode: 'text', WanTextEncode: 'text' },
   width:  { EmptyLatentImage: 'width', EmptySD3LatentImage: 'width', EmptyHunyuanLatentVideo: 'width' },
   height: { EmptyLatentImage: 'height', EmptySD3LatentImage: 'height', EmptyHunyuanLatentVideo: 'height' },
-  seed:   { KSampler: 'seed', KSamplerAdvanced: 'noise_seed', RandomNoise: 'noise_seed', SamplerCustomAdvanced: 'noise_seed' },
+  seed:   { KSampler: 'seed', KSamplerAdvanced: 'noise_seed', RandomNoise: 'noise_seed', SamplerCustomAdvanced: 'noise_seed', OpenAIGPTImage1: 'seed' },
 }
+
+const EXTRA_TYPES: ExtraInjectPoint['type'][] = ['string', 'int', 'float', 'image']
 
 const TYPE_COLOR: Record<string, string> = {
   llm:     'var(--cat-code)',
@@ -103,14 +110,13 @@ function parseNodes(wf: Record<string, unknown>): WorkflowNode[] {
   }).sort((a, b) => a.title.localeCompare(b.title))
 }
 
-const EMPTY_INJECT: InjectConfig = {
-  prompt: { node: '', field: '' }, width:  { node: '', field: '' },
-  height: { node: '', field: '' }, seed:   { node: '', field: '' },
-}
+const EMPTY_INJECT: InjectConfig = {}
 
-function autoDetectInject(nodes: WorkflowNode[]): { inject: InjectConfig; undetected: (keyof InjectConfig)[] } {
-  const inject = { ...EMPTY_INJECT }
-  const undetected: (keyof InjectConfig)[] = []
+type StdPoint = 'prompt' | 'width' | 'height' | 'seed'
+
+function autoDetectInject(nodes: WorkflowNode[]): { inject: InjectConfig; undetected: StdPoint[] } {
+  const inject: InjectConfig = {}
+  const undetected: StdPoint[] = []
 
   for (const point of ['prompt', 'width', 'height', 'seed'] as const) {
     const map = AUTO_DETECT[point]
@@ -126,12 +132,13 @@ function autoDetectInject(nodes: WorkflowNode[]): { inject: InjectConfig; undete
 
 // ─── ModelSelector ────────────────────────────────────────────────────────────
 
-function ModelSelector({ value, onChange, availableProviders }: {
+function ModelSelector({ value, onChange, availableProviders, catalog = MODELS_BY_PROVIDER }: {
   value: string | null
   onChange: (v: string | null) => void
   availableProviders: Record<string, boolean>
+  catalog?: Record<string, string[]>
 }) {
-  const providers = Object.keys(MODELS_BY_PROVIDER).filter(p => availableProviders[p])
+  const providers = Object.keys(catalog).filter(p => availableProviders[p] !== false)
   const [provider, model] = value ? value.split(':') : ['', '']
 
   function set(p: string, m: string) { onChange(p && m ? `${p}:${m}` : null) }
@@ -140,7 +147,7 @@ function ModelSelector({ value, onChange, availableProviders }: {
     <div style={{ display: 'flex', gap: 8 }}>
       <div style={{ flex: 1 }}>
         <label style={labelStyle}>Provider</label>
-        <select style={selectStyle} value={provider || ''} onChange={e => set(e.target.value, MODELS_BY_PROVIDER[e.target.value]?.[0] || '')}>
+        <select style={selectStyle} value={provider || ''} onChange={e => set(e.target.value, catalog[e.target.value]?.[0] || '')}>
           <option value="">— default —</option>
           {providers.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
@@ -149,7 +156,7 @@ function ModelSelector({ value, onChange, availableProviders }: {
         <div style={{ flex: 2 }}>
           <label style={labelStyle}>Model</label>
           <select style={selectStyle} value={model || ''} onChange={e => set(provider, e.target.value)}>
-            {(MODELS_BY_PROVIDER[provider] || []).map(m => <option key={m} value={m}>{m}</option>)}
+            {(catalog[provider] || []).map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
       )}
@@ -164,15 +171,16 @@ function InjectConfigPicker({ nodes, value, onChange, undetected }: {
   nodes: WorkflowNode[]
   value: InjectConfig
   onChange: (v: InjectConfig) => void
-  undetected: (keyof InjectConfig)[]
+  undetected: StdPoint[]
 }) {
-  function setPoint(point: keyof InjectConfig, key: 'node' | 'field', val: string) {
-    const updated = { ...value, [point]: { ...value[point], [key]: val } }
+  function setPoint(point: StdPoint, key: 'node' | 'field', val: string) {
+    const current = value[point] ?? { node: '', field: '' }
+    const next: InjectConfig = { ...value, [point]: { ...current, [key]: val } }
     if (key === 'node') {
       const node = nodes.find(n => n.id === val)
-      if (node?.fields.length) updated[point].field = node.fields[0]
+      if (node?.fields.length) next[point] = { node: val, field: node.fields[0] }
     }
-    onChange(updated)
+    onChange(next)
   }
 
   return (
@@ -205,6 +213,115 @@ function InjectConfigPicker({ nodes, value, onChange, undetected }: {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// ─── ExtraInjectEditor ───────────────────────────────────────────────────────
+
+function ExtraInjectEditor({ nodes, inject, onChange }: {
+  nodes: WorkflowNode[]
+  inject: InjectConfig
+  onChange: (v: InjectConfig) => void
+}) {
+  const extra = inject.extra ?? {}
+  const keys  = Object.keys(extra)
+
+  function setExtra(updated: Record<string, ExtraInjectPoint>) {
+    onChange({ ...inject, extra: updated })
+  }
+
+  function addPoint() {
+    let k = 'new_point'
+    let i = 1
+    while (k in extra) k = `new_point_${i++}`
+    setExtra({ ...extra, [k]: { node: nodes[0]?.id ?? '', field: '', type: 'string' } })
+  }
+
+  function removePoint(key: string) {
+    const next = { ...extra }
+    delete next[key]
+    setExtra(next)
+  }
+
+  function updateKey(oldKey: string, newKey: string) {
+    if (oldKey === newKey || !newKey.trim()) return
+    const next: Record<string, ExtraInjectPoint> = {}
+    for (const [k, v] of Object.entries(extra)) next[k === oldKey ? newKey.trim() : k] = v
+    setExtra(next)
+  }
+
+  function updatePoint(key: string, patch: Partial<ExtraInjectPoint>) {
+    const point = { ...extra[key], ...patch }
+    if (patch.node) {
+      const node = nodes.find(n => n.id === patch.node)
+      if (node?.fields.length) point.field = node.fields[0]
+    }
+    setExtra({ ...extra, [key]: point })
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <label style={labelStyle}>Extra injection points</label>
+        <button type="button" onClick={addPoint} style={{
+          fontSize: 10, fontFamily: 'monospace', padding: '3px 10px', borderRadius: 5, cursor: 'pointer',
+          border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--cat-code)',
+        }}>+ Add point</button>
+      </div>
+
+      {keys.length === 0 ? (
+        <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', padding: '8px 0' }}>
+          No extra points — use for workflows with String, PrimitiveInt, LoadImage or other custom nodes.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {keys.map(key => {
+            const pt  = extra[key]
+            const nd  = nodes.find(n => n.id === pt.node)
+            return (
+              <div key={key} style={{ background: 'var(--bg-2)', borderRadius: 6, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    style={{ ...inputStyle, flex: 1, fontSize: 11, fontFamily: 'monospace' }}
+                    value={key}
+                    onChange={e => updateKey(key, e.target.value)}
+                    onBlur={e => updateKey(key, e.target.value)}
+                    placeholder="key_name"
+                  />
+                  <select
+                    style={{ ...selectStyle, width: 72, fontSize: 11, flexShrink: 0 }}
+                    value={pt.type}
+                    onChange={e => updatePoint(key, { type: e.target.value as ExtraInjectPoint['type'] })}
+                  >
+                    {EXTRA_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <button type="button" onClick={() => removePoint(key)} style={{
+                    padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer', flexShrink: 0,
+                    border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--cat-output)',
+                  }}>✕</button>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ flex: 2 }}>
+                    <label style={{ ...labelStyle, marginBottom: 3 }}>Node</label>
+                    <select style={{ ...selectStyle, fontSize: 11 }} value={pt.node} onChange={e => updatePoint(key, { node: e.target.value })}>
+                      <option value="">— select —</option>
+                      {nodes.map(n => <option key={n.id} value={n.id}>{n.title} ({n.class_type})</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ ...labelStyle, marginBottom: 3 }}>Field</label>
+                    <select style={{ ...selectStyle, fontSize: 11 }} value={pt.field} onChange={e => updatePoint(key, { field: e.target.value })}>
+                      <option value="">— select —</option>
+                      {(nd?.fields ?? []).map(f => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -347,7 +464,7 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
             {imgType === 'llm' && (
               <div>
                 <label style={labelStyle}>Image model <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(empty = default)</span></label>
-                <ModelSelector value={imgModel} onChange={setImgModel} availableProviders={availableProviders} />
+                <ModelSelector value={imgModel} onChange={setImgModel} availableProviders={availableProviders} catalog={IMAGE_MODELS_BY_PROVIDER} />
               </div>
             )}
 
@@ -395,7 +512,7 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
   const [jsonText, setJsonText] = useState('')
   const [inject, setInject]     = useState<InjectConfig>(workflow?.inject_config || EMPTY_INJECT)
   const [nodes, setNodes]       = useState<WorkflowNode[]>([])
-  const [undetected, setUndetected] = useState<(keyof InjectConfig)[]>([])
+  const [undetected, setUndetected] = useState<StdPoint[]>([])
   const [jsonError, setJsonError]   = useState('')
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState('')
@@ -407,13 +524,22 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
     setInject(workflow.inject_config || EMPTY_INJECT)
     setError(''); setSuccess('')
 
+    const savedInject = workflow.inject_config || EMPTY_INJECT
+
     const loadJson = (wf: Record<string, unknown>) => {
       setJsonText(JSON.stringify(wf, null, 2))
       const parsed = parseNodes(wf)
       setNodes(parsed)
-      const { inject: detected, undetected: missing } = autoDetectInject(parsed)
-      setInject(detected)
-      setUndetected(missing)
+      // Use saved inject_config if it has any configured points; otherwise auto-detect
+      const hasConfig = savedInject.prompt?.node || savedInject.seed?.node || Object.keys(savedInject.extra ?? {}).length > 0
+      if (hasConfig) {
+        setInject(savedInject)
+        setUndetected([])
+      } else {
+        const { inject: detected, undetected: missing } = autoDetectInject(parsed)
+        setInject(detected)
+        setUndetected(missing)
+      }
     }
 
     if (workflow.workflow_json) {
@@ -431,7 +557,8 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
       const parsed = parseNodes(JSON.parse(txt))
       setNodes(parsed)
       const { inject: detected, undetected: missing } = autoDetectInject(parsed)
-      setInject(detected)
+      // Preserve extra points already configured by the user
+      setInject(prev => ({ ...detected, extra: prev.extra }))
       setUndetected(missing)
     } catch {
       setJsonError('Invalid JSON'); setNodes([]); setUndetected([])
@@ -492,40 +619,44 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
 
       {/* Injection config — auto-detected summary */}
       {nodes.length > 0 && (
-        <div>
-          <label style={labelStyle}>Injection config</label>
-          <div style={{ background: 'var(--bg-2)', borderRadius: 6, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {(['prompt', 'width', 'height', 'seed'] as const).map(point => {
-              const cfg  = inject[point]
-              const node = nodes.find(n => n.id === cfg?.node)
-              const ok   = cfg?.node && cfg?.field
-              return (
-                <div key={point} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', width: 48, flexShrink: 0 }}>{point}</span>
-                  {ok ? (
-                    <>
-                      <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓</span>
-                      <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-2)' }}>
-                        {node?.title || cfg.node} → <strong>{cfg.field}</strong>
-                      </span>
-                    </>
-                  ) : (
-                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-output)' }}>not detected</span>
-                  )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div>
+            <label style={labelStyle}>Standard injection points</label>
+            <div style={{ background: 'var(--bg-2)', borderRadius: 6, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {(['prompt', 'width', 'height', 'seed'] as const).map(point => {
+                const cfg  = inject[point]
+                const node = nodes.find(n => n.id === cfg?.node)
+                const ok   = cfg?.node && cfg?.field
+                return (
+                  <div key={point} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', width: 48, flexShrink: 0 }}>{point}</span>
+                    {ok ? (
+                      <>
+                        <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓</span>
+                        <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-2)' }}>
+                          {node?.title || cfg!.node} → <strong>{cfg!.field}</strong>
+                        </span>
+                      </>
+                    ) : (
+                      <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)' }}>— not used</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {undetected.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-output)', marginBottom: 8 }}>
+                  {undetected.length} field{undetected.length > 1 ? 's' : ''} could not be auto-detected. Select manually:
                 </div>
-              )
-            })}
+                <InjectConfigPicker nodes={nodes} value={inject} onChange={setInject} undetected={undetected} />
+              </div>
+            )}
           </div>
 
-          {/* Manual picker only for undetected fields */}
-          {undetected.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-output)', marginBottom: 8 }}>
-                {undetected.length} field{undetected.length > 1 ? 's' : ''} could not be auto-detected. Select them manually:
-              </div>
-              <InjectConfigPicker nodes={nodes} value={inject} onChange={setInject} undetected={undetected} />
-            </div>
-          )}
+          {/* Extra injection points */}
+          <ExtraInjectEditor nodes={nodes} inject={inject} onChange={setInject} />
         </div>
       )}
 
