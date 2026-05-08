@@ -1,11 +1,15 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { Node } from '@xyflow/react'
-import type { Project } from '@/lib/types'
+import type { Project, ProjectMember } from '@/lib/types'
 import type { ForgeNodeData } from './ForgeNode'
 import UserMenu from '@/components/layout/UserMenu'
 import ReviewBadge from '@/components/layout/ReviewBadge'
+import MembersModal from '@/components/projects/MembersModal'
+import { useAuth } from '@/lib/auth-context'
+import { getProjectMembers } from '@/lib/api'
 
 type PipelinePhase = 'idle' | 'running' | 'error'
 
@@ -18,8 +22,105 @@ interface Props {
   nodes?: Node[]
 }
 
+/* Avatar individual — usa inicial si no hay imagen */
+function Avatar({ name, url, size = 24 }: { name: string; url?: string; size?: number }) {
+  if (url) {
+    return (
+      <img
+        src={url} alt={name}
+        style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--bg-1)', flexShrink: 0 }}
+      />
+    )
+  }
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      background: 'var(--bg-4)', border: '2px solid var(--bg-1)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.38, fontWeight: 700, color: 'var(--text-2)',
+    }}>
+      {name.charAt(0).toUpperCase()}
+    </div>
+  )
+}
+
+/* Stack de avatares + botón que abre el modal */
+function MembersButton({ project, currentMemberId }: { project: Project; currentMemberId: string | null }) {
+  const [members, setMembers]     = useState<ProjectMember[]>([])
+  const [showModal, setShowModal] = useState(false)
+
+  function loadMembers() {
+    getProjectMembers(project.id).then(setMembers).catch(() => {})
+  }
+
+  useEffect(() => { loadMembers() }, [project.id])
+
+  const visible  = members.slice(0, 3)
+  const overflow = members.length - visible.length
+
+  return (
+    <>
+      <button
+        onClick={() => setShowModal(true)}
+        title="Ver equipo del proyecto"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 4,
+          background: 'none', border: '1px solid var(--line-2)',
+          borderRadius: 99, padding: '3px 10px 3px 4px',
+          cursor: 'pointer', transition: 'border-color 100ms',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--line)')}
+        onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
+      >
+        {/* Stack de avatares (superpuestos) */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {visible.map((pm, i) => (
+            <div key={pm.id} style={{ marginLeft: i === 0 ? 0 : -8, zIndex: visible.length - i }}>
+              <Avatar name={pm.members.display_name} url={pm.members.avatar_url} size={22} />
+            </div>
+          ))}
+          {overflow > 0 && (
+            <div style={{
+              marginLeft: -8, zIndex: 0,
+              width: 22, height: 22, borderRadius: '50%',
+              background: 'var(--bg-4)', border: '2px solid var(--bg-1)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 8, fontWeight: 700, color: 'var(--text-3)',
+              fontFamily: 'var(--font-mono)',
+            }}>
+              +{overflow}
+            </div>
+          )}
+        </div>
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginLeft: 4 }}>
+          {members.length} {members.length === 1 ? 'member' : 'members'}
+        </span>
+      </button>
+
+      {showModal && (
+        <MembersModal
+          projectId={project.id}
+          projectName={project.name}
+          ownerMemberId={project.owner_member_id}
+          currentMemberId={currentMemberId}
+          onClose={() => { setShowModal(false); loadMembers() }}
+        />
+      )}
+    </>
+  )
+}
+
 export default function ForgeToolbar({ project, phase, onRefresh, onRunPipeline, runProgress, nodes = [] }: Props) {
-  const approvable = nodes.filter(n => {
+  const { user } = useAuth()
+  const [currentMemberId, setCurrentMemberId] = useState<string | null>(null)
+
+  /* Carga el memberId del usuario actual desde localStorage (ya guardado por AuthProvider) */
+  useEffect(() => {
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+    if (stored) setCurrentMemberId(stored)
+  }, [user])
+
+  const approvable    = nodes.filter(n => {
     if (n.type === 'forgeGroup') return false
     const d = n.data as unknown as ForgeNodeData
     return !d.comingSoon
@@ -56,12 +157,12 @@ export default function ForgeToolbar({ project, phase, onRefresh, onRunPipeline,
 
       <div className="tb-divider" />
 
-      {/* Actions */}
+      {/* Acciones */}
       <button className="tb-btn" onClick={onRefresh} title="Refresh pipeline state (R)">
         ↻ Refresh
       </button>
 
-      {/* Run All button — only when project exists and there are idle nodes */}
+      {/* Botón Run All — solo cuando hay nodos idle */}
       {hasProject && onRunPipeline && idleCount > 0 && phase !== 'running' && (
         <button
           className="tb-btn"
@@ -75,14 +176,14 @@ export default function ForgeToolbar({ project, phase, onRefresh, onRunPipeline,
 
       <div className="tb-spacer" />
 
-      {/* Progress during execution */}
+      {/* Progreso durante ejecución */}
       {phase === 'running' && runProgress && (
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)' }}>
           {runProgress.done}/{runProgress.total} nodes
         </span>
       )}
 
-      {/* Static progress */}
+      {/* Progreso estático */}
       {phase !== 'running' && (
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>
           {approvedCount}/{totalCount} approved
@@ -91,7 +192,14 @@ export default function ForgeToolbar({ project, phase, onRefresh, onRunPipeline,
 
       <div className="tb-divider" />
 
-      {/* Status pill */}
+      {/* Stack de miembros del proyecto */}
+      {hasProject && (
+        <MembersButton project={project} currentMemberId={currentMemberId} />
+      )}
+
+      <div className="tb-divider" />
+
+      {/* Pill de estado */}
       {phase !== 'idle' && (
         <div className={`tb-status-pill${phase === 'running' ? ' running' : ' error'}`}>
           <div className="dot" />
