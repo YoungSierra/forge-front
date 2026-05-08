@@ -5,6 +5,7 @@ import type { Node } from '@xyflow/react'
 import type { ForgeNodeData } from './ForgeNode'
 import { CAT_VAR } from './ForgeNode'
 import DetailModal, { ImageReferenceModal, CharatersModal } from './DetailModal'
+import PipelineSuggestionModal from './PipelineSuggestionModal'
 import type {
   Project, GameFormData, GDD, ValidationResult,
   SpritePreview, ScriptFile, ProjectMember,
@@ -867,7 +868,9 @@ interface NewGamePanelProps {
 function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) {
   const [phase, setPhase] = useState<NewGamePhase>('form')
   const [approving, setApproving] = useState(false)
-  const [showGDDPreview, setShowGDDPreview] = useState(false)
+  const [showGDDPreview,        setShowGDDPreview]        = useState(false)
+  const [pendingProject,        setPendingProject]        = useState<Project | null>(null)
+  const [showPipelineSuggestion, setShowPipelineSuggestion] = useState(false)
   const [ideaPrompt, setIdeaPrompt] = useState('')
   const [params, setParams] = useState<Record<string, string | string[]>>(initParamValues)
   const [showParams, setShowParams] = useState(true)
@@ -950,7 +953,10 @@ function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) 
         const res = await approveStep1(payload)
         saveGDDInput(res.project.id, { ideaPrompt, params })
         onLog('Project created!')
-        onProjectCreated(res.project)
+        // Mostrar modal de sugerencia de pipeline antes de abrir el canvas
+        setPendingProject(res.project)
+        setShowPipelineSuggestion(true)
+        setApproving(false)
         return
       } catch (e) {
         if (attempt === 2) {
@@ -959,6 +965,17 @@ function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) 
         }
       }
     }
+  }
+
+  /* ── Modal de sugerencia de pipeline (post-aprobación GDD) ── */
+  if (showPipelineSuggestion && pendingProject) {
+    return (
+      <PipelineSuggestionModal
+        project={pendingProject}
+        onConfirm={() => { setShowPipelineSuggestion(false); onProjectCreated(pendingProject) }}
+        onSkip={()    => { setShowPipelineSuggestion(false); onProjectCreated(pendingProject) }}
+      />
+    )
   }
 
   /* ── Review ── */

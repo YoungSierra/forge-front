@@ -712,6 +712,36 @@ export async function generateArtDirectionIntake(project_id: string, input_conte
   return data.art_direction_intake
 }
 
+// ── Pipeline config ──────────────────────────────────────────────────────────
+
+export type PipelineSuggestion = {
+  nodeId:  string
+  active:  boolean
+  reason:  string
+}
+
+export type PipelineCatalogEntry = {
+  nodeId:      string
+  phase:       string
+  label:       string
+  description: string
+}
+
+export async function suggestPipeline(project_id: string): Promise<{ suggestions: PipelineSuggestion[]; catalog: PipelineCatalogEntry[] }> {
+  const data = await request<{ success: boolean; suggestions: PipelineSuggestion[]; catalog: PipelineCatalogEntry[] }>(
+    `/api/projects/${project_id}/suggest-pipeline`,
+    { method: 'POST' }
+  )
+  return { suggestions: data.suggestions, catalog: data.catalog }
+}
+
+export async function savePipelineConfig(project_id: string, active_nodes: string[]): Promise<void> {
+  await request(`/api/projects/${project_id}/pipeline-config`, {
+    method: 'PATCH',
+    body: JSON.stringify({ active_nodes }),
+  })
+}
+
 export interface VisualGuide {
   style_summary: string
   palette: { name: string; hex: string; usage: string }[]
