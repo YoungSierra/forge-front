@@ -727,12 +727,13 @@ export type PipelineCatalogEntry = {
   description: string
 }
 
-export async function suggestPipeline(project_id: string): Promise<{ suggestions: PipelineSuggestion[]; catalog: PipelineCatalogEntry[] }> {
-  const data = await request<{ success: boolean; suggestions: PipelineSuggestion[]; catalog: PipelineCatalogEntry[] }>(
-    `/api/projects/${project_id}/suggest-pipeline`,
+export async function suggestPipeline(project_id: string, force = false): Promise<{ suggestions: PipelineSuggestion[]; catalog: PipelineCatalogEntry[]; from_cache?: boolean }> {
+  const url = `/api/projects/${project_id}/suggest-pipeline${force ? '?force=true' : ''}`
+  const data = await request<{ success: boolean; suggestions: PipelineSuggestion[]; catalog: PipelineCatalogEntry[]; from_cache?: boolean }>(
+    url,
     { method: 'POST' }
   )
-  return { suggestions: data.suggestions, catalog: data.catalog }
+  return { suggestions: data.suggestions, catalog: data.catalog, from_cache: data.from_cache }
 }
 
 export async function savePipelineConfig(project_id: string, active_nodes: string[]): Promise<void> {

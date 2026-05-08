@@ -25,7 +25,7 @@ import ForgeStatusBar from './ForgeStatusBar'
 import ContextMenu, { type ContextMenuState } from './ContextMenu'
 import NewProjectModal from './NewProjectModal'
 import type { Project } from '@/lib/types'
-import { getTemplate, type TemplateCatalogNode } from '@/lib/templates'
+import { getTemplate, CATALOG_ALL, TEMPLATES, type TemplateCatalogNode } from '@/lib/templates'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
 import type { CanvasLayout } from '@/lib/canvas-storage'
 import { executePipeline } from '@/lib/pipelineExecutor'
@@ -42,6 +42,12 @@ function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []
     const sk = (n.data as unknown as ForgeNodeData).stepKey
     if (sk) stepKeyToNodeId.set(sk, n.id)
   }
+
+  // Nodos excluidos del pipeline config — siempre visibles
+  const REQUIRED_IDS = new Set(['gdd', 'export'])
+
+  // active_nodes del pipeline config guardado (si existe)
+  const activeNodes = project?.concept?.pipeline_config?.active_nodes
 
   // Build approved + pending_review sets
   // step_1_concept is the DB key for the GDD wizard job — it must resolve to node id 'gdd'
@@ -72,6 +78,12 @@ function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []
   return nodes.map(n => {
     if (n.type === 'forgeGroup') return n
     const data = n.data as unknown as ForgeNodeData
+
+    // Si hay pipeline config y este nodo no está en la lista de activos, marcarlo como comingSoon
+    if (activeNodes && !REQUIRED_IDS.has(n.id) && !activeNodes.includes(n.id) && !approved.has(n.id)) {
+      return { ...n, data: { ...data, comingSoon: true } }
+    }
+
     if (data.comingSoon) return n
 
     const nodeApproved = approved.has(n.id)
@@ -490,6 +502,28 @@ function PipelineApp({
     setFramePrompt({ x: flowX, y: flowY })
   }
 
+  function handleCleanCanvas() {
+    const keptIds = new Set<string>()
+    const keptNodes = flowNodes.filter(n => {
+      if (n.type === 'forgeGroup') return true
+      if (FIXED_NODE_IDS.has(n.id)) { keptIds.add(n.id); return true }
+      const d = n.data as unknown as ForgeNodeData
+      if (d.approved || d.status === 'complete' || d.status === 'pending_review') {
+        keptIds.add(n.id); return true
+      }
+      return false
+    })
+    const keptEdges = flowEdges.filter(e =>
+      keptIds.has(e.source as string) && keptIds.has(e.target as string)
+    )
+    setFlowNodes(keptNodes)
+    setFlowEdges(keptEdges)
+    if (selectedId && !keptIds.has(selectedId) && flowNodes.find(n => n.id === selectedId)?.type !== 'forgeGroup') {
+      setSelectedId(null)
+    }
+    setLog('Canvas cleaned — idle and locked nodes removed')
+  }
+
   function confirmFrame(name: string) {
     if (!framePrompt) return
     const id = `frame-${Date.now()}`
@@ -666,6 +700,52 @@ function PipelineApp({
     }
   }
 
+  // Aplica pipeline config al canvas sin esperar recarga del servidor.
+  // Construye el canvas desde CATALOG_ALL para no estar atado a un solo template.
+  function handlePipelineApply(activeNodes: string[]) {
+    const updatedProject = liveProject ? {
+      ...liveProject,
+      concept: {
+        ...liveProject.concept,
+        pipeline_config: { active_nodes: activeNodes, configured_at: new Date().toISOString() },
+      },
+    } : null
+
+    setLiveProject(updatedProject)
+
+    // Solo dibujar nodos si el canvas aún está vacío (sin template aplicado)
+    const nonFixed = flowNodes.filter(n => n.id !== 'gdd' && n.id !== 'export' && n.type !== 'forgeGroup')
+    if (nonFixed.length > 0 || !updatedProject) return
+
+    // Construir solo los nodos activos + fijos
+    const activeSet = new Set(activeNodes)
+    const fixed = buildFixedNodes(updatedProject)
+    const allNodes = [...fixed]
+    for (const entry of CATALOG_ALL) {
+      if (fixed.some(n => n.id === entry.id)) continue
+      if (!activeSet.has(entry.id)) continue
+      allNodes.push(makeForgeNode(entry, entry.x, entry.y))
+    }
+
+    // Solo edges donde ambos extremos están en el canvas
+    const nodeIds = new Set(allNodes.map(n => n.id))
+    const edgeMap = new Map<string, Edge>()
+    for (const template of TEMPLATES) {
+      for (const te of template.edges) {
+        if (edgeMap.has(te.id)) continue
+        if (!nodeIds.has(te.source) || !nodeIds.has(te.target)) continue
+        const srcNode = allNodes.find(n => n.id === te.source)
+        const cat = srcNode ? (srcNode.data as unknown as ForgeNodeData).category : 'design'
+        edgeMap.set(te.id, fe(te.id, te.source, te.target, cat as ForgeNodeCategory))
+      }
+    }
+    const edges = Array.from(edgeMap.values())
+
+    setFlowNodes(hydrateNodes(allNodes, updatedProject, edges))
+    setFlowEdges(edges)
+    setLog('Pipeline applied')
+  }
+
   const toolbarProject = liveProject ?? {
     id: '', name: 'New project', description: '', genre: '',
     target_engine: '', status: 'draft', owner_member_id: '',
@@ -682,6 +762,7 @@ function PipelineApp({
         project={toolbarProject}
         phase={phase}
         onRefresh={handleRefresh}
+        onPipelineApply={liveProject?.id ? handlePipelineApply : undefined}
         onRunPipeline={liveProject?.id ? handleRunPipeline : undefined}
         runProgress={runProgress}
         nodes={flowNodes}
@@ -747,6 +828,7 @@ function PipelineApp({
             onDeleteNode={handleDeleteNode}
             onDeleteEdge={handleDeleteEdge}
             onCreateFrame={handleCreateFrame}
+            onCleanCanvas={handleCleanCanvas}
           />
         )}
 

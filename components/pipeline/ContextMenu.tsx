@@ -23,6 +23,7 @@ interface Props {
   onDeleteNode: (nodeId: string) => void
   onDeleteEdge: (edgeId: string) => void
   onCreateFrame: (flowX: number, flowY: number) => void
+  onCleanCanvas?: () => void
 }
 
 export default function ContextMenu({
@@ -35,6 +36,7 @@ export default function ContextMenu({
   onDeleteNode,
   onDeleteEdge,
   onCreateFrame,
+  onCleanCanvas,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -115,6 +117,15 @@ export default function ContextMenu({
           <button className="ctx-item" onClick={() => { onCreateFrame(menu.flowX, menu.flowY); onClose() }}>
             Create Frame
           </button>
+
+          {hasProject && onCleanCanvas && (
+            <>
+              <div className="ctx-divider" />
+              <button className="ctx-item ctx-item--danger" onClick={() => { onCleanCanvas(); onClose() }}>
+                Clean Canvas
+              </button>
+            </>
+          )}
 
           {!hasProject && (
             <>

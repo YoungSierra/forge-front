@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createProject, validateIdea, generateGDD, approveStep1, searchMembers, addProjectMember } from '@/lib/api'
 import type { GDD, Project, ValidationResult, Member, Discipline } from '@/lib/types'
+import PipelineSuggestionModal from './PipelineSuggestionModal'
 import GDD_PARAMS_RAW from '@/lib/gdd-params.json'
 import GDD_RULES_RAW from '@/lib/gdd-param-rules.json'
 
@@ -287,6 +288,8 @@ export default function NewProjectModal({
   const [meta, setMeta]                         = useState<unknown>(null)
   const [error, setError]                       = useState<string | null>(null)
   const [approving, setApproving]               = useState(false)
+  const [pendingProject,         setPendingProject]         = useState<Project | null>(null)
+  const [showPipelineSuggestion, setShowPipelineSuggestion] = useState(false)
   const [genStep, setGenStep]                   = useState<'gdd' | 'images' | 'done' | null>(null)
   const genStepTimer                            = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -403,7 +406,15 @@ export default function NewProjectModal({
         if (attempt > 1) await new Promise(r => setTimeout(r, 2000))
         const res = await approveStep1(payload)
         saveGDDInput(res.project_id, { ideaPrompt, params })
-        onProjectCreated(res.project)
+        if (isRegenMode) {
+          // Regeneración del GDD: el concepto pudo cambiar, preguntar si ajustar pipeline
+          setPendingProject(res.project)
+          setShowPipelineSuggestion(true)
+          setApproving(false)
+        } else {
+          // Proyecto nuevo: abrir canvas directamente sin interrupciones
+          onProjectCreated(res.project)
+        }
         return
       } catch (e) {
         if (attempt === 2) {
@@ -412,6 +423,16 @@ export default function NewProjectModal({
         }
       }
     }
+  }
+
+  if (showPipelineSuggestion && pendingProject) {
+    return (
+      <PipelineSuggestionModal
+        project={pendingProject}
+        onConfirm={() => { setShowPipelineSuggestion(false); onProjectCreated(pendingProject) }}
+        onSkip={()    => { setShowPipelineSuggestion(false); onProjectCreated(pendingProject) }}
+      />
+    )
   }
 
   if (!open) return null

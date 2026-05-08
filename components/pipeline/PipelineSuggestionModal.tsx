@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Project } from '@/lib/types'
 import type { PipelineSuggestion, PipelineCatalogEntry } from '@/lib/api'
 import { suggestPipeline, savePipelineConfig } from '@/lib/api'
@@ -29,23 +29,44 @@ export default function PipelineSuggestionModal({ project, onConfirm, onSkip }: 
   const [catalog,     setCatalog]     = useState<PipelineCatalogEntry[]>([])
   const [active,      setActive]      = useState<Set<string>>(new Set())
   const [loading,     setLoading]     = useState(true)
+  const [fromCache,   setFromCache]   = useState(false)
+  const [reanalyzing, setReanalyzing] = useState(false)
   const [saving,      setSaving]      = useState(false)
   const [error,       setError]       = useState<string | null>(null)
+  // Guard contra la doble ejecución de React 18 Strict Mode en desarrollo
+  const fetchedRef = useRef(false)
 
   useEffect(() => {
+    if (fetchedRef.current) return
+    fetchedRef.current = true
     suggestPipeline(project.id)
-      .then(({ suggestions: s, catalog: c }) => {
+      .then(({ suggestions: s, catalog: c, from_cache }) => {
         setSuggestions(s)
         setCatalog(c)
-        // Inicializar activos según sugerencia de la IA
-        const initialActive = new Set(
-          s.filter(n => n.active).map(n => n.nodeId)
-        )
+        setFromCache(!!from_cache)
+        const initialActive = new Set(s.filter(n => n.active).map(n => n.nodeId))
         setActive(initialActive)
       })
-      .catch(e => setError(e instanceof Error ? e.message : 'Error al obtener sugerencias'))
+      .catch(e => setError(e instanceof Error ? e.message : 'Failed to load suggestions'))
       .finally(() => setLoading(false))
   }, [project.id])
+
+  async function handleReanalyze() {
+    setReanalyzing(true)
+    setError(null)
+    try {
+      const { suggestions: s, catalog: c } = await suggestPipeline(project.id, true)
+      setSuggestions(s)
+      setCatalog(c)
+      setFromCache(false)
+      const initialActive = new Set(s.filter(n => n.active).map(n => n.nodeId))
+      setActive(initialActive)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to re-analyze')
+    } finally {
+      setReanalyzing(false)
+    }
+  }
 
   // Cerrar con Escape
   useEffect(() => {
@@ -70,7 +91,7 @@ export default function PipelineSuggestionModal({ project, onConfirm, onSkip }: 
       await savePipelineConfig(project.id, activeNodes)
       onConfirm(activeNodes)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al guardar configuración')
+      setError(e instanceof Error ? e.message : 'Failed to save pipeline config')
       setSaving(false)
     }
   }
@@ -111,14 +132,48 @@ export default function PipelineSuggestionModal({ project, onConfirm, onSkip }: 
         <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <div>
-              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-code)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
-                ✦ Pipeline sugerido por IA
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-code)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                  ✦ {fromCache ? 'Saved pipeline config' : 'AI-suggested pipeline'}
+                </div>
+                {fromCache && (
+                  <>
+                    <style>{`@keyframes btn-spin { to { transform: rotate(360deg); } }`}</style>
+                    <button
+                      onClick={!reanalyzing ? handleReanalyze : undefined}
+                      disabled={reanalyzing}
+                      style={{
+                        fontSize: 10, fontFamily: 'var(--font-mono)',
+                        color: reanalyzing ? 'var(--cat-code)' : 'var(--text-3)',
+                        background: reanalyzing ? 'color-mix(in oklch, var(--cat-code) 12%, var(--bg-2))' : 'var(--bg-3)',
+                        border: `1px solid ${reanalyzing ? 'color-mix(in oklch, var(--cat-code) 35%, transparent)' : 'var(--line-2)'}`,
+                        borderRadius: 4, padding: '2px 8px',
+                        cursor: reanalyzing ? 'default' : 'pointer',
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        transition: 'all 150ms',
+                      }}
+                      onMouseEnter={e => { if (!reanalyzing) e.currentTarget.style.color = 'var(--text-1)' }}
+                      onMouseLeave={e => { if (!reanalyzing) e.currentTarget.style.color = 'var(--text-3)' }}
+                    >
+                      {reanalyzing ? (
+                        <>
+                          <span style={{
+                            display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                            border: '1.5px solid var(--cat-code)', borderTopColor: 'transparent',
+                            animation: 'btn-spin 0.7s linear infinite', flexShrink: 0,
+                          }} />
+                          Analyzing…
+                        </>
+                      ) : '↺ Re-analyze'}
+                    </button>
+                  </>
+                )}
               </div>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-0)' }}>
                 {project.name}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                La IA analizó tu GDD y sugiere estos pasos de producción
+                {fromCache ? 'Showing your saved configuration — adjust as needed' : 'AI analyzed your GDD and suggests these production steps'}
               </div>
             </div>
             <button
@@ -141,7 +196,7 @@ export default function PipelineSuggestionModal({ project, onConfirm, onSkip }: 
               }} />
               <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)' }}>
-                Analizando GDD…
+                Analyzing GDD…
               </span>
             </div>
           )}
@@ -234,21 +289,21 @@ export default function PipelineSuggestionModal({ project, onConfirm, onSkip }: 
             flexShrink: 0, gap: 12,
           }}>
             <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
-              {activeCount} nodo{activeCount !== 1 ? 's' : ''} activado{activeCount !== 1 ? 's' : ''}
+              {activeCount} node{activeCount !== 1 ? 's' : ''} active
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={onSkip}
                 style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'none', cursor: 'pointer', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-2)' }}
               >
-                Usar todos los nodos
+                Use all nodes
               </button>
               <button
                 onClick={handleConfirm}
                 disabled={saving}
                 style={{ padding: '7px 20px', borderRadius: 6, border: 'none', cursor: saving ? 'not-allowed' : 'pointer', background: 'var(--cat-code)', color: '#0a0a0c', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, opacity: saving ? 0.7 : 1 }}
               >
-                {saving ? 'Guardando…' : 'Aplicar pipeline →'}
+                {saving ? 'Saving…' : 'Apply pipeline →'}
               </button>
             </div>
           </div>

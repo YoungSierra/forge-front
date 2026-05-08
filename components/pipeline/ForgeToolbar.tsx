@@ -8,6 +8,7 @@ import type { ForgeNodeData } from './ForgeNode'
 import UserMenu from '@/components/layout/UserMenu'
 import ReviewBadge from '@/components/layout/ReviewBadge'
 import MembersModal from '@/components/projects/MembersModal'
+import PipelineSuggestionModal from './PipelineSuggestionModal'
 import { useAuth } from '@/lib/auth-context'
 import { getProjectMembers } from '@/lib/api'
 
@@ -17,6 +18,7 @@ interface Props {
   project: Project
   phase: PipelinePhase
   onRefresh: () => void
+  onPipelineApply?: (activeNodes: string[]) => void
   onRunPipeline?: () => void
   runProgress?: { done: number; total: number }
   nodes?: Node[]
@@ -110,9 +112,10 @@ function MembersButton({ project, currentMemberId }: { project: Project; current
   )
 }
 
-export default function ForgeToolbar({ project, phase, onRefresh, onRunPipeline, runProgress, nodes = [] }: Props) {
+export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, runProgress, nodes = [] }: Props) {
   const { user } = useAuth()
-  const [currentMemberId, setCurrentMemberId] = useState<string | null>(null)
+  const [currentMemberId,       setCurrentMemberId]       = useState<string | null>(null)
+  const [showPipelineModal,     setShowPipelineModal]     = useState(false)
 
   /* Carga el memberId del usuario actual desde localStorage (ya guardado por AuthProvider) */
   useEffect(() => {
@@ -131,6 +134,7 @@ export default function ForgeToolbar({ project, phase, onRefresh, onRunPipeline,
   const hasProject    = !!project.id
 
   return (
+    <>
     <header className="forge-toolbar">
       {/* Brand */}
       <div className="brand">
@@ -192,6 +196,20 @@ export default function ForgeToolbar({ project, phase, onRefresh, onRunPipeline,
 
       <div className="tb-divider" />
 
+      {/* Botón de configuración del pipeline */}
+      {hasProject && (
+        <button
+          className="tb-btn"
+          onClick={() => setShowPipelineModal(true)}
+          title="Configurar pipeline del proyecto"
+          style={{ color: 'var(--text-2)' }}
+        >
+          ⚙ Pipeline
+        </button>
+      )}
+
+      <div className="tb-divider" />
+
       {/* Stack de miembros del proyecto */}
       {hasProject && (
         <MembersButton project={project} currentMemberId={currentMemberId} />
@@ -213,5 +231,14 @@ export default function ForgeToolbar({ project, phase, onRefresh, onRunPipeline,
 
       <UserMenu />
     </header>
+
+    {showPipelineModal && (
+      <PipelineSuggestionModal
+        project={project}
+        onConfirm={activeNodes => { setShowPipelineModal(false); onPipelineApply?.(activeNodes) }}
+        onSkip={()             => setShowPipelineModal(false)}
+      />
+    )}
+  </>
   )
 }

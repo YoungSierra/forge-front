@@ -156,6 +156,10 @@ export type ProjectConcept = {
     gdd?: GDD
     [key: string]: PipelineNodeArtifact | GDD | undefined
   }
+  pipeline_config?: {
+    active_nodes: string[]
+    configured_at: string
+  }
 }
 
 export type Project = {
