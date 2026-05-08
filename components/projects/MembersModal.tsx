@@ -51,7 +51,10 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
   const [adding, setAdding]           = useState(false)
   const [error, setError]             = useState<string | null>(null)
   const searchTimeout                 = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const isOwner                       = currentMemberId === ownerMemberId
+  // Puede gestionar el equipo: el owner del proyecto o cualquier admin global
+  const isOwner    = currentMemberId === ownerMemberId
+  const isAdmin    = members.some(m => m.members.id === currentMemberId && m.members.role === 'admin')
+  const canManage  = isOwner || isAdmin
 
   useEffect(() => {
     getProjectMembers(projectId)
@@ -102,7 +105,7 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
       style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, width: '100%', maxWidth: 480, maxHeight: canManage ? '80vh' : '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
@@ -123,7 +126,7 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
             ) : members.length === 0 ? (
               <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'monospace' }}>No members yet</div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: canManage ? 220 : undefined, overflowY: 'auto' }}>
                 {members.map(pm => (
                   <div key={pm.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--line-2)' }}>
                     <Avatar member={pm.members} />
@@ -145,7 +148,7 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
                         )}
                       </div>
                     </div>
-                    {isOwner && pm.members.id !== ownerMemberId && (
+                    {canManage && pm.members.id !== ownerMemberId && pm.members.id !== currentMemberId && (
                       <button
                         onClick={() => handleRemove(pm.members.id)}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 14, padding: 4, borderRadius: 4, lineHeight: 1 }}
@@ -159,7 +162,7 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
           </div>
 
           {/* Add member — only owner */}
-          {isOwner && (
+          {canManage && (
             <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 16 }}>
               <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
                 Add Member
