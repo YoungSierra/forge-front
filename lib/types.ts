@@ -334,6 +334,48 @@ export type AssetVersion = {
   metadata?: Record<string, unknown>
 }
 
+export type ImageRef = {
+  id:            string
+  project_id:    string
+  character_key: string
+  image_url:     string
+  storage_path:  string
+  round:         number
+  selected:      boolean
+  created_at:    string
+}
+
+export type CharacterRefStatus = {
+  character_key:  string
+  character_name: string
+  sprite_prompt:  string
+  total_images:   number
+  selected_count: number
+  rounds:         number
+  status:         'empty' | 'pending' | 'approved'
+  at_pool_limit:  boolean
+}
+
+export type GlobalRefStatus = {
+  total_images:   number
+  selected_count: number
+  rounds:         number
+  status:         'empty' | 'pending' | 'approved'
+  at_pool_limit:  boolean
+}
+
+export type CharacterRenderStatus = {
+  character_key:   string
+  character_name:  string
+  character_index: number
+  sprite_prompt:   string
+  status:          'empty' | 'generated' | 'approved'
+  asset_id:        string | null
+  review_status:   string | null
+  current_version: AssetVersion | null
+  total_versions:  number
+}
+
 export type AssetWithVersions = {
   id: string
   project_id: string

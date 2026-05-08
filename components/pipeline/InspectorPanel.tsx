@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import type { Node } from '@xyflow/react'
 import type { ForgeNodeData } from './ForgeNode'
 import { CAT_VAR } from './ForgeNode'
-import DetailModal from './DetailModal'
+import DetailModal, { ImageReferenceModal, CharatersModal } from './DetailModal'
 import type {
   Project, GameFormData, GDD, ValidationResult,
   SpritePreview, ScriptFile, ProjectMember,
@@ -2917,7 +2917,7 @@ function NodeContent({
   const [memberId, setMemberId] = useState<string | null>(null)
   useEffect(() => { if (user?.id) getMemberByAuth(user.id).then(m => setMemberId(m?.id ?? null)) }, [user?.id])
 
-  const [modalOpen, setModalOpen] = useState(false)
+  const [modalOpen, setModalOpen] = useState<boolean | 'generate' | 'detail'>(false)
   const [pendingResult, setPendingResult] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
   const stepKey = data.stepKey ?? node.id
@@ -3047,7 +3047,8 @@ function NodeContent({
   // 3D pipeline nodes using JsonDocPanel
   const doc3dNodes: Record<string, { title: string; fn: (id: string, ctx?: InputContext) => Promise<unknown>; rows: { k: string; v: string; accent?: boolean }[] }> = {
     modeling:   { title: 'Modeling',    fn: generateModeling,   rows: [{ k: 'engine', v: project.target_engine ?? '–', accent: true }, { k: 'characters', v: String(project.concept?.pipeline?.gdd?.characters?.length ?? 0) }] },
-    charaters:  { title: 'Characters',  fn: generateCharaters,  rows: [{ k: 'characters', v: String(project.concept?.pipeline?.gdd?.characters?.length ?? 0), accent: true }] },
+    // charaters handled separately below (requires image_reference connection)
+
     vfx:        { title: 'VFX',         fn: generateVfx,        rows: [{ k: 'genre', v: project.concept?.pipeline?.gdd?.project?.genre ?? '–', accent: true }, { k: 'engine', v: project.target_engine ?? '–' }] },
     texturing:  { title: 'Texturing',   fn: generateTexturing,  rows: [{ k: 'style', v: project.concept?.pipeline?.gdd?.art_direction?.style ?? '–', accent: true }] },
     rigging:    { title: 'Rigging',     fn: generateRigging,    rows: [{ k: 'characters', v: String(project.concept?.pipeline?.gdd?.characters?.length ?? 0), accent: true }] },
@@ -3058,6 +3059,69 @@ function NodeContent({
   }
 
   const ar = (sk: string) => onApproved ? () => onApproved(sk) : onRefresh
+
+  if (stepKey === 'charaters') {
+    const hasImageRef     = !!(nodeContext?.image_reference)
+    const imageRefApproved = !!((project.concept?.pipeline?.image_reference as Record<string, unknown> | undefined)?.approved)
+    const charCount        = project.concept?.pipeline?.gdd?.characters?.length ?? 0
+    const isApproved       = !!((project.concept?.pipeline?.charaters as Record<string, unknown> | undefined)?.approved)
+    const canGenerate      = hasImageRef && imageRefApproved && !locked
+
+    return (
+      <>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SectionTitle approved={isApproved}>Characters</SectionTitle>
+          <MonoRow k="characters" v={String(charCount)} accent />
+        </div>
+
+        {isApproved && (
+          <div style={{
+            background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+            borderRadius: 5, padding: '10px 12px',
+            fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)',
+          }}>✓ All characters approved</div>
+        )}
+
+        {!hasImageRef && (
+          <div style={{
+            background: 'color-mix(in oklch, var(--cat-gate) 10%, var(--bg-2))',
+            border: '1px solid color-mix(in oklch, var(--cat-gate) 30%, transparent)',
+            borderRadius: 5, padding: '8px 12px',
+            fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-gate)', lineHeight: 1.5,
+          }}>⚠ Connect the Image Reference node as input to enable generation.</div>
+        )}
+        {hasImageRef && !imageRefApproved && (
+          <div style={{
+            background: 'color-mix(in oklch, var(--cat-gate) 10%, var(--bg-2))',
+            border: '1px solid color-mix(in oklch, var(--cat-gate) 30%, transparent)',
+            borderRadius: 5, padding: '8px 12px',
+            fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-gate)', lineHeight: 1.5,
+          }}>⚠ Approve the Image Reference node before generating characters.</div>
+        )}
+
+        {!isApproved && canGenerate && (
+          <ActionBtn
+            label="▶ Generate characters"
+            onClick={() => setModalOpen('generate')}
+            variant="run"
+            disabled={charCount === 0}
+          />
+        )}
+
+        <ViewDetailBtn onClick={() => setModalOpen('detail')} />
+        {modalOpen === 'detail' && (
+          <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />
+        )}
+        {modalOpen === 'generate' && (
+          <CharatersModal
+            project={project}
+            onClose={() => setModalOpen(false)}
+            onApproved={() => { setModalOpen(false); ar('charaters')() }}
+          />
+        )}
+      </>
+    )
+  }
 
   if (stepKey in doc3dNodes) {
     const cfg = doc3dNodes[stepKey]
@@ -3166,6 +3230,53 @@ function NodeContent({
         <SfxPanel project={project} onRefresh={ar('sfx')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
         <ViewDetailBtn onClick={() => setModalOpen(true)} />
         {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
+      </>
+    )
+  }
+
+  if (stepKey === 'image_reference') {
+    const hasGdd     = !!(project.concept?.pipeline?.gdd?.project?.name)
+    const isApproved = !!data.approved
+
+    return (
+      <>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SectionTitle approved={isApproved}>Image Reference</SectionTitle>
+          <MonoRow k="scope" v="global · 2 images" />
+          <MonoRow k="status" v={isApproved ? 'approved' : 'pending'} />
+        </div>
+        {isApproved && (
+          <div style={{
+            background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+            borderRadius: 5, padding: '10px 12px',
+            fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)',
+          }}>✓ References approved</div>
+        )}
+        {!isApproved && !locked && (
+          <ActionBtn
+            label="▶ Generate references"
+            onClick={() => setModalOpen('generate')}
+            variant="run"
+            disabled={!hasGdd}
+          />
+        )}
+        <ViewDetailBtn onClick={() => setModalOpen('detail')} />
+        {modalOpen === 'detail' && (
+          <DetailModal
+            stepKey={stepKey}
+            project={project}
+            pendingData={pendingResult}
+            onClose={() => setModalOpen(false)}
+            nodeContext={nodeContext}
+          />
+        )}
+        {modalOpen === 'generate' && (
+          <ImageReferenceModal
+            project={project}
+            onClose={() => setModalOpen(false)}
+            onApproved={() => { setModalOpen(false); ar('image_reference')() }}
+          />
+        )}
       </>
     )
   }

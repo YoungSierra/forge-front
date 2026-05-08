@@ -540,6 +540,25 @@ export async function deleteAdminWorkflow(id: string): Promise<void> {
   await request(`/api/admin/comfyui-workflows/${id}`, { method: 'DELETE' })
 }
 
+export async function testAdminImage(
+  model: string, prompt: string, width: number, height: number
+): Promise<{ image_url: string }> {
+  return request<{ success: boolean; image_url: string }>('/api/admin/test-image', {
+    method: 'POST', body: JSON.stringify({ model, prompt, width, height }),
+  })
+}
+
+export async function testAdminWorkflow(
+  id: string,
+  values: { prompt?: string; width?: number; height?: number; seed?: number; extras?: Record<string, string | number> }
+): Promise<{ image_url: string; job_id: string }> {
+  const data = await request<{ success: boolean; image_url: string; job_id: string }>(
+    `/api/admin/comfyui-workflows/${id}/test`,
+    { method: 'POST', body: JSON.stringify(values) }
+  )
+  return { image_url: data.image_url, job_id: data.job_id }
+}
+
 // ─── Admin: prompt configs ────────────────────────────────────────────────────
 
 export async function getAdminPromptConfigs(): Promise<PromptConfig[]> {
@@ -573,6 +592,60 @@ export async function approveNode(project_id: string, stepKey: string, nodeData:
     method: 'POST',
     body: JSON.stringify({ stepKey, data: nodeData, member_id }),
   })
+}
+
+// ─── Image Reference ──────────────────────────────────────────────────────────
+
+import type { ImageRef, CharacterRefStatus, GlobalRefStatus } from './types'
+
+export async function startImageReference(project_id: string): Promise<void> {
+  await request(`/api/projects/${project_id}/image-reference/start`, { method: 'POST', body: JSON.stringify({}) })
+}
+
+export async function getImageReferenceStatus(project_id: string): Promise<{ status: GlobalRefStatus; prompt_used: string; max_pool: number }> {
+  const data = await request<{ success: boolean; status: GlobalRefStatus; prompt_used: string; max_pool: number }>(`/api/projects/${project_id}/image-reference`)
+  return { status: data.status, prompt_used: data.prompt_used, max_pool: data.max_pool }
+}
+
+export async function getImageReferencePool(project_id: string): Promise<ImageRef[]> {
+  const data = await request<{ success: boolean; images: ImageRef[] }>(`/api/projects/${project_id}/image-reference/pool`)
+  return data.images
+}
+
+export async function generateImageReferenceRound(project_id: string, count: number): Promise<ImageRef[]> {
+  const data = await request<{ success: boolean; images: ImageRef[] }>(`/api/projects/${project_id}/image-reference/generate`, {
+    method: 'POST', body: JSON.stringify({ count }),
+  })
+  return data.images
+}
+
+export async function approveImageReferenceSelection(project_id: string, selected_ids: string[]): Promise<ImageRef[]> {
+  const data = await request<{ success: boolean; selected: ImageRef[] }>(`/api/projects/${project_id}/image-reference/approve`, {
+    method: 'POST', body: JSON.stringify({ selected_ids }),
+  })
+  return data.selected
+}
+
+import type { CharacterRenderStatus, AssetVersion } from './types'
+
+export async function getCharatersStatus(project_id: string): Promise<CharacterRenderStatus[]> {
+  const data = await request<{ success: boolean; characters: CharacterRenderStatus[] }>(`/api/projects/${project_id}/charaters/status`)
+  return data.characters
+}
+
+export async function generateCharacterRender(project_id: string, char_key: string): Promise<{ version: AssetVersion | null; image_url: string }> {
+  const data = await request<{ success: boolean; version: AssetVersion | null; image_url: string }>(`/api/projects/${project_id}/charaters/${char_key}/generate`, {
+    method: 'POST', body: JSON.stringify({}),
+  })
+  return { version: data.version, image_url: data.image_url }
+}
+
+export async function approveCharacterRender(project_id: string, char_key: string): Promise<void> {
+  await request(`/api/projects/${project_id}/charaters/${char_key}/approve`, { method: 'POST', body: JSON.stringify({}) })
+}
+
+export async function approveCharatersNode(project_id: string): Promise<void> {
+  await request(`/api/projects/${project_id}/charaters/approve-node`, { method: 'POST', body: JSON.stringify({}) })
 }
 
 // Request peer review for a pipeline node

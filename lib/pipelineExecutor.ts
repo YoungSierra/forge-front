@@ -11,10 +11,17 @@ import {
   generateSplashArt, generateMarketing,
   generateModeling, generateCharaters, generateVfx, generateTexturing,
   generateRigging, generateLighting, generateAnimation, generateCinematics, generateVoice,
-  approveNode,
+  approveNode, startImageReference,
   type InputContext,
 } from './api'
 import { getNodeExecutionContext } from './nodeExecutionContext'
+
+export class PendingReviewSignal extends Error {
+  constructor(public readonly stepKey: string) {
+    super(`${stepKey} requires user review before continuing`)
+    this.name = 'PendingReviewSignal'
+  }
+}
 
 /* ─── Node execution registry ─── */
 
@@ -64,6 +71,13 @@ export const NODE_EXECUTOR: Record<string, NodeExecConfig> = {
     run: async (id, ctx) => {
       const audio = await generateAudio(id, ctx)
       await approveStep5(id, audio)
+    },
+  },
+  image_reference: {
+    title: 'Image Reference',
+    run: async (project_id) => {
+      await startImageReference(project_id)
+      throw new PendingReviewSignal('image_reference')
     },
   },
   visual_guide:         genericNode('Visual Guide',   generateVisualGuide,        'visual_guide'),
@@ -139,10 +153,11 @@ export function topoSort(nodes: Node[], edges: Edge[]): string[] {
 /* ─── Pipeline execution ─── */
 
 export type PipelineCallbacks = {
-  onNodeStart: (stepKey: string) => void
-  onNodeDone: (stepKey: string) => void
-  onNodeError: (stepKey: string, error: string) => void
-  onDone: () => void
+  onNodeStart:         (stepKey: string) => void
+  onNodeDone:          (stepKey: string) => void
+  onNodeError:         (stepKey: string, error: string) => void
+  onNodePendingReview?: (stepKey: string) => void
+  onDone:              () => void
 }
 
 export async function executePipeline(
@@ -168,6 +183,10 @@ export async function executePipeline(
       await NODE_EXECUTOR[stepKey].run(project_id, ctx)
       callbacks.onNodeDone(stepKey)
     } catch (e) {
+      if (e instanceof PendingReviewSignal) {
+        callbacks.onNodePendingReview?.(stepKey)
+        return
+      }
       const msg = e instanceof Error ? e.message : 'Unknown error'
       callbacks.onNodeError(stepKey, msg)
       return

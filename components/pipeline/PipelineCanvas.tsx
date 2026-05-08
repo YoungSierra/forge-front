@@ -602,6 +602,27 @@ function PipelineApp({
         })
         setRunProgress(p => p ? { done: p.done + 1, total: p.total } : undefined)
       },
+      onNodePendingReview: (stepKey) => {
+        setFlowNodes(ns => ns.map(n => {
+          const d = n.data as unknown as ForgeNodeData
+          if (d.stepKey === stepKey || n.id === stepKey)
+            return { ...n, data: { ...d, status: 'pending_review' as const } }
+          return n
+        }))
+        setLiveProject(prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            generation_jobs: [
+              ...(prev.generation_jobs ?? []),
+              { id: `pending-${stepKey}`, project_id: prev.id, current_step: stepKey, status: 'review', review_status: 'pending' } as never,
+            ],
+          }
+        })
+        setPhase('idle')
+        setRunProgress(undefined)
+        setLog(`"${stepKey}" is waiting for your review — open the node to select references`)
+      },
       onNodeError: (stepKey, error) => {
         setFlowNodes(ns => ns.map(n => {
           const d = n.data as unknown as ForgeNodeData

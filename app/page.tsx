@@ -20,7 +20,7 @@ export default function HomePage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
           {/* Tabs */}
           <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--line-2)' }}>
-            {([['projects', 'Projects'], ['assets', 'Asset Library']] as [Tab, string][]).map(([id, label]) => {
+            {([['projects', 'Projects']/*, ['assets', 'Asset Library']*/] as [Tab, string][]).map(([id, label]) => {
               const active = tab === id
               return (
                 <button

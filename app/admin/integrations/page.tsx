@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   getAdminStepConfigs, updateAdminStepConfig,
   getAdminWorkflows, getAdminWorkflow, createAdminWorkflow, updateAdminWorkflow, deleteAdminWorkflow,
-  getModelsConfig,
+  testAdminWorkflow, testAdminImage, getModelsConfig,
 } from '@/lib/api'
 import type { StepConfig, ComfyUIWorkflow, InjectConfig, ExtraInjectPoint, ModelsConfig } from '@/lib/types'
 
@@ -195,7 +195,7 @@ function InjectConfigPicker({ nodes, value, onChange, undetected }: {
                 <select style={{ ...selectStyle, fontSize: 11 }} value={value[point]?.node || ''} onChange={e => setPoint(point, 'node', e.target.value)}>
                   <option value="">— select node —</option>
                   {nodes.map(n => (
-                    <option key={n.id} value={n.id}>{n.title} ({n.class_type})</option>
+                    <option key={n.id} value={n.id}>[{n.id}] {n.title} ({n.class_type})</option>
                   ))}
                 </select>
               </div>
@@ -306,7 +306,7 @@ function ExtraInjectEditor({ nodes, inject, onChange }: {
                     <label style={{ ...labelStyle, marginBottom: 3 }}>Node</label>
                     <select style={{ ...selectStyle, fontSize: 11 }} value={pt.node} onChange={e => updatePoint(key, { node: e.target.value })}>
                       <option value="">— select —</option>
-                      {nodes.map(n => <option key={n.id} value={n.id}>{n.title} ({n.class_type})</option>)}
+                      {nodes.map(n => <option key={n.id} value={n.id}>[{n.id}] {n.title} ({n.class_type})</option>)}
                     </select>
                   </div>
                   <div style={{ flex: 1 }}>
@@ -322,6 +322,247 @@ function ExtraInjectEditor({ nodes, inject, onChange }: {
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── WorkflowTester ──────────────────────────────────────────────────────────
+
+function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onClose: () => void }) {
+  const inject = workflow.inject_config || {}
+  const extra  = inject.extra ?? {}
+
+  const hasSeed = !!(inject.seed?.node && inject.seed?.field)
+
+  // Read existing seed from workflow_json if available
+  const existingSeed = (() => {
+    if (!hasSeed || !inject.seed?.node || !inject.seed?.field) return ''
+    const node = (workflow.workflow_json as Record<string, Record<string, Record<string, unknown>>> | undefined)?.[inject.seed.node]
+    const val  = node?.inputs?.[inject.seed.field]
+    return val !== undefined ? String(val) : ''
+  })()
+
+  // Build initial values
+  const initValues = () => {
+    const v: Record<string, string> = {}
+    if (inject.prompt?.node)  v['prompt'] = 'A stylized 3D character in T-pose, white background, high quality render'
+    if (inject.width?.node)   v['width']  = '512'
+    if (inject.height?.node)  v['height'] = '512'
+    if (hasSeed)              v['seed']   = existingSeed
+    for (const [key, pt] of Object.entries(extra)) {
+      v[key] = pt.type === 'int' ? '1' : pt.type === 'float' ? '1.0' : ''
+    }
+    return v
+  }
+
+  const [values, setValues]   = useState<Record<string, string>>(initValues)
+  const [running, setRunning] = useState(false)
+  const [result, setResult]   = useState<string | null>(null)
+  const [error, setError]     = useState<string | null>(null)
+
+  function set(key: string, val: string) { setValues(prev => ({ ...prev, [key]: val })) }
+
+  async function handleRun() {
+    setRunning(true); setResult(null); setError(null)
+    try {
+      const payload: Parameters<typeof testAdminWorkflow>[1] = {}
+      if ('prompt' in values && values['prompt']) payload.prompt = values['prompt']
+      if ('width'  in values && values['width'])  payload.width  = Number(values['width'])
+      if ('height' in values && values['height']) payload.height = Number(values['height'])
+      if ('seed'   in values && values['seed'])   payload.seed   = Number(values['seed'])
+      const extrasPayload: Record<string, string | number> = {}
+      for (const [key, pt] of Object.entries(extra)) {
+        if (!values[key]) continue
+        extrasPayload[key] = pt.type === 'int' || pt.type === 'float' ? Number(values[key]) : values[key]
+      }
+      if (Object.keys(extrasPayload).length) payload.extras = extrasPayload
+      const res = await testAdminWorkflow(workflow.id, payload)
+      setResult(res.image_url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error')
+    } finally { setRunning(false) }
+  }
+
+  const TYPE_INPUT: Record<string, string> = { int: 'number', float: 'number', string: 'text', image: 'text' }
+
+  return (
+    <div onClick={e => e.target === e.currentTarget && onClose()} style={{
+      position: 'fixed', inset: 0, zIndex: 3000,
+      background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+    }}>
+      <div style={{
+        background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12,
+        width: '100%', maxWidth: 520, maxHeight: '90vh', overflow: 'auto',
+        boxShadow: '0 24px 80px rgba(0,0,0,0.6)', padding: 24, display: 'flex', flexDirection: 'column', gap: 16,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-0)' }}>Test workflow</div>
+            <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', marginTop: 2 }}>{workflow.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--text-3)' }}>✕</button>
+        </div>
+
+        {/* Standard points */}
+        {inject.prompt?.node && (
+          <div>
+            <label style={labelStyle}>prompt</label>
+            <textarea style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 72, resize: 'vertical' }}
+              value={values['prompt'] ?? ''} onChange={e => set('prompt', e.target.value)} />
+          </div>
+        )}
+        {(inject.width?.node || inject.height?.node) && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            {inject.width?.node  && <div style={{ flex: 1 }}><label style={labelStyle}>width</label><input  type="number" style={inputStyle} value={values['width']  ?? '512'} onChange={e => set('width',  e.target.value)} /></div>}
+            {inject.height?.node && <div style={{ flex: 1 }}><label style={labelStyle}>height</label><input type="number" style={inputStyle} value={values['height'] ?? '512'} onChange={e => set('height', e.target.value)} /></div>}
+          </div>
+        )}
+        {hasSeed && (
+          <div>
+            <label style={labelStyle}>seed <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(clear to use random)</span></label>
+            <input type="number" style={inputStyle} value={values['seed'] ?? ''} onChange={e => set('seed', e.target.value)} placeholder="random" />
+          </div>
+        )}
+
+        {/* Extra injection points */}
+        {Object.entries(extra).length > 0 && (
+          <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Extra injection points</div>
+            {Object.entries(extra).map(([key, pt]) => (
+              <div key={key}>
+                <label style={labelStyle}>
+                  {key} <span style={{ color: 'var(--cat-code)', textTransform: 'none', letterSpacing: 0 }}>{pt.type}</span>
+                  {pt.type === 'image' && <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}> — filename or URL</span>}
+                </label>
+                {pt.type === 'string' ? (
+                  <textarea style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 60, resize: 'vertical' }}
+                    value={values[key] ?? ''} onChange={e => set(key, e.target.value)} />
+                ) : (
+                  <input type={TYPE_INPUT[pt.type] ?? 'text'} style={inputStyle}
+                    value={values[key] ?? ''} onChange={e => set(key, e.target.value)} />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && (
+          <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
+        )}
+
+        {result && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓ Generated</div>
+            <img src={result} alt="result" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line-2)', display: 'block' }} />
+            <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>Open full size ↗</a>
+          </div>
+        )}
+
+        <button
+          type="button" onClick={handleRun} disabled={running}
+          style={{ ...btnStyle(!running, true), display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+        >
+          {running
+            ? <><span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />Running…</>
+            : '▶ Run workflow'}
+        </button>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
+    </div>
+  )
+}
+
+// ─── ImageTester ─────────────────────────────────────────────────────────────
+
+function ImageTester({ model, onClose }: { model: string; onClose: () => void }) {
+  const [prompt,  setPrompt]  = useState('A stylized game character, concept art, detailed illustration')
+  const [width,   setWidth]   = useState(512)
+  const [height,  setHeight]  = useState(512)
+  const [running, setRunning] = useState(false)
+  const [result,  setResult]  = useState<string | null>(null)
+  const [error,   setError]   = useState<string | null>(null)
+
+  const [provider] = model.split(':')
+
+  async function handleRun() {
+    setRunning(true); setResult(null); setError(null)
+    try {
+      const res = await testAdminImage(model, prompt, width, height)
+      setResult(res.image_url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error')
+    } finally { setRunning(false) }
+  }
+
+  return (
+    <div onClick={e => e.target === e.currentTarget && onClose()} style={{
+      position: 'fixed', inset: 0, zIndex: 3000,
+      background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+    }}>
+      <div style={{
+        background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12,
+        width: '100%', maxWidth: 480, maxHeight: '90vh', overflow: 'auto',
+        boxShadow: '0 24px 80px rgba(0,0,0,0.6)', padding: 24, display: 'flex', flexDirection: 'column', gap: 16,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-0)' }}>Test image model</div>
+            <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', marginTop: 2 }}>{model}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--text-3)' }}>✕</button>
+        </div>
+
+        <div>
+          <label style={labelStyle}>Prompt</label>
+          <textarea
+            style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 80, resize: 'vertical' }}
+            value={prompt} onChange={e => setPrompt(e.target.value)}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Width</label>
+            <input type="number" style={inputStyle} value={width} min={64} max={2048} step={64}
+              onChange={e => setWidth(Number(e.target.value))} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Height</label>
+            <input type="number" style={inputStyle} value={height} min={64} max={2048} step={64}
+              onChange={e => setHeight(Number(e.target.value))} />
+          </div>
+        </div>
+
+        {provider === 'openai' && (
+          <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', padding: '6px 10px', background: 'var(--bg-2)', borderRadius: 6 }}>
+            Note: DALL-E and gpt-image models ignore width/height — use square sizes (512, 1024).
+          </div>
+        )}
+
+        {error && (
+          <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
+        )}
+
+        {result && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓ Generated</div>
+            <img src={result} alt="result" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line-2)', display: 'block' }} />
+            <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>Open full size ↗</a>
+          </div>
+        )}
+
+        <button
+          type="button" onClick={handleRun} disabled={running || !prompt.trim()}
+          style={{ ...btnStyle(!running && !!prompt.trim(), true), display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+        >
+          {running
+            ? <><span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />Generating…</>
+            : '▶ Generate image'}
+        </button>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
     </div>
   )
 }
@@ -343,11 +584,13 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
   const [imgModel, setImgModel]       = useState<string | null>(config.image_model)
   const [imgWfId, setImgWfId]         = useState<string | null>(config.image_workflow_id)
   const [imgUrl, setImgUrl]           = useState(config.image_webhook_url || '')
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState('')
-  const [success, setSuccess]   = useState('')
+  const [saving, setSaving]       = useState(false)
+  const [error, setError]         = useState('')
+  const [success, setSuccess]     = useState('')
+  const [imageTesting, setImageTesting] = useState(false)
 
   useEffect(() => {
+    setImageTesting(false)
     setType(config.integration_type); setModel(config.model_name)
     setWfId(config.comfyui_workflow_id); setUrl(config.webhook_url || '')
     setImgEnabled(config.image_enabled)
@@ -462,9 +705,19 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
             </div>
 
             {imgType === 'llm' && (
-              <div>
-                <label style={labelStyle}>Image model <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(empty = default)</span></label>
-                <ModelSelector value={imgModel} onChange={setImgModel} availableProviders={availableProviders} catalog={IMAGE_MODELS_BY_PROVIDER} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div>
+                  <label style={labelStyle}>Image model <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(empty = default)</span></label>
+                  <ModelSelector value={imgModel} onChange={setImgModel} availableProviders={availableProviders} catalog={IMAGE_MODELS_BY_PROVIDER} />
+                </div>
+                {imgModel && (
+                  <button type="button" onClick={() => setImageTesting(true)} style={{
+                    alignSelf: 'flex-start', padding: '5px 12px', borderRadius: 5, fontSize: 11, fontFamily: 'monospace', cursor: 'pointer',
+                    border: '1px solid var(--cat-gate)', background: 'color-mix(in srgb, var(--cat-gate) 10%, var(--bg-1))', color: 'var(--cat-gate)',
+                  }}>
+                    ▶ Test image
+                  </button>
+                )}
               </div>
             )}
 
@@ -496,6 +749,8 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
       <button type="submit" disabled={saving} style={btnStyle(!saving, true)}>
         {saving ? 'Saving...' : 'Save changes'}
       </button>
+
+      {imageTesting && imgModel && <ImageTester model={imgModel} onClose={() => setImageTesting(false)} />}
     </form>
   )
 }
@@ -510,16 +765,17 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
   const [name, setName]         = useState(workflow?.name || '')
   const [desc, setDesc]         = useState(workflow?.description || '')
   const [jsonText, setJsonText] = useState('')
-  const [inject, setInject]     = useState<InjectConfig>(workflow?.inject_config || EMPTY_INJECT)
-  const [nodes, setNodes]       = useState<WorkflowNode[]>([])
-  const [undetected, setUndetected] = useState<StdPoint[]>([])
+  const [inject, setInject]       = useState<InjectConfig>(workflow?.inject_config || EMPTY_INJECT)
+  const [nodes, setNodes]         = useState<WorkflowNode[]>([])
+  const [expandedPoint, setExpandedPoint] = useState<StdPoint | null>(null)
+  const [testing, setTesting]     = useState(false)
   const [jsonError, setJsonError]   = useState('')
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState('')
   const [success, setSuccess]   = useState('')
 
   useEffect(() => {
-    if (!workflow) { setName(''); setDesc(''); setJsonText(''); setInject(EMPTY_INJECT); setNodes([]); setUndetected([]); return }
+    if (!workflow) { setName(''); setDesc(''); setJsonText(''); setInject(EMPTY_INJECT); setNodes([]); return }
     setName(workflow.name); setDesc(workflow.description || '')
     setInject(workflow.inject_config || EMPTY_INJECT)
     setError(''); setSuccess('')
@@ -534,11 +790,9 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
       const hasConfig = savedInject.prompt?.node || savedInject.seed?.node || Object.keys(savedInject.extra ?? {}).length > 0
       if (hasConfig) {
         setInject(savedInject)
-        setUndetected([])
       } else {
-        const { inject: detected, undetected: missing } = autoDetectInject(parsed)
+        const { inject: detected } = autoDetectInject(parsed)
         setInject(detected)
-        setUndetected(missing)
       }
     }
 
@@ -556,12 +810,11 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
     try {
       const parsed = parseNodes(JSON.parse(txt))
       setNodes(parsed)
-      const { inject: detected, undetected: missing } = autoDetectInject(parsed)
+      const { inject: detected } = autoDetectInject(parsed)
       // Preserve extra points already configured by the user
       setInject(prev => ({ ...detected, extra: prev.extra }))
-      setUndetected(missing)
     } catch {
-      setJsonError('Invalid JSON'); setNodes([]); setUndetected([])
+      setJsonError('Invalid JSON'); setNodes([])
     }
   }
 
@@ -617,42 +870,63 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
         {jsonError && <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-output)', marginTop: 3 }}>{jsonError}</div>}
       </div>
 
-      {/* Injection config — auto-detected summary */}
+      {/* Injection config */}
       {nodes.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div>
-            <label style={labelStyle}>Standard injection points</label>
-            <div style={{ background: 'var(--bg-2)', borderRadius: 6, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={labelStyle}>Standard injection points <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>— click "not used" to configure</span></label>
+            <div style={{ background: 'var(--bg-2)', borderRadius: 6, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {(['prompt', 'width', 'height', 'seed'] as const).map(point => {
-                const cfg  = inject[point]
-                const node = nodes.find(n => n.id === cfg?.node)
-                const ok   = cfg?.node && cfg?.field
+                const cfg      = inject[point]
+                const cfgNode  = nodes.find(n => n.id === cfg?.node)
+                const ok       = !!(cfg?.node && cfg?.field)
+                const expanded = expandedPoint === point
                 return (
-                  <div key={point} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', width: 48, flexShrink: 0 }}>{point}</span>
-                    {ok ? (
-                      <>
-                        <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓</span>
-                        <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-2)' }}>
-                          {node?.title || cfg!.node} → <strong>{cfg!.field}</strong>
-                        </span>
-                      </>
-                    ) : (
-                      <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)' }}>— not used</span>
+                  <div key={point}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', width: 48, flexShrink: 0 }}>{point}</span>
+                      {ok ? (
+                        <>
+                          <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓</span>
+                          <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-2)', flex: 1 }}>
+                            {cfgNode?.title || cfg!.node} → <strong>{cfg!.field}</strong>
+                          </span>
+                          <button type="button" onClick={() => setExpandedPoint(expanded ? null : point)} style={{ fontSize: 9, fontFamily: 'monospace', padding: '2px 7px', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)' }}>
+                            {expanded ? 'close' : 'edit'}
+                          </button>
+                        </>
+                      ) : (
+                        <button type="button" onClick={() => setExpandedPoint(expanded ? null : point)} style={{ fontSize: 10, fontFamily: 'monospace', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: '1px dashed var(--line-2)', background: 'transparent', color: 'var(--text-3)' }}>
+                          — not used · configure
+                        </button>
+                      )}
+                    </div>
+                    {expanded && (
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6, paddingLeft: 56 }}>
+                        <div style={{ flex: 2 }}>
+                          <select style={{ ...selectStyle, fontSize: 11 }} value={cfg?.node || ''} onChange={e => {
+                            const n = nodes.find(x => x.id === e.target.value)
+                            setInject(prev => ({ ...prev, [point]: { node: e.target.value, field: n?.fields[0] ?? '' } }))
+                          }}>
+                            <option value="">— select node —</option>
+                            {nodes.map(n => <option key={n.id} value={n.id}>[{n.id}] {n.title} ({n.class_type})</option>)}
+                          </select>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <select style={{ ...selectStyle, fontSize: 11 }} value={cfg?.field || ''} onChange={e => setInject(prev => ({ ...prev, [point]: { node: prev[point]?.node ?? '', field: e.target.value } }))}>
+                            <option value="">— field —</option>
+                            {(cfgNode?.fields ?? nodes.find(n => n.id === cfg?.node)?.fields ?? []).map(f => <option key={f} value={f}>{f}</option>)}
+                          </select>
+                        </div>
+                        {ok && (
+                          <button type="button" onClick={() => { setInject(prev => { const next = { ...prev }; delete next[point]; return next }); setExpandedPoint(null) }} style={{ fontSize: 10, fontFamily: 'monospace', padding: '0 8px', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--cat-output)' }}>clear</button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )
               })}
             </div>
-
-            {undetected.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-output)', marginBottom: 8 }}>
-                  {undetected.length} field{undetected.length > 1 ? 's' : ''} could not be auto-detected. Select manually:
-                </div>
-                <InjectConfigPicker nodes={nodes} value={inject} onChange={setInject} undetected={undetected} />
-              </div>
-            )}
           </div>
 
           {/* Extra injection points */}
@@ -667,10 +941,17 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
         <button type="submit" disabled={saving || !!jsonError} style={btnStyle(!saving && !jsonError, true)}>
           {saving ? 'Saving...' : workflow ? 'Save changes' : 'Create workflow'}
         </button>
+        {workflow && (
+          <button type="button" onClick={() => setTesting(true)} style={{ ...btnStyle(), color: 'var(--cat-gate)', border: '1px solid var(--cat-gate)', background: 'color-mix(in srgb, var(--cat-gate) 10%, var(--bg-1))' }}>
+            ▶ Test
+          </button>
+        )}
         {workflow && onDeleted && (
           <button type="button" onClick={handleDelete} style={{ ...btnStyle(), color: 'var(--cat-output)' }}>Delete</button>
         )}
       </div>
+
+      {testing && workflow && <WorkflowTester workflow={{ ...workflow, inject_config: inject, workflow_json: (() => { try { return JSON.parse(jsonText) } catch { return workflow.workflow_json } })() }} onClose={() => setTesting(false)} />}
     </form>
   )
 }

@@ -13,6 +13,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   modeling: 'Modeling', texturing: 'Texturing', rigging: 'Rigging',
   animation: 'Animation', vfx: 'VFX', lighting: 'Lighting',
   cinematics: 'Cinematics', voice: 'Voice', playtesting: 'Playtesting',
+  image_reference: 'Image Reference',
 }
 
 const CATEGORY_COLOR: Record<string, string> = {
@@ -25,6 +26,7 @@ const CATEGORY_COLOR: Record<string, string> = {
   modeling: 'var(--cat-asset)', texturing: 'var(--cat-asset)', rigging: 'var(--cat-asset)',
   animation: 'var(--cat-asset)', vfx: 'var(--cat-output)', lighting: 'var(--cat-design)',
   cinematics: 'var(--cat-output)', voice: 'var(--cat-audio)', playtesting: 'var(--cat-gate)',
+  image_reference: 'var(--cat-asset)',
 }
 
 const STATUS_COLOR: Record<string, string> = {
