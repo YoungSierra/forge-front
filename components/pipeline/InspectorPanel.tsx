@@ -977,8 +977,17 @@ function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) 
     return (
       <PipelineSuggestionModal
         project={pendingProject}
-        onConfirm={() => { setShowPipelineSuggestion(false); onProjectCreated(pendingProject) }}
-        onSkip={()    => { setShowPipelineSuggestion(false); onProjectCreated(pendingProject) }}
+        onConfirm={(activeNodes) => {
+          setShowPipelineSuggestion(false)
+          onProjectCreated({
+            ...pendingProject!,
+            concept: {
+              ...pendingProject!.concept,
+              pipeline_config: { active_nodes: activeNodes, configured_at: new Date().toISOString() },
+            },
+          })
+        }}
+        onSkip={() => { setShowPipelineSuggestion(false); onProjectCreated(pendingProject!) }}
       />
     )
   }
