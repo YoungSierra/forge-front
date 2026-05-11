@@ -65,7 +65,7 @@ export async function pollForGDD(projectId: string, timeoutMs = 300_000): Promis
       // _t rompe el cache HTTP del browser para que siempre llegue la respuesta fresca
       const data = await request<{ success: boolean; project: Project }>(`/api/projects/${projectId}?_t=${Date.now()}`)
       const gdd = data.project?.concept?.pipeline?.gdd
-      if (gdd?.project?.name) return gdd
+      if (gdd) return gdd
     } catch { /* continuar */ }
   }
   throw new Error('GDD generation timed out after 5 minutes — check n8n and try again')
