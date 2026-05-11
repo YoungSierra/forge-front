@@ -62,8 +62,9 @@ export async function pollForGDD(projectId: string, timeoutMs = 300_000): Promis
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 10_000))
     try {
-      const project = await getProject(projectId)
-      const gdd = project.concept?.pipeline?.gdd
+      // _t rompe el cache HTTP del browser para que siempre llegue la respuesta fresca
+      const data = await request<{ success: boolean; project: Project }>(`/api/projects/${projectId}?_t=${Date.now()}`)
+      const gdd = data.project?.concept?.pipeline?.gdd
       if (gdd?.project?.name) return gdd
     } catch { /* continuar */ }
   }
