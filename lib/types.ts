@@ -232,6 +232,8 @@ export type ComfyUIWorkflow = {
   workflow_json?: Record<string, unknown>
   inject_config: InjectConfig
   is_active: boolean
+  refinement_capable: boolean
+  mask_capable: boolean
   created_at: string
   updated_at: string
 }
