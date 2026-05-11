@@ -44,12 +44,30 @@ export async function createProject(name: string, memberId?: string) {
 }
 
 // Step 1
-export async function generateGDD(prompt: string, projectId?: string) {
-  const data = await request<{ success: boolean; gdd: GDD; meta: unknown }>('/api/generate/gdd', {
-    method: 'POST',
-    body: JSON.stringify({ prompt, project_id: projectId }),
-  })
-  return { gdd: data.gdd, meta: data.meta }
+export type GenerateGDDResult =
+  | { async: false; gdd: GDD; meta: unknown }
+  | { async: true; project_id: string }
+
+export async function generateGDD(prompt: string, projectId?: string): Promise<GenerateGDDResult> {
+  const data = await request<{ success: boolean; async?: boolean; gdd?: GDD; meta?: unknown; project_id?: string }>(
+    '/api/generate/gdd',
+    { method: 'POST', body: JSON.stringify({ prompt, project_id: projectId }) }
+  )
+  if (data.async) return { async: true, project_id: data.project_id || projectId || '' }
+  return { async: false, gdd: data.gdd!, meta: data.meta }
+}
+
+export async function pollForGDD(projectId: string, timeoutMs = 300_000): Promise<GDD> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 10_000))
+    try {
+      const project = await getProject(projectId)
+      const gdd = project.concept?.pipeline?.gdd
+      if (gdd?.project?.name) return gdd
+    } catch { /* continuar */ }
+  }
+  throw new Error('GDD generation timed out after 5 minutes — check n8n and try again')
 }
 
 export async function approveStep1(payload: { project_id: string; gdd: GDD; prompt: string; meta: unknown; member_id?: string }) {
@@ -520,6 +538,7 @@ export async function getAdminWorkflow(id: string): Promise<ComfyUIWorkflow> {
 
 export async function createAdminWorkflow(payload: {
   name: string; description?: string; workflow_json: Record<string, unknown>; inject_config: InjectConfig
+  refinement_capable?: boolean; mask_capable?: boolean
 }): Promise<ComfyUIWorkflow> {
   const data = await request<{ success: boolean; workflow: ComfyUIWorkflow }>('/api/admin/comfyui-workflows', {
     method: 'POST',
@@ -534,6 +553,18 @@ export async function updateAdminWorkflow(id: string, payload: Partial<ComfyUIWo
     body: JSON.stringify(payload),
   })
   return data.workflow
+}
+
+export async function uploadToComfyUI(blob: Blob, filename: string): Promise<string> {
+  const buffer = await blob.arrayBuffer()
+  const bytes  = new Uint8Array(buffer)
+  let binary   = ''
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+  const data = await request<{ success: boolean; filename: string }>('/api/admin/comfyui-upload', {
+    method: 'POST',
+    body: JSON.stringify({ image_base64: btoa(binary), filename }),
+  })
+  return data.filename
 }
 
 export async function deleteAdminWorkflow(id: string): Promise<void> {
@@ -551,12 +582,12 @@ export async function testAdminImage(
 export async function testAdminWorkflow(
   id: string,
   values: { prompt?: string; width?: number; height?: number; seed?: number; extras?: Record<string, string | number> }
-): Promise<{ image_url: string; job_id: string }> {
-  const data = await request<{ success: boolean; image_url: string; job_id: string }>(
+): Promise<{ image_url: string; job_id: string; prepared_workflow?: Record<string, unknown> }> {
+  const data = await request<{ success: boolean; image_url: string; job_id: string; prepared_workflow?: Record<string, unknown> }>(
     `/api/admin/comfyui-workflows/${id}/test`,
     { method: 'POST', body: JSON.stringify(values) }
   )
-  return { image_url: data.image_url, job_id: data.job_id }
+  return { image_url: data.image_url, job_id: data.job_id, prepared_workflow: data.prepared_workflow }
 }
 
 // ─── Admin: prompt configs ────────────────────────────────────────────────────

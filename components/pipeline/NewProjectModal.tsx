@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { createProject, validateIdea, generateGDD, approveStep1, searchMembers, addProjectMember } from '@/lib/api'
+import { createProject, validateIdea, generateGDD, pollForGDD, approveStep1, searchMembers, addProjectMember } from '@/lib/api'
 import type { GDD, Project, ValidationResult, Member, Discipline } from '@/lib/types'
 import PipelineSuggestionModal from './PipelineSuggestionModal'
 import GDD_PARAMS_RAW from '@/lib/gdd-params.json'
@@ -361,10 +361,21 @@ export default function NewProjectModal({
     genStepTimer.current = setTimeout(() => setGenStep('images'), 46000)
     try {
       const res = await generateGDD(fullPrompt, draftProjectId ?? undefined)
-      if (genStepTimer.current) clearTimeout(genStepTimer.current)
-      setGenStep('done')
-      setGdd(res.gdd); setMeta(res.meta)
-      setPhase('review')
+      if (res.async) {
+        // n8n: respuesta inmediata, el GDD llega por webhook — clearar timer de imágenes y pollear
+        if (genStepTimer.current) clearTimeout(genStepTimer.current)
+        const pid = res.project_id || draftProjectId
+        if (!pid) throw new Error('Async GDD generation requires an existing project.')
+        const gdd = await pollForGDD(pid)
+        setGenStep('done')
+        setGdd(gdd); setMeta({})
+        setPhase('review')
+      } else {
+        if (genStepTimer.current) clearTimeout(genStepTimer.current)
+        setGenStep('done')
+        setGdd(res.gdd); setMeta(res.meta)
+        setPhase('review')
+      }
     } catch (e) {
       if (genStepTimer.current) clearTimeout(genStepTimer.current)
       setGenStep(null)

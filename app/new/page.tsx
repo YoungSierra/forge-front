@@ -41,6 +41,11 @@ export default function NewProjectPage() {
     setError(null)
     try {
       const result = await generateGDD(ep)
+      if (result.async) {
+        setError('El paso GDD está configurado como n8n (async). Usa el canvas de pipeline para crear el proyecto.')
+        setState('form')
+        return
+      }
       setGdd(result.gdd)
       setMeta(result.meta)
       setEnrichedPrompt(ep)

@@ -894,6 +894,11 @@ function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) 
     setError(null)
     try {
       const res = await generateGDD(fullPrompt)
+      if (res.async) {
+        setError('El paso GDD está configurado como n8n (async). Crea el proyecto desde el modal de nuevo proyecto para usar este flujo.')
+        setPhase('form')
+        return
+      }
       setGdd(res.gdd)
       setMeta(res.meta)
       setPhase('review')

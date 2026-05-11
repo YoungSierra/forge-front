@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   getAdminStepConfigs, updateAdminStepConfig,
   getAdminWorkflows, getAdminWorkflow, createAdminWorkflow, updateAdminWorkflow, deleteAdminWorkflow,
-  testAdminWorkflow, testAdminImage, getModelsConfig,
+  testAdminWorkflow, testAdminImage, getModelsConfig, uploadToComfyUI,
 } from '@/lib/api'
+import MaskPainter, { type MaskPainterHandle } from '@/components/shared/MaskPainter'
 import type { StepConfig, ComfyUIWorkflow, InjectConfig, ExtraInjectPoint, ModelsConfig } from '@/lib/types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -356,15 +357,32 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
   }
 
   const [values, setValues]   = useState<Record<string, string>>(initValues)
-  const [running, setRunning] = useState(false)
-  const [result, setResult]   = useState<string | null>(null)
-  const [error, setError]     = useState<string | null>(null)
+  const [running, setRunning]           = useState(false)
+  const [result, setResult]             = useState<string | null>(null)
+  const [preparedJson, setPreparedJson] = useState<string | null>(null)
+  const [showJson, setShowJson]         = useState(false)
+  const [error, setError]               = useState<string | null>(null)
+  const [imageFile, setImageFile]       = useState<File | null>(null)
+  const [brushSize, setBrushSize]       = useState(30)
+  const maskRef = useRef<MaskPainterHandle>(null)
+
+  const imageExtras = Object.entries(extra).filter(([, pt]) => pt.type === 'image')
+  const isMaskMode  = workflow.mask_capable && imageExtras.length > 0
 
   function set(key: string, val: string) { setValues(prev => ({ ...prev, [key]: val })) }
 
   async function handleRun() {
     setRunning(true); setResult(null); setError(null)
     try {
+      // Subir máscara compuesta a ComfyUI antes de armar el payload
+      const uploadedFilenames: Record<string, string> = {}
+      if (isMaskMode && imageFile) {
+        const blob = await maskRef.current?.getComposedBlob()
+        if (!blob) throw new Error('Could not compose mask — paint at least one stroke')
+        const remoteFilename = await uploadToComfyUI(blob, `mask-test-${Date.now()}.png`)
+        for (const [key] of imageExtras) uploadedFilenames[key] = remoteFilename
+      }
+
       const payload: Parameters<typeof testAdminWorkflow>[1] = {}
       if ('prompt' in values && values['prompt']) payload.prompt = values['prompt']
       if ('width'  in values && values['width'])  payload.width  = Number(values['width'])
@@ -372,12 +390,14 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
       if ('seed'   in values && values['seed'])   payload.seed   = Number(values['seed'])
       const extrasPayload: Record<string, string | number> = {}
       for (const [key, pt] of Object.entries(extra)) {
-        if (!values[key]) continue
-        extrasPayload[key] = pt.type === 'int' || pt.type === 'float' ? Number(values[key]) : values[key]
+        const val = uploadedFilenames[key] ?? values[key]
+        if (!val) continue
+        extrasPayload[key] = pt.type === 'int' || pt.type === 'float' ? Number(val) : val
       }
       if (Object.keys(extrasPayload).length) payload.extras = extrasPayload
       const res = await testAdminWorkflow(workflow.id, payload)
       setResult(res.image_url)
+      if (res.prepared_workflow) setPreparedJson(JSON.stringify(res.prepared_workflow, null, 2))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error')
     } finally { setRunning(false) }
@@ -393,7 +413,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
     }}>
       <div style={{
         background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12,
-        width: '100%', maxWidth: 520, maxHeight: '90vh', overflow: 'auto',
+        width: '100%', maxWidth: isMaskMode ? 720 : 520, maxHeight: '90vh', overflow: 'auto',
         boxShadow: '0 24px 80px rgba(0,0,0,0.6)', padding: 24, display: 'flex', flexDirection: 'column', gap: 16,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -433,9 +453,44 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
               <div key={key}>
                 <label style={labelStyle}>
                   {key} <span style={{ color: 'var(--cat-code)', textTransform: 'none', letterSpacing: 0 }}>{pt.type}</span>
-                  {pt.type === 'image' && <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}> — filename or URL</span>}
+                  {pt.type === 'image' && !isMaskMode && <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}> — filename or URL</span>}
+                  {pt.type === 'image' && isMaskMode  && <span style={{ color: 'var(--cat-asset)', textTransform: 'none', letterSpacing: 0 }}> — pick image, then paint the area to edit</span>}
                 </label>
-                {pt.type === 'string' ? (
+                {pt.type === 'image' && isMaskMode ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                      <span style={{
+                        fontSize: 11, fontFamily: 'monospace', padding: '6px 14px', borderRadius: 6,
+                        border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-1)',
+                        cursor: 'pointer',
+                      }}>
+                        {imageFile ? `✓ ${imageFile.name}` : '📁 Choose image…'}
+                      </span>
+                      <input
+                        type="file" accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={e => setImageFile(e.target.files?.[0] || null)}
+                      />
+                    </label>
+                    {imageFile && (
+                      <>
+                        <MaskPainter ref={maskRef} imageFile={imageFile} brushSize={brushSize} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <label style={{ ...labelStyle, marginBottom: 0, whiteSpace: 'nowrap' }}>Brush</label>
+                          <input type="range" min={5} max={120} value={brushSize}
+                            onChange={e => setBrushSize(Number(e.target.value))}
+                            style={{ flex: 1 }}
+                          />
+                          <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', width: 32, textAlign: 'right' }}>{brushSize}px</span>
+                          <button type="button" onClick={() => maskRef.current?.clear()} style={{
+                            fontSize: 10, fontFamily: 'monospace', padding: '3px 10px', borderRadius: 5,
+                            cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)',
+                          }}>Clear</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : pt.type === 'string' ? (
                   <textarea style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 60, resize: 'vertical' }}
                     value={values[key] ?? ''} onChange={e => set(key, e.target.value)} />
                 ) : (
@@ -453,18 +508,34 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
 
         {result && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓ Generated</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓ Generated</div>
+              {preparedJson && (
+                <button type="button" onClick={() => setShowJson(v => !v)} style={{ fontSize: 9, fontFamily: 'monospace', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)' }}>
+                  {showJson ? 'Hide JSON' : 'Show prepared JSON'}
+                </button>
+              )}
+            </div>
             <img src={result} alt="result" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line-2)', display: 'block' }} />
             <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>Open full size ↗</a>
+            {showJson && preparedJson && (
+              <textarea
+                readOnly
+                value={preparedJson}
+                style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 9, height: 200, resize: 'vertical', color: 'var(--text-2)' }}
+              />
+            )}
           </div>
         )}
 
         <button
-          type="button" onClick={handleRun} disabled={running}
-          style={{ ...btnStyle(!running, true), display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          type="button" onClick={handleRun}
+          disabled={running || (isMaskMode && !imageFile)}
+          style={{ ...btnStyle(!running && !(isMaskMode && !imageFile), true), display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
         >
           {running
             ? <><span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />Running…</>
+            : isMaskMode && !imageFile ? 'Pick an image first'
             : '▶ Run workflow'}
         </button>
         <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
@@ -655,7 +726,7 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
           <label style={labelStyle}>Workflow</label>
           <select style={selectStyle} value={wfId || ''} onChange={e => setWfId(e.target.value || null)}>
             <option value="">— not assigned —</option>
-            {workflows.filter(w => w.is_active).map(w => (
+            {workflows.filter(w => w.is_active && !w.refinement_capable).map(w => (
               <option key={w.id} value={w.id}>
                 {w.name}{w.description ? ` — ${w.description}` : ''}
               </option>
@@ -726,7 +797,7 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
                 <label style={labelStyle}>Image workflow</label>
                 <select style={selectStyle} value={imgWfId || ''} onChange={e => setImgWfId(e.target.value || null)}>
                   <option value="">— not assigned —</option>
-                  {workflows.filter(w => w.is_active).map(w => (
+                  {workflows.filter(w => w.is_active && !w.refinement_capable).map(w => (
                     <option key={w.id} value={w.id}>{w.name}{w.description ? ` — ${w.description}` : ''}</option>
                   ))}
                 </select>
@@ -768,6 +839,8 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
   const [inject, setInject]       = useState<InjectConfig>(workflow?.inject_config || EMPTY_INJECT)
   const [nodes, setNodes]         = useState<WorkflowNode[]>([])
   const [expandedPoint, setExpandedPoint] = useState<StdPoint | null>(null)
+  const [refinementCapable, setRefinementCapable] = useState(workflow?.refinement_capable ?? false)
+  const [maskCapable, setMaskCapable]             = useState(workflow?.mask_capable ?? false)
   const [testing, setTesting]     = useState(false)
   const [jsonError, setJsonError]   = useState('')
   const [saving, setSaving]     = useState(false)
@@ -775,9 +848,11 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
   const [success, setSuccess]   = useState('')
 
   useEffect(() => {
-    if (!workflow) { setName(''); setDesc(''); setJsonText(''); setInject(EMPTY_INJECT); setNodes([]); return }
+    if (!workflow) { setName(''); setDesc(''); setJsonText(''); setInject(EMPTY_INJECT); setNodes([]); setRefinementCapable(false); setMaskCapable(false); return }
     setName(workflow.name); setDesc(workflow.description || '')
     setInject(workflow.inject_config || EMPTY_INJECT)
+    setRefinementCapable(workflow.refinement_capable ?? false)
+    setMaskCapable(workflow.mask_capable ?? false)
     setError(''); setSuccess('')
 
     const savedInject = workflow.inject_config || EMPTY_INJECT
@@ -825,7 +900,7 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
     try {
       let parsed: Record<string, unknown>
       try { parsed = JSON.parse(jsonText) } catch { setError('Invalid JSON'); setSaving(false); return }
-      const payload = { name, description: desc || undefined, workflow_json: parsed, inject_config: inject }
+      const payload = { name, description: desc || undefined, workflow_json: parsed, inject_config: inject, refinement_capable: refinementCapable, mask_capable: maskCapable }
       onSaved(workflow ? await updateAdminWorkflow(workflow.id, payload) : await createAdminWorkflow(payload))
       setSuccess('Saved.')
     } catch (err: unknown) {
@@ -851,6 +926,25 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
           <label style={labelStyle}>Description</label>
           <input style={inputStyle} value={desc} onChange={e => setDesc(e.target.value)} placeholder="Fast image generation pipeline" />
         </div>
+      </div>
+
+      {/* Flags de refinamiento */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        {([
+          { label: 'Refinement workflow', value: refinementCapable, set: setRefinementCapable, hint: 'Appears in the image refinement tool' },
+          { label: 'Supports mask',       value: maskCapable,       set: setMaskCapable,       hint: 'Enables the mask brush when this workflow is selected' },
+        ] as const).map(({ label, value, set, hint }) => (
+          <div key={label} style={{ flex: 1, background: value ? 'color-mix(in oklch, var(--cat-asset) 10%, var(--bg-2))' : 'var(--bg-2)', border: `1px solid ${value ? 'color-mix(in oklch, var(--cat-asset) 35%, transparent)' : 'var(--line-2)'}`, borderRadius: 7, padding: '8px 12px', cursor: 'pointer', transition: 'all 120ms' }}
+            onClick={() => set(v => !v)}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
+              <div style={{ width: 14, height: 14, borderRadius: 3, background: value ? 'var(--cat-asset)' : 'var(--bg-3)', border: `1px solid ${value ? 'var(--cat-asset)' : 'var(--line-2)'}`, display: 'grid', placeItems: 'center', fontSize: 9, color: '#0a0a0c', fontWeight: 700, flexShrink: 0 }}>
+                {value ? '✓' : ''}
+              </div>
+              <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, color: value ? 'var(--text-0)' : 'var(--text-3)' }}>{label}</span>
+            </div>
+            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', paddingLeft: 21 }}>{hint}</div>
+          </div>
+        ))}
       </div>
 
       <div>
@@ -951,7 +1045,7 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
         )}
       </div>
 
-      {testing && workflow && <WorkflowTester workflow={{ ...workflow, inject_config: inject, workflow_json: (() => { try { return JSON.parse(jsonText) } catch { return workflow.workflow_json } })() }} onClose={() => setTesting(false)} />}
+      {testing && workflow && <WorkflowTester workflow={{ ...workflow, inject_config: inject, refinement_capable: refinementCapable, mask_capable: maskCapable, workflow_json: (() => { try { return JSON.parse(jsonText) } catch { return workflow.workflow_json } })() }} onClose={() => setTesting(false)} />}
     </form>
   )
 }
@@ -1069,7 +1163,14 @@ export default function IntegrationsPage() {
                     padding: '10px 16px', cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
                     background: selectedWf?.id === w.id ? 'var(--bg-2)' : 'transparent',
                   }}>
-                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-0)' }}>{w.name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-0)', flex: 1 }}>{w.name}</span>
+                      {w.refinement_capable && (
+                        <span style={{ fontSize: 8, fontFamily: 'monospace', padding: '1px 5px', borderRadius: 99, background: 'color-mix(in oklch, var(--cat-asset) 15%, var(--bg-1))', color: 'var(--cat-asset)', flexShrink: 0 }}>
+                          {w.mask_capable ? 'refine+mask' : 'refine'}
+                        </span>
+                      )}
+                    </div>
                     {w.description && <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2 }}>{w.description}</div>}
                   </div>
                 ))}
