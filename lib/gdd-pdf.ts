@@ -180,7 +180,7 @@ ${gdd.levels.map((l, i) => `
   <div style="display:flex;align-items:center;gap:10pt;margin-bottom:6pt;">
     <span style="font-family:monospace;font-size:14pt;font-weight:700;color:#bbb;">${String(l.order ?? i + 1).padStart(2, '0')}</span>
     <h3 style="flex:1;margin:0;">${esc(l.name)}</h3>
-    <span class="badge badge-diff-${l.difficulty}">${DIFF_ICON[l.difficulty] ?? ''} ${esc(l.difficulty)}</span>
+    <span class="badge badge-diff-${l.difficulty ?? ''}">${DIFF_ICON[l.difficulty ?? ''] ?? ''} ${esc(l.difficulty)}</span>
     <span class="badge" style="border-color:#888;color:#666;">${esc(l.environment)}</span>
   </div>
   <p style="margin-bottom:5pt;color:#333;">${esc(l.description)}</p>

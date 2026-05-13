@@ -1,4 +1,4 @@
-import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser, StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig, PromptConfig } from './types'
+import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser, StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig, PromptConfig, RepoConfig } from './types'
 import type { InputContext } from './nodeExecutionContext'
 
 export type { ScriptFile, CodeGenerationResult }
@@ -583,12 +583,12 @@ export async function testAdminImage(
 export async function testAdminWorkflow(
   id: string,
   values: { prompt?: string; width?: number; height?: number; seed?: number; extras?: Record<string, string | number> }
-): Promise<{ image_url: string; job_id: string; prepared_workflow?: Record<string, unknown> }> {
-  const data = await request<{ success: boolean; image_url: string; job_id: string; prepared_workflow?: Record<string, unknown> }>(
+): Promise<{ image_url: string; glb_urls: string[]; job_id: string; prepared_workflow?: Record<string, unknown> }> {
+  const data = await request<{ success: boolean; image_url: string; glb_urls?: string[]; job_id: string; prepared_workflow?: Record<string, unknown> }>(
     `/api/admin/comfyui-workflows/${id}/test`,
     { method: 'POST', body: JSON.stringify(values) }
   )
-  return { image_url: data.image_url, job_id: data.job_id, prepared_workflow: data.prepared_workflow }
+  return { image_url: data.image_url, glb_urls: data.glb_urls ?? [], job_id: data.job_id, prepared_workflow: data.prepared_workflow }
 }
 
 // ─── Admin: prompt configs ────────────────────────────────────────────────────
@@ -623,6 +623,93 @@ export async function approveNode(project_id: string, stepKey: string, nodeData:
   return request(`/api/projects/${project_id}/approve-node`, {
     method: 'POST',
     body: JSON.stringify({ stepKey, data: nodeData, member_id }),
+  })
+}
+
+// ─── Repo export ──────────────────────────────────────────────────────────────
+
+export async function getProjectRepoConfig(projectId: string): Promise<RepoConfig | null> {
+  const data = await request<{ success: boolean; repo_config: RepoConfig | null }>(`/api/projects/${projectId}/repo-config`)
+  return data.repo_config
+}
+
+export async function saveProjectRepoConfig(
+  projectId: string,
+  payload: { repo_url?: string; repo_token?: string }
+): Promise<RepoConfig> {
+  const data = await request<{ success: boolean; repo_config: RepoConfig }>(`/api/projects/${projectId}/repo-config`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+  return data.repo_config
+}
+
+export async function createProjectRepo(projectId: string): Promise<{ ok: boolean; repo_url: string; message?: string }> {
+  const data = await request<{ success: boolean; repo_url: string; message?: string }>(`/api/projects/${projectId}/repo/create`, { method: 'POST' })
+  return { ok: data.success, repo_url: data.repo_url, message: data.message }
+}
+
+export async function validateProjectRepo(projectId: string): Promise<{ ok: boolean; message: string }> {
+  return request<{ ok: boolean; message: string }>(`/api/projects/${projectId}/repo/validate`, { method: 'POST' })
+}
+
+export async function exportProjectToRepo(
+  projectId: string,
+  nodeKeys: string[]
+): Promise<{ ok: boolean; pushed: string[]; errors: string[] }> {
+  const data = await request<{ success: boolean; pushed: string[]; errors: string[] }>(`/api/projects/${projectId}/repo/export`, {
+    method: 'POST',
+    body: JSON.stringify({ node_keys: nodeKeys }),
+  })
+  return { ok: data.success, pushed: data.pushed ?? [], errors: data.errors ?? [] }
+}
+
+// ─── Idea Generator ──────────────────────────────────────────────────────────
+
+export type IdeaCard = {
+  title:         string
+  elevator_pitch: string
+  genre:         string
+  tone:          string
+  core_mechanic: string
+  unique_hook:   string
+  visual_style:  string
+  tags:          string[]
+  image_prompt:  string
+  image_url:     string | null
+}
+
+export async function generateIdeas(payload: {
+  prompt:   string
+  genre?:   string
+  tone?:    string
+  scope?:   string
+  engine?:  string
+  count?:   number
+  exclude?: string[]
+}): Promise<{ ideas: IdeaCard[]; meta: unknown }> {
+  return request<{ success: boolean; ideas: IdeaCard[]; meta: unknown }>('/api/gen-idea', {
+    method: 'POST',
+    body:   JSON.stringify(payload),
+  })
+}
+
+export async function getIdeaCandidate(projectId: string): Promise<{ id: string; title: string; idea_data: IdeaCard; original_description: string | null; selected_at: string } | null> {
+  const data = await request<{ success: boolean; candidate: { id: string; title: string; idea_data: IdeaCard; original_description: string | null; selected_at: string } | null }>(`/api/projects/${projectId}/idea-candidate`)
+  return data.candidate
+}
+
+export async function saveIdeaCandidate(projectId: string, idea: IdeaCard, originalDescription: string): Promise<void> {
+  await request(`/api/projects/${projectId}/idea-candidate`, {
+    method: 'POST',
+    body:   JSON.stringify({ title: idea.title, idea_data: idea, original_description: originalDescription }),
+  })
+}
+
+export async function updateProjectName(projectId: string, name: string): Promise<void> {
+  await request(`/api/projects/${projectId}/name`, {
+    method: 'PATCH',
+    body:   JSON.stringify({ name }),
   })
 }
 

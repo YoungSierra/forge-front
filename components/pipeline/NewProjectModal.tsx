@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { createProject, validateIdea, generateGDD, pollForGDD, approveStep1, searchMembers, addProjectMember } from '@/lib/api'
+import { createProject, validateIdea, generateGDD, pollForGDD, approveStep1, searchMembers, addProjectMember, generateIdeas, saveIdeaCandidate, updateProjectName } from '@/lib/api'
+import type { IdeaCard } from '@/lib/api'
 import type { GDD, Project, ValidationResult, Member, Discipline } from '@/lib/types'
 import PipelineSuggestionModal from './PipelineSuggestionModal'
 import GDD_PARAMS_RAW from '@/lib/gdd-params.json'
@@ -242,6 +243,91 @@ function GenCheckItem({ label, status, detail }: { label: string; status: 'runni
   )
 }
 
+// ─── Idea panel components ────────────────────────────────────────────────────
+
+function IdeaCardComponent({ idea, onZoom, onUse }: { idea: IdeaCard; onZoom: () => void; onUse: () => void }) {
+  return (
+    <div style={{ borderRadius: 8, border: '1px solid var(--line-2)', overflow: 'hidden', background: 'var(--bg-2)' }}>
+      <div
+        onClick={onZoom}
+        style={{ width: '100%', aspectRatio: '16/9', overflow: 'hidden', position: 'relative', cursor: 'zoom-in', background: 'var(--bg-3)' }}
+      >
+        {idea.image_url
+          ? <img src={idea.image_url} alt={idea.title} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>No image</span>
+            </div>
+        }
+        <div style={{ position: 'absolute', top: 6, right: 6, fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: 99, background: 'rgba(0,0,0,0.55)', color: 'var(--text-2)' }}>
+          {idea.genre}
+        </div>
+      </div>
+      <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-0)', lineHeight: 1.3 }}>{idea.title}</div>
+        <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, fontFamily: 'var(--font-sans)' }}>{idea.elevator_pitch}</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+          {idea.tags.slice(0, 5).map(tag => (
+            <span key={tag} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '1px 6px', borderRadius: 99, background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--text-3)' }}>{tag}</span>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+          <button onClick={onZoom} style={{ flex: 1, padding: '5px', borderRadius: 5, fontSize: 10, fontFamily: 'var(--font-mono)', border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-2)', cursor: 'pointer' }}>
+            Details ↗
+          </button>
+          <button onClick={onUse} style={{ flex: 2, padding: '5px', borderRadius: 5, fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, border: 'none', background: 'var(--cat-design)', color: '#000', cursor: 'pointer' }}>
+            Use this idea →
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function IdeaZoomOverlay({ idea, onClose, onUse }: { idea: IdeaCard; onClose: () => void; onUse: () => void }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, zIndex: 3500, background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ maxWidth: 820, width: '100%', maxHeight: '88vh', overflowY: 'auto', background: 'var(--bg-1)', borderRadius: 12, border: '1px solid var(--line-2)', boxShadow: '0 32px 100px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}
+      >
+        {idea.image_url && (
+          <img src={idea.image_url} alt={idea.title} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block', borderRadius: '12px 12px 0 0' }} />
+        )}
+        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-0)', lineHeight: 1.2 }}>{idea.title}</div>
+            <button onClick={onClose} style={{ flexShrink: 0, background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: 0 }}>×</button>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {[idea.genre, idea.tone].map(t => t && <span key={t} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 8px', borderRadius: 99, background: 'color-mix(in oklch, var(--cat-design) 12%, var(--bg-3))', border: '1px solid color-mix(in oklch, var(--cat-design) 25%, transparent)', color: 'var(--cat-design)' }}>{t}</span>)}
+            {idea.tags.map(tag => <span key={tag} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 8px', borderRadius: 99, background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--text-3)' }}>{tag}</span>)}
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text-1)', lineHeight: 1.65 }}>{idea.elevator_pitch}</div>
+          {[
+            { label: 'Core mechanic', value: idea.core_mechanic },
+            { label: 'Unique hook',   value: idea.unique_hook   },
+            { label: 'Visual style',  value: idea.visual_style  },
+          ].map(({ label, value }) => value && (
+            <div key={label} style={{ paddingTop: 10, borderTop: '1px solid var(--line-2)' }}>
+              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>{label}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>{value}</div>
+            </div>
+          ))}
+          <button
+            onClick={onUse}
+            style={{ marginTop: 6, padding: '10px', borderRadius: 7, fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600, border: 'none', background: 'var(--cat-design)', color: '#000', cursor: 'pointer' }}
+          >
+            ← Use this idea
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export interface NewProjectModalProps {
@@ -278,6 +364,14 @@ export default function NewProjectModal({
   const [memberRole, setMemberRole]   = useState('reviewer')
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Ideas panel
+  const [ideas, setIdeas]             = useState<IdeaCard[]>([])
+  const [ideaLoading, setIdeaLoading] = useState(false)
+  const [ideaError, setIdeaError]     = useState<string | null>(null)
+  const [zoomIdea, setZoomIdea]       = useState<IdeaCard | null>(null)
+  const [ideaProgress, setIdeaProgress] = useState(0)
+  const ideaProgressTimer               = useRef<ReturnType<typeof setInterval> | null>(null)
+
   // Step 2
   const [ideaPrompt, setIdeaPrompt]             = useState(initialIdea ?? '')
   const [params, setParams]                     = useState<Record<string, string | string[]>>(initialParams ?? initParams())
@@ -304,6 +398,7 @@ export default function NewProjectModal({
     setParams(initialParams ?? initParams())
     setValidation(null); setValidationFailure(null)
     setGdd(null); setMeta(null); setError(null); setApproving(false)
+    setIdeas([]); setIdeaLoading(false); setIdeaError(null); setZoomIdea(null)
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Escape key
@@ -336,6 +431,62 @@ export default function NewProjectModal({
 
   function buildFullPrompt() {
     return [ideaPrompt.trim(), buildParamPrompt(params)].filter(Boolean).join('\n')
+  }
+
+  // ── Idea generator ─────────────────────────────────────────────────────────
+  async function handleGenerateIdeas(addMore = false) {
+    if (ideaPrompt.trim().length < 10) return
+    setIdeaLoading(true); setIdeaError(null)
+
+    // Barra de progreso falsa: avanza rápido al inicio, se frena cerca del 90%
+    setIdeaProgress(0)
+    if (ideaProgressTimer.current) clearInterval(ideaProgressTimer.current)
+    ideaProgressTimer.current = setInterval(() => {
+      setIdeaProgress(prev => {
+        if (prev >= 90) return prev
+        const increment = Math.max(0.4, (90 - prev) * 0.035)
+        return Math.min(90, prev + increment)
+      })
+    }, 400)
+
+    try {
+      const genre  = (params.genre  as string[]).join(', ') || undefined
+      const tone   = (params.tone   as string[]).join(', ') || undefined
+      const scope  = params.scope   as string || undefined
+      const engine = params.engine  as string || undefined
+      const result = await generateIdeas({
+        prompt: ideaPrompt.trim(),
+        genre, tone, scope, engine,
+        count:   addMore ? 1 : 7,
+        exclude: addMore ? ideas.map(i => i.title) : [],
+      })
+      // Salta al 100% y limpia
+      if (ideaProgressTimer.current) clearInterval(ideaProgressTimer.current)
+      setIdeaProgress(100)
+      setIdeas(prev => addMore ? [...prev, ...result.ideas] : result.ideas)
+    } catch (e) {
+      if (ideaProgressTimer.current) clearInterval(ideaProgressTimer.current)
+      setIdeaProgress(0)
+      setIdeaError(e instanceof Error ? e.message : 'Failed to generate ideas')
+    } finally {
+      setIdeaLoading(false)
+      setTimeout(() => setIdeaProgress(0), 600)
+    }
+  }
+
+  function handleUseIdea(idea: IdeaCard) {
+    const originalDescription = ideaPrompt.trim()
+    setIdeaPrompt(`${idea.title}\n\n${idea.elevator_pitch}\n\nCore mechanic: ${idea.core_mechanic}\n\nUnique hook: ${idea.unique_hook}`)
+    setNameInput(idea.title)
+    setZoomIdea(null)
+    if (draftProjectId) {
+      saveIdeaCandidate(draftProjectId, idea, originalDescription).catch(e =>
+        console.warn('[gen-idea] Failed to save idea candidate:', e.message)
+      )
+      updateProjectName(draftProjectId, idea.title).catch(e =>
+        console.warn('[gen-idea] Failed to update project name:', e.message)
+      )
+    }
   }
 
   // ── Step 1: create project ──────────────────────────────────────────────────
@@ -457,10 +608,19 @@ export default function NewProjectModal({
 
   if (!open) return null
 
-  const conflicted = conflictedParamIds(params)
+  const conflicted  = conflictedParamIds(params)
+  const showIdeas   = phase === 'form' && (ideas.length > 0 || ideaLoading)
 
   // ── Overlay ────────────────────────────────────────────────────────────────
   return (
+    <>
+    {zoomIdea && (
+      <IdeaZoomOverlay
+        idea={zoomIdea}
+        onClose={() => setZoomIdea(null)}
+        onUse={() => handleUseIdea(zoomIdea)}
+      />
+    )}
     <div
       style={{
         position: 'fixed', inset: 0, zIndex: 2000,
@@ -471,8 +631,9 @@ export default function NewProjectModal({
     >
       <div style={{
         background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12,
-        width: '100%', maxWidth: 600, maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+        width: '100%', maxWidth: showIdeas ? 1100 : 600, maxHeight: '90vh', display: 'flex', flexDirection: 'column',
         overflow: 'hidden', boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+        transition: 'max-width 0.3s ease',
       }}>
 
         {/* Header */}
@@ -503,8 +664,9 @@ export default function NewProjectModal({
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: 20, padding: 0, lineHeight: 1 }}>×</button>
         </div>
 
-        {/* Body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        {/* Body — dos columnas cuando el panel de ideas está activo */}
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+        <div style={{ flex: showIdeas ? '0 0 480px' : '1', overflowY: 'auto', padding: '20px 24px', borderRight: showIdeas ? '1px solid var(--line-2)' : 'none' }}>
 
           {/* ── Step 1: project name + members ── */}
           {phase === 'name' && (
@@ -652,7 +814,26 @@ export default function NewProjectModal({
                   {error}
                 </div>
               )}
-              <Field label="Describe your game">
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Describe your game</div>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateIdeas(false)}
+                    disabled={ideaLoading || ideaPrompt.trim().length < 10}
+                    style={{
+                      padding: '3px 10px', borderRadius: 5,
+                      border: '1px solid color-mix(in oklch, var(--cat-audio) 40%, transparent)',
+                      background: ideaLoading || ideaPrompt.trim().length < 10 ? 'transparent' : 'color-mix(in oklch, var(--cat-audio) 10%, var(--bg-2))',
+                      color: ideaLoading || ideaPrompt.trim().length < 10 ? 'var(--text-4)' : 'var(--cat-audio)',
+                      fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                      cursor: ideaLoading || ideaPrompt.trim().length < 10 ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {ideaLoading && !ideas.length ? '⟳ …' : '✦ Generate ideas'}
+                  </button>
+                </div>
                 <textarea
                   autoFocus
                   value={ideaPrompt}
@@ -661,7 +842,7 @@ export default function NewProjectModal({
                   rows={5}
                   style={{ ...INPUT, resize: 'vertical', lineHeight: 1.5, fontFamily: 'var(--font-sans)', fontSize: 12 }}
                 />
-              </Field>
+              </div>
               <button type="button" onClick={() => setShowParams(p => !p)} style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {showParams ? '▲' : '▼'} Parameters
               </button>
@@ -672,6 +853,9 @@ export default function NewProjectModal({
                     <ParamField key={param.id} param={param} value={params[param.id]} onChange={setParam} conflicted={conflicted.has(param.id)} />
                   ))}
                 </div>
+              )}
+              {ideaError && (
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)' }}>{ideaError}</div>
               )}
               <Btn
                 label={ideaPrompt.trim().length < 10 ? 'Min. 10 characters' : '▶ Validate & generate GDD'}
@@ -743,8 +927,76 @@ export default function NewProjectModal({
               </div>
             </div>
           )}
-        </div>
+        </div>{/* end left column */}
+
+        {/* ── Panel derecho: ideas ── */}
+        {showIdeas && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                Ideas {ideas.length > 0 && `· ${ideas.length}`}
+              </div>
+              {ideas.length > 0 && !ideaLoading && (
+                <button
+                  type="button"
+                  onClick={() => handleGenerateIdeas(true)}
+                  style={{ padding: '4px 10px', borderRadius: 5, fontSize: 10, fontFamily: 'var(--font-mono)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-2)', cursor: 'pointer' }}
+                >
+                  + One more
+                </button>
+              )}
+            </div>
+
+            {ideaLoading && ideas.length === 0 && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '40px 16px' }}>
+                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', animation: 'item-pulse 1.6s ease-in-out infinite' }}>
+                      {ideaProgress < 40 ? 'Generating ideas…' : ideaProgress < 80 ? 'Generating images…' : 'Almost ready…'}
+                    </span>
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-audio)' }}>
+                      {Math.round(ideaProgress)}%
+                    </span>
+                  </div>
+                  <div style={{ width: '100%', height: 3, background: 'var(--bg-3)', borderRadius: 99, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', borderRadius: 99,
+                      background: 'linear-gradient(90deg, var(--cat-audio), var(--cat-design))',
+                      width: `${ideaProgress}%`,
+                      transition: 'width 0.4s ease',
+                    }} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {ideas.map((idea, i) => (
+              <IdeaCardComponent
+                key={i}
+                idea={idea}
+                onZoom={() => setZoomIdea(idea)}
+                onUse={() => handleUseIdea(idea)}
+              />
+            ))}
+
+            {ideaLoading && ideas.length > 0 && (
+              <div style={{ padding: '12px 14px', borderRadius: 8, border: '1px solid var(--line-2)', background: 'var(--bg-2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', animation: 'item-pulse 1.6s ease-in-out infinite' }}>
+                    {ideaProgress < 40 ? 'Generating idea…' : ideaProgress < 80 ? 'Generating image…' : 'Almost ready…'}
+                  </span>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-audio)' }}>{Math.round(ideaProgress)}%</span>
+                </div>
+                <div style={{ width: '100%', height: 3, background: 'var(--bg-3)', borderRadius: 99, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, var(--cat-audio), var(--cat-design))', width: `${ideaProgress}%`, transition: 'width 0.4s ease' }} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        </div>{/* end body flex row */}
       </div>
     </div>
+    </>
   )
 }

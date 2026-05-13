@@ -15,8 +15,8 @@ export default function DirectionSection({ art_direction, audio_direction, devel
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-xl border border-slate-800 bg-[#0d0f16] p-4 space-y-3">
-            <Row label="Style" value={art_direction.style} />
-            <Row label="Palette" value={art_direction.palette} />
+            <Row label="Style" value={art_direction.style ?? '–'} />
+            <Row label="Palette" value={Array.isArray(art_direction.palette) ? art_direction.palette.map(p => p.role).join(', ') : (art_direction.palette ?? '–')} />
             <Row label="Resolution" value={art_direction.sprite_resolution ?? art_direction.resolution ?? '–'} />
           </div>
           <div className="rounded-xl border border-slate-800 bg-[#0d0f16] p-4">
@@ -24,10 +24,10 @@ export default function DirectionSection({ art_direction, audio_direction, devel
               References
             </p>
             <ul className="space-y-1">
-              {art_direction.references.map((ref, i) => (
+              {(art_direction.references ?? []).map((ref, i) => (
                 <li key={i} className="text-sm text-slate-300 flex items-start gap-1.5">
                   <span className="text-slate-600 mt-0.5">·</span>
-                  {ref}
+                  {typeof ref === 'string' ? ref : ref.reference}
                 </li>
               ))}
             </ul>
@@ -40,9 +40,9 @@ export default function DirectionSection({ art_direction, audio_direction, devel
           <span className="text-teal-400">🎵</span> Audio Direction
         </h2>
         <div className="rounded-xl border border-slate-800 bg-[#0d0f16] p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Row label="Mood" value={audio_direction.music_mood} />
-          <Row label="Music style" value={audio_direction.music_style} />
-          <Row label="SFX notes" value={audio_direction.sfx_notes} />
+          <Row label="Genre" value={audio_direction.music_genre ?? audio_direction.music_mood ?? '–'} />
+          <Row label="Music style" value={audio_direction.music_style ?? audio_direction.instrumentation ?? '–'} />
+          <Row label="SFX notes" value={audio_direction.sfx_notes ?? audio_direction.sound_design_style ?? '–'} />
         </div>
       </section>
 
@@ -52,28 +52,30 @@ export default function DirectionSection({ art_direction, audio_direction, devel
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-xl border border-slate-800 bg-[#0d0f16] p-4 space-y-3">
-            <Row label="Estimated scope" value={development.estimated_scope} />
-            <Row label="Suggested engine" value={development.suggested_engine} />
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                Core features
-              </p>
-              <ul className="space-y-1">
-                {development.core_features.map((f, i) => (
-                  <li key={i} className="text-xs text-slate-300 flex items-start gap-1.5">
-                    <span className="text-green-500 mt-0.5">✓</span>
-                    {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <Row label="Estimated scope" value={development.estimated_scope ?? '–'} />
+            <Row label="Suggested engine" value={development.suggested_engine ?? '–'} />
+            {(development.core_features?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                  Core features
+                </p>
+                <ul className="space-y-1">
+                  {development.core_features!.map((f, i) => (
+                    <li key={i} className="text-xs text-slate-300 flex items-start gap-1.5">
+                      <span className="text-green-500 mt-0.5">✓</span>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
           <div className="rounded-xl border border-slate-800 bg-[#0d0f16] p-4">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
               Out of scope
             </p>
             <ul className="space-y-1">
-              {development.out_of_scope.map((f, i) => (
+              {(development.out_of_scope ?? []).map((f, i) => (
                 <li key={i} className="text-xs text-slate-400 flex items-start gap-1.5">
                   <span className="text-slate-600 mt-0.5">✗</span>
                   {f}

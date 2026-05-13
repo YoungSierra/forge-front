@@ -1,6 +1,6 @@
 import type { GDDMechanic } from '@/lib/types'
 
-const TYPE_STYLES: Record<GDDMechanic['type'], string> = {
+const TYPE_STYLES: Record<string, string> = {
   core: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
   secondary: 'bg-slate-600/40 text-slate-400 border-slate-600',
   progression: 'bg-teal-500/20 text-teal-400 border-teal-500/30',
@@ -24,11 +24,11 @@ export default function MechanicsSection({ mechanics }: Props) {
           >
             <div className="flex items-center gap-2 mb-2">
               <h3 className="font-bold text-white text-sm">{mechanic.name}</h3>
-              <span
-                className={`text-xs px-2 py-0.5 rounded-md border capitalize ${TYPE_STYLES[mechanic.type]}`}
-              >
-                {mechanic.type}
-              </span>
+              {(mechanic.type || mechanic.category) && (
+                <span className={`text-xs px-2 py-0.5 rounded-md border capitalize ${TYPE_STYLES[mechanic.type ?? ''] ?? 'bg-slate-600/40 text-slate-400 border-slate-600'}`}>
+                  {mechanic.category ?? mechanic.type}
+                </span>
+              )}
             </div>
             <p className="text-slate-400 text-xs leading-relaxed">{mechanic.description}</p>
           </div>

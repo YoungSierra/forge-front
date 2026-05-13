@@ -4,6 +4,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Node } from '@xyflow/react'
 import { CAT_VAR, type ForgeNodeData, type ForgeNodeCategory } from './ForgeNode'
 import type { ForgeGroupNodeData } from './ForgeGroupNode'
+import type { Project } from '@/lib/types'
+import ExportModal from '@/components/shared/ExportModal'
 
 interface Props {
   nodes: Node[]
@@ -14,6 +16,8 @@ interface Props {
   onToggle: () => void
   width?: number
   onWidthChange?: (w: number) => void
+  project?: Project | null
+  onProjectRepoSaved?: () => void
 }
 
 interface OutlinerFrame {
@@ -111,8 +115,11 @@ function NodeRow({ node, selectedId, onSelect, onFocus, indent = 0 }: {
   )
 }
 
-export default function LibraryPanel({ nodes, selectedNodeId, onSelect, onFocus, isOpen, onToggle, width = 220, onWidthChange }: Props) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+export default function LibraryPanel({ nodes, selectedNodeId, onSelect, onFocus, isOpen, onToggle, width = 220, onWidthChange, project, onProjectRepoSaved }: Props) {
+  const [collapsed, setCollapsed]     = useState<Record<string, boolean>>({})
+  const [exportOpen, setExportOpen]   = useState(false)
+
+  const hasApprovedNodes = nodes.some(n => (n.data as unknown as ForgeNodeData).approved === true)
   const toggle = (id: string) => setCollapsed(p => ({ ...p, [id]: !p[id] }))
 
   const dragging = useRef(false)
@@ -218,7 +225,39 @@ export default function LibraryPanel({ nodes, selectedNodeId, onSelect, onFocus,
 
             return null
           })}
+
+          {/* Botón Export — sticky al fondo del panel aunque la lista haga scroll */}
+          {project && (
+            <div style={{ position: 'sticky', bottom: 0, padding: '10px 10px 12px', background: 'var(--bg-1)', borderTop: '1px solid var(--line)' }}>
+              <button
+                onClick={() => setExportOpen(true)}
+                disabled={!hasApprovedNodes}
+                title={!hasApprovedNodes ? 'Approve at least one node to export' : 'Export to repository'}
+                style={{
+                  width: '100%', padding: '7px 0', borderRadius: 6,
+                  fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600,
+                  cursor: hasApprovedNodes ? 'pointer' : 'not-allowed',
+                  border: `1px solid ${hasApprovedNodes ? 'var(--cat-code)' : 'var(--line-2)'}`,
+                  background: hasApprovedNodes ? 'color-mix(in oklch, var(--cat-code) 10%, var(--bg-2))' : 'transparent',
+                  color: hasApprovedNodes ? 'var(--cat-code)' : 'var(--text-3)',
+                  transition: 'all 0.15s',
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                }}
+              >
+                ↑ Export
+              </button>
+            </div>
+          )}
         </>
+      )}
+
+      {exportOpen && project && (
+        <ExportModal
+          project={project}
+          nodes={nodes}
+          onClose={() => setExportOpen(false)}
+          onRepoSaved={onProjectRepoSaved}
+        />
       )}
     </aside>
   )

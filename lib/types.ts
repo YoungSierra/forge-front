@@ -8,11 +8,30 @@ export type StepStatus =
   | 'approved'
   | 'invalidated'
 
+export type GDDPaletteSwatch = {
+  role: string
+  color_description: string
+  tone: string
+  usage: string
+}
+
+export type GDDArtRef = {
+  reference: string
+  what_we_take: string
+}
+
 export type GDDMechanic = {
-  id: string
+  id?: string
   name: string
-  description: string
-  type: 'core' | 'secondary' | 'progression'
+  description?: string
+  // formato n8n nuevo
+  category?: string
+  player_goal?: string
+  rules?: string
+  depth?: string
+  integration?: string
+  // formato antiguo
+  type?: 'core' | 'secondary' | 'progression'
   player_fantasy?: string
   gameplay_tags?: string[]
   inputs?: string[]
@@ -25,11 +44,16 @@ export type GDDMechanic = {
 export type GDDLevel = {
   id?: string
   name: string
-  description: string
-  order: number
-  difficulty: 'easy' | 'medium' | 'hard' | 'boss'
-  environment: string
-  background_prompt: string
+  // formato n8n nuevo
+  visual_feel?: string
+  gameplay_role?: string
+  narrative_significance?: string
+  // formato antiguo
+  description?: string
+  order?: number
+  difficulty?: 'easy' | 'medium' | 'hard' | 'boss'
+  environment?: string
+  background_prompt?: string
   introduced_mechanics?: string[]
   objectives?: string[]
   preview_url?: string
@@ -39,12 +63,20 @@ export type GDDLevel = {
 export type GDDCharacter = {
   id?: string
   name: string
-  role: 'hero' | 'enemy' | 'npc' | 'boss'
-  description: string
+  role: string
+  // formato n8n nuevo
+  age?: string
+  appearance?: string
+  backstory?: string
+  motivation?: string
+  arc?: string
+  gameplay_role?: string
+  // formato antiguo
+  description?: string
   personality?: string
-  abilities: { name: string; mechanic_link: string; description: string }[] | string[]
+  abilities?: { name: string; mechanic_link: string; description: string }[] | string[]
   gameplay_tags?: string[]
-  sprite_prompt: string
+  sprite_prompt?: string
   asset_type?: string
   preview_url?: string
 }
@@ -52,58 +84,94 @@ export type GDDCharacter = {
 export type GDD = {
   project: {
     name: string
-    description: string
+    // formato n8n nuevo
+    tagline?: string
+    logline?: string
+    player_mode?: string
+    art_style?: string
+    setting?: string
+    lore?: string
+    target_audience?: string
+    // ambos formatos
+    description?: string
     genre: string
-    subgenre?: string
-    elevator_pitch: string
-    core_loop: string
-    tone: string
+    elevator_pitch?: string
+    core_loop?: string
+    tone?: string
     target_platform?: string
     camera?: string
+    // formato antiguo
+    subgenre?: string
     design_pillars?: string[]
     player_motivation?: string
+  }
+  // formato n8n nuevo
+  design_pillars?: { pillar: string; description: string }[]
+  key_features?: string[]
+  story_acts?: { act: number; title: string; summary: string }[]
+  themes?: { theme: string; manifestation: string }[]
+  factions?: { name: string; alignment: string; goals: string; player_relationship: string }[]
+  game_phases?: { phase: string; time_range: string; power_level: string; content_available: string; key_unlock: string }[]
+  player_stats?: { stat: string; description: string; base_value: string; max_value: string; how_it_grows: string }[]
+  player_abilities?: { ability: string; unlock_condition: string; description: string; cooldown_cost: string }[]
+  magic_moments?: string[]
+  economy?: {
+    model: string
+    price: string
+    currencies: { currency: string; type: string; how_earned: string; how_spent: string; purchasable: string }[]
+    reward_structure: { reward_type: string; trigger: string; frequency: string; emotion_targeted: string }[]
   }
   mechanics: GDDMechanic[]
   levels: GDDLevel[]
   characters: GDDCharacter[]
   art_direction: {
-    style: string
-    palette: string
+    style?: string
+    palette?: string | GDDPaletteSwatch[]
+    references?: string[] | GDDArtRef[]
+    // formato n8n nuevo
+    character_style?: string
+    environment_style?: string
+    technical_targets?: string
+    // formato antiguo
     lighting_style?: string
     sprite_resolution?: string
     background_resolution?: string
     resolution?: string
     ui_style?: string
-    references: string[]
+    mood?: string
   }
   audio_direction: {
-    music_mood: string
-    music_style: string
+    // formato n8n nuevo
+    music_genre?: string
+    instrumentation?: string
+    adaptive_music?: string
+    sound_design_style?: string
+    voice_over?: string
+    ambience?: string
+    // formato antiguo
+    music_mood?: string
+    music_style?: string
     adaptive_audio?: string
-    sfx_notes: string
+    sfx_notes?: string
   }
-  systems?: {
-    progression?: string
-    economy?: string
-    economy_sources?: string[]
-    economy_sinks?: string[]
-    combat?: string
-    ui_flow?: string
-    onboarding?: string
+  development: {
+    suggested_engine?: string
+    language?: string
+    tools?: { category: string; tool: string }[]
+    // formato antiguo
+    estimated_scope?: string
+    team_size?: number
+    core_features?: string[]
+    out_of_scope?: string[]
+    technical_risks?: string[]
   }
+  // formato antiguo
+  systems?: Record<string, unknown>
   narrative?: Record<string, unknown>
   world?: Record<string, unknown>
   glossary?: unknown[]
   uiux_direction?: Record<string, unknown>
   open_questions?: unknown[]
-  development: {
-    estimated_scope: string
-    team_size?: number
-    core_features: string[]
-    out_of_scope: string[]
-    technical_risks?: string[]
-    suggested_engine: string
-  }
 }
 
 export type SpritePreview = {
@@ -162,6 +230,12 @@ export type ProjectConcept = {
   }
 }
 
+export type RepoConfig = {
+  repo_url: string
+  has_token: boolean
+  configured_at: string
+}
+
 export type Project = {
   id: string
   name: string
@@ -179,6 +253,7 @@ export type Project = {
   node_total_count?: number
   canvas_layout?: unknown
   generation_jobs?: GenerationJob[]
+  repo_config?: RepoConfig
 }
 
 export type AdminUser = {
@@ -341,14 +416,15 @@ export type AssetVersion = {
 }
 
 export type ImageRef = {
-  id:            string
-  project_id:    string
-  character_key: string
-  image_url:     string
-  storage_path:  string
-  round:         number
-  selected:      boolean
-  created_at:    string
+  id:              string
+  project_id:      string
+  character_key:   string
+  image_url:       string
+  storage_path:    string
+  round:           number
+  selected:        boolean
+  refined_from_id: string | null
+  created_at:      string
 }
 
 export type CharacterRefStatus = {

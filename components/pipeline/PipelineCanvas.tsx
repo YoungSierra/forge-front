@@ -777,6 +777,8 @@ function PipelineApp({
         onToggle={() => setLibraryOpen(o => !o)}
         width={libraryWidth}
         onWidthChange={setLibraryWidth}
+        project={liveProject}
+        onProjectRepoSaved={onRefresh}
       />
 
       <div className="forge-canvas">

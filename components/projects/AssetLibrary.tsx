@@ -285,11 +285,11 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
 
 // Categories are derived from actual data, not a static list
 
-export default function AssetLibrary() {
+export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: string }) {
   const [allAssets, setAllAssets] = useState<AssetWithVersions[]>([])
   const [projects, setProjects]   = useState<Project[]>([])
   const [loading, setLoading]     = useState(true)
-  const [projectId, setProjectId] = useState<string>('')
+  const [projectId, setProjectId] = useState<string>(defaultProjectId ?? '')
   const [stepKey, setStepKey]     = useState<string>('')
   const [page, setPage]           = useState(0)
   const [selected, setSelected]   = useState<AssetWithVersions | null>(null)

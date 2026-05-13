@@ -745,7 +745,7 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {[
                   ['Style', gdd.art_direction?.style],
-                  ['Palette', gdd.art_direction?.palette],
+                  ['Palette', Array.isArray(gdd.art_direction?.palette) ? (gdd.art_direction!.palette as import('@/lib/types').GDDPaletteSwatch[]).map(p => p.role).join(', ') : gdd.art_direction?.palette],
                   ['Sprite res.', gdd.art_direction?.sprite_resolution ?? gdd.art_direction?.resolution ?? '–'],
                   ['Background res.', gdd.art_direction?.background_resolution ?? '–'],
                   ['Lighting', gdd.art_direction?.lighting_style ?? '–'],
@@ -1157,7 +1157,7 @@ function SpritesPanel({ project, onRefresh, onLog, locked, memberId, nodeContext
       const chars = project.concept?.pipeline?.gdd?.characters ?? []
       const payload = sprites ?? chars.map(c => ({
         character_name: c.name, character_role: c.role,
-        sprite_prompt: c.sprite_prompt, preview_url: '', placeholder: true,
+        sprite_prompt: c.sprite_prompt ?? '', preview_url: '', placeholder: true,
       }))
       await approveStep2(project.id, payload, memberId ?? undefined)
       onRefresh()
@@ -1167,7 +1167,7 @@ function SpritesPanel({ project, onRefresh, onLog, locked, memberId, nodeContext
   }
 
   const list = sprites ?? (approved ? project.concept?.pipeline?.gdd?.characters?.map(c => ({
-    character_name: c.name, character_role: c.role, sprite_prompt: c.sprite_prompt,
+    character_name: c.name, character_role: c.role, sprite_prompt: c.sprite_prompt ?? '',
     preview_url: c.preview_url ?? '',
     placeholder: !c.preview_url,
   })) : null)
@@ -1260,7 +1260,7 @@ function LevelsPanel({ project, onRefresh, onLog, locked, memberId, nodeContext,
   const approved = !!stored?.approved
 
   const mechNames: Record<string, string> = Object.fromEntries(
-    (project.concept?.pipeline?.gdd?.mechanics ?? []).map((m: { id: string; name: string }) => [m.id, m.name])
+    (project.concept?.pipeline?.gdd?.mechanics ?? []).map((m) => [m.id, m.name])
   )
 
   async function generate() {
@@ -1449,7 +1449,7 @@ function CodePanel({ project, onRefresh, onLog, locked, memberId, nodeContext }:
           <Divider />
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 2 }}>MECHANICS TO IMPLEMENT</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {mechanics.map((m: { id: string; name: string; type: string; description?: string }, i: number) => (
+            {mechanics.map((m, i) => (
               <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
                 <span style={{ color: m.type === 'core' ? 'var(--cat-code)' : m.type === 'progression' ? 'var(--cat-gate)' : 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 10, flexShrink: 0 }}>›</span>
                 <span style={{ fontSize: 11, color: 'var(--text-1)' }}>{m.name}</span>

@@ -3,17 +3,23 @@
 import { useState } from 'react'
 import type { GDDCharacter } from '@/lib/types'
 
-const ROLE_STYLES: Record<GDDCharacter['role'], string> = {
+const ROLE_STYLES: Record<string, string> = {
   hero: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  protagonist: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
   enemy: 'bg-red-500/20 text-red-400 border-red-500/30',
+  antagonist: 'bg-red-500/20 text-red-400 border-red-500/30',
   npc: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  mentor: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   boss: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
 }
 
-const ROLE_BG: Record<GDDCharacter['role'], string> = {
+const ROLE_BG: Record<string, string> = {
   hero: 'bg-purple-900/40',
+  protagonist: 'bg-purple-900/40',
   enemy: 'bg-red-900/40',
+  antagonist: 'bg-red-900/40',
   npc: 'bg-blue-900/40',
+  mentor: 'bg-blue-900/40',
   boss: 'bg-orange-900/40',
 }
 
@@ -74,9 +80,9 @@ export default function CharactersSection({ characters, previewUrls = {} }: Prop
               <p className="text-slate-400 text-xs leading-relaxed line-clamp-2">
                 {char.description}
               </p>
-              {char.abilities.length > 0 && (
+              {(char.abilities?.length ?? 0) > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {char.abilities.map((ability, j) => (
+                  {char.abilities!.map((ability, j) => (
                     <span
                       key={j}
                       className="text-xs px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-400"

@@ -1,21 +1,23 @@
 'use client'
 
-import React from 'react'
-import type { Project } from '@/lib/types'
-import { assetUrl } from '@/lib/api'
+import React, { useState, useEffect } from 'react'
+import type { Project, ImageRef } from '@/lib/types'
+import { assetUrl, getImageReferencePool } from '@/lib/api'
 
 /* ─── Types ─── */
 
 type InputSource = {
+  key?:  string
   label: string
   color: string
-  data: unknown
+  data:  unknown
 }
 
 /* ─── Canvas-driven source metadata ─── */
 
 const SOURCE_META: Record<string, { label: string; color: string }> = {
   gdd:                  { label: 'Game Design Doc',       color: 'var(--cat-design)' },
+  image_reference:      { label: 'Image Reference',       color: 'var(--cat-asset)'  },
   art_direction_intake: { label: 'Art Direction Intake',  color: 'var(--cat-design)' },
   visual_guide:         { label: 'Visual Guide',          color: 'var(--cat-asset)'  },
   concept_art:          { label: 'Concept Art',           color: 'var(--cat-design)' },
@@ -413,12 +415,77 @@ function renderSourceData(data: unknown): React.ReactNode {
   return renderGenericValue(data)
 }
 
+/* ─── Image reference source — carga async las imágenes seleccionadas ─── */
+
+function ImageRefSource({ projectId }: { projectId: string }) {
+  const [images,    setImages]    = useState<ImageRef[]>([])
+  const [loading,   setLoading]   = useState(true)
+  const [zoomedUrl, setZoomedUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    getImageReferencePool(projectId)
+      .then(pool => setImages(pool.filter(i => i.selected)))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [projectId])
+
+  useEffect(() => {
+    if (!zoomedUrl) return
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); setZoomedUrl(null) } }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [zoomedUrl])
+
+  if (loading) return (
+    <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>Loading…</div>
+  )
+  if (!images.length) return (
+    <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', fontStyle: 'italic' }}>No references selected yet</div>
+  )
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {images.map(img => (
+          <div key={img.id} style={{ position: 'relative', flexShrink: 0 }}>
+            <img
+              src={img.image_url}
+              alt=""
+              style={{ width: 100, height: 100, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--line-2)', display: 'block' }}
+            />
+            <button
+              onClick={() => setZoomedUrl(img.image_url)}
+              style={{ position: 'absolute', bottom: 5, right: 5, width: 22, height: 22, borderRadius: 4, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 12, opacity: 0.75, transition: 'opacity 150ms' }}
+              onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+              onMouseLeave={e => (e.currentTarget.style.opacity = '0.75')}
+              title="Zoom"
+            >⊕</button>
+          </div>
+        ))}
+      </div>
+
+      {zoomedUrl && (
+        <div
+          onClick={() => setZoomedUrl(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}
+        >
+          <button
+            onClick={() => setZoomedUrl(null)}
+            style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, width: 36, height: 36, display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 18 }}
+          >✕</button>
+          <img src={zoomedUrl} alt="" onClick={e => e.stopPropagation()} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 10, boxShadow: '0 24px 80px rgba(0,0,0,0.8)' }} />
+        </div>
+      )}
+    </>
+  )
+}
+
 /* ─── Main component ─── */
 
 export function InputContext({ stepKey, project, nodeContext }: { stepKey: string; project: Project; nodeContext?: Record<string, unknown> }) {
   // Canvas-driven: use actual connected parents. Fall back to hardcoded only when no nodeContext provided.
   const sources: InputSource[] = nodeContext != null
     ? Object.entries(nodeContext).map(([key, data]) => ({
+        key,
         label: SOURCE_META[key]?.label ?? key.replace(/_/g, ' '),
         color: SOURCE_META[key]?.color ?? 'var(--cat-design)',
         data,
@@ -451,7 +518,9 @@ export function InputContext({ stepKey, project, nodeContext }: { stepKey: strin
             </div>
             {/* Source data */}
             <div style={{ paddingLeft: 11, borderLeft: `1px solid color-mix(in oklch, ${source.color} 25%, var(--line-2))` }}>
-              {renderSourceData(source.data)}
+              {source.key === 'image_reference'
+                ? <ImageRefSource projectId={project.id} />
+                : renderSourceData(source.data)}
             </div>
           </div>
         )

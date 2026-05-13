@@ -4,9 +4,11 @@ import React, { useEffect, useState, useCallback } from 'react'
 import type { Project } from '@/lib/types'
 import type { GlobalRefStatus, ImageRef } from '@/lib/types'
 import { exportGDDToPDF, } from '@/lib/gdd-pdf'
-import { assetUrl, getImageReferenceStatus, getImageReferencePool, generateImageReferenceRound, approveImageReferenceSelection, approveNode, getCharatersStatus, generateCharacterRender, approveCharacterRender, approveCharatersNode } from '@/lib/api'
+import { assetUrl, getImageReferenceStatus, getImageReferencePool, generateImageReferenceRound, approveImageReferenceSelection, approveNode, getCharatersStatus, generateCharacterRender, approveCharacterRender, approveCharatersNode, getIdeaCandidate } from '@/lib/api'
+import type { IdeaCard } from '@/lib/api'
 import type { CharacterRenderStatus, AssetVersion } from '@/lib/types'
 import { InputContext, getInputSources } from './InputContext'
+import RefinementModal from '@/components/shared/RefinementModal'
 
 interface Props {
   stepKey: string
@@ -96,6 +98,7 @@ function Card({ children }: { children: React.ReactNode }) {
 function GDDDetail({ project }: { project: Project }) {
   const gdd = project.concept?.pipeline?.gdd
   const [lightbox, setLightbox] = useState<{ url: string; name: string } | null>(null)
+  const [ideaCandidate, setIdeaCandidate] = useState<{ title: string; idea_data: IdeaCard; original_description: string | null } | null>(null)
 
   React.useEffect(() => {
     if (!lightbox) return
@@ -104,36 +107,50 @@ function GDDDetail({ project }: { project: Project }) {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [lightbox])
 
+  React.useEffect(() => {
+    getIdeaCandidate(project.id).then(c => { if (c) setIdeaCandidate(c) }).catch(() => {})
+  }, [project.id])
+
   if (!gdd) return <p style={{ color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>No GDD available.</p>
 
-  const DIFFICULTY_COLOR: Record<string, string> = {
-    easy: 'var(--cat-code)', medium: 'var(--cat-gate)',
-    hard: 'var(--cat-output)', boss: 'oklch(0.65 0.25 340)',
-  }
-  const ROLE_COLOR: Record<string, string> = {
-    hero: 'var(--cat-design)', enemy: 'var(--cat-output)',
-    npc: 'var(--cat-asset)', boss: 'oklch(0.65 0.25 340)',
-  }
-  const MECHANIC_COLOR: Record<string, string> = {
-    core: 'var(--cat-gate)', secondary: 'var(--text-3)', progression: 'var(--cat-level)',
-  }
+  const roleColor = (role: string) => ({
+    hero: 'var(--cat-design)', protagonist: 'var(--cat-design)',
+    enemy: 'var(--cat-output)', antagonist: 'var(--cat-output)',
+    npc: 'var(--cat-asset)', mentor: 'var(--cat-asset)',
+    boss: 'oklch(0.65 0.25 340)',
+  }[role?.toLowerCase()] ?? 'var(--text-3)')
+
+  const paletteIsArray = Array.isArray(gdd.art_direction?.palette)
+  const refsAreObjects = Array.isArray(gdd.art_direction?.references) &&
+    (gdd.art_direction.references as unknown[]).length > 0 &&
+    typeof (gdd.art_direction.references as unknown[])[0] === 'object'
+
+  const mono9: React.CSSProperties = { color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.08em' }
 
   return (
     <div>
-      {/* Header */}
+      {/* ── Header ── */}
       <div style={{ marginBottom: 28 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-0)', marginBottom: 6 }}>
+        <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-0)', marginBottom: 4 }}>
           {gdd.project.name}
         </h2>
+        {gdd.project.tagline && (
+          <p style={{ fontSize: 13, color: 'var(--text-3)', fontStyle: 'italic', marginBottom: 10 }}>
+            {gdd.project.tagline}
+          </p>
+        )}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-          <Badge label={gdd.project.genre} color="var(--cat-design)" />
-          <Badge label={gdd.project.tone} color="var(--cat-audio)" />
-          {gdd.development?.suggested_engine && <Badge label={gdd.development.suggested_engine} color="var(--cat-code)" />}
-          {gdd.development?.estimated_scope && <Badge label={gdd.development.estimated_scope} color="var(--text-3)" />}
+          {gdd.project.genre && <Badge label={gdd.project.genre} color="var(--cat-design)" />}
+          {gdd.project.tone && <Badge label={gdd.project.tone} color="var(--cat-audio)" />}
+          {gdd.project.target_platform && <Badge label={gdd.project.target_platform} color="var(--cat-code)" />}
+          {gdd.project.player_mode && <Badge label={gdd.project.player_mode} color="var(--text-3)" />}
+          {gdd.development?.suggested_engine && <Badge label={gdd.development.suggested_engine} color="var(--cat-gate)" />}
         </div>
-        <p style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.65, fontStyle: 'italic' }}>
-          {gdd.project.elevator_pitch}
-        </p>
+        {(gdd.project.logline || gdd.project.elevator_pitch) && (
+          <p style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.65, fontStyle: 'italic' }}>
+            {gdd.project.logline || gdd.project.elevator_pitch}
+          </p>
+        )}
         {gdd.project.core_loop && (
           <div style={{
             marginTop: 12, padding: '8px 12px',
@@ -147,43 +164,133 @@ function GDDDetail({ project }: { project: Project }) {
         )}
       </div>
 
-      {/* Characters */}
-      {gdd.characters?.length > 0 && (
+      {/* ── Design Pillars ── */}
+      {(gdd.design_pillars?.length ?? 0) > 0 && (
+        <Section title="Design Pillars">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+            {gdd.design_pillars!.map((p, i) => (
+              <Card key={i}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--cat-design)', marginBottom: 6 }}>{p.pillar}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55 }}>{p.description}</div>
+              </Card>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* ── Overview ── */}
+      {(gdd.project.description || (gdd.key_features?.length ?? 0) > 0) && (
+        <Section title="Overview">
+          {gdd.project.description && (
+            <p style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.65, marginBottom: (gdd.key_features?.length ?? 0) > 0 ? 12 : 0 }}>
+              {gdd.project.description}
+            </p>
+          )}
+          {(gdd.key_features?.length ?? 0) > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {gdd.key_features!.map((f, i) => (
+                <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12, color: 'var(--text-2)', lineHeight: 1.55 }}>
+                  <span style={{ color: 'var(--cat-design)', fontWeight: 700, flexShrink: 0 }}>›</span>
+                  {f}
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* ── Characters ── */}
+      {(gdd.characters?.length ?? 0) > 0 && (
         <Section title={`Characters · ${gdd.characters.length}`}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
             {gdd.characters.map((c, i) => (
               <Card key={i}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
                   <div
                     onClick={() => c.preview_url && setLightbox({ url: assetUrl(c.preview_url), name: c.name })}
-                    style={{ cursor: c.preview_url ? 'zoom-in' : 'default', borderRadius: 8, flexShrink: 0 }}
-                    title={c.preview_url ? 'Click to enlarge' : undefined}
+                    style={{ cursor: c.preview_url ? 'zoom-in' : 'default', flexShrink: 0 }}
                   >
-                    <SpriteImgBox url={c.preview_url} name={c.name} color={ROLE_COLOR[c.role] ?? 'var(--text-3)'} />
+                    <SpriteImgBox url={c.preview_url} name={c.name} color={roleColor(c.role)} />
                   </div>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-0)' }}>{c.name}</div>
-                    <Badge label={c.role} color={ROLE_COLOR[c.role] ?? 'var(--text-3)'} />
+                  <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-0)', marginBottom: 5 }}>{c.name}</div>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      <Badge label={c.role} color={roleColor(c.role)} />
+                      {c.age && <Badge label={`Age: ${c.age}`} color="var(--text-3)" />}
+                    </div>
                   </div>
                 </div>
-                <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 8 }}>{c.description}</p>
-                {c.abilities?.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-                    {c.abilities.map((a, j) => (
-                      <span key={j} style={{
-                        fontSize: 9, fontFamily: 'var(--font-mono)', padding: '1px 6px',
-                        borderRadius: 3, background: 'var(--bg-3)', color: 'var(--text-3)',
-                        border: '1px solid var(--line)',
-                      }}>{toStr(a)}</span>
+                {c.appearance && (
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 6 }}>
+                    <span style={mono9}>APPEARANCE · </span>{c.appearance}
+                  </div>
+                )}
+                {c.personality && (
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 6 }}>
+                    <span style={mono9}>PERSONALITY · </span>{c.personality}
+                  </div>
+                )}
+                {!c.appearance && !c.personality && c.description && (
+                  <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 6 }}>{c.description}</p>
+                )}
+                {c.motivation && (
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 6 }}>
+                    <span style={mono9}>MOTIVATION · </span>{c.motivation}
+                  </div>
+                )}
+                {(c.backstory || c.arc) && (
+                  <details style={{ marginTop: 4 }}>
+                    <summary style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', cursor: 'pointer' }}>backstory & arc</summary>
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {c.backstory && <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55 }}><span style={mono9}>BACKSTORY · </span>{c.backstory}</div>}
+                      {c.arc && <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55 }}><span style={mono9}>ARC · </span>{c.arc}</div>}
+                    </div>
+                  </details>
+                )}
+                {c.gameplay_role && (
+                  <div style={{ marginTop: 8, padding: '6px 8px', background: 'var(--bg-1)', borderRadius: 5, border: '1px solid var(--line)', fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                    <span style={{ color: 'var(--cat-design)' }}>GAMEPLAY · </span>{c.gameplay_role}
+                  </div>
+                )}
+                {!c.gameplay_role && (c.abilities?.length ?? 0) > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                    {c.abilities!.map((a, j) => (
+                      <span key={j} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '1px 6px', borderRadius: 3, background: 'var(--bg-3)', color: 'var(--text-3)', border: '1px solid var(--line)' }}>
+                        {toStr(a)}
+                      </span>
                     ))}
                   </div>
                 )}
-                {c.sprite_prompt && (
+              </Card>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* ── Mechanics ── */}
+      {(gdd.mechanics?.length ?? 0) > 0 && (
+        <Section title={`Game Mechanics · ${gdd.mechanics.length}`}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 10 }}>
+            {gdd.mechanics.map((m, i) => (
+              <Card key={i}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-0)', flex: 1 }}>{toStr(m.name)}</span>
+                  {(m.category || m.type) && <Badge label={m.category ?? toStr(m.type)} color={m.category ? 'var(--cat-gate)' : 'var(--text-3)'} />}
+                </div>
+                {m.description && <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 8 }}>{m.description}</p>}
+                {m.player_goal && (
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, marginBottom: 6 }}>
+                    <span style={mono9}>GOAL · </span>{m.player_goal}
+                  </div>
+                )}
+                {(m.rules || m.depth || m.integration) && (
                   <details style={{ marginTop: 4 }}>
-                    <summary style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', cursor: 'pointer' }}>
-                      sprite prompt
-                    </summary>
-                    <p style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5, marginTop: 4 }}>{c.sprite_prompt}</p>
+                    <summary style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', cursor: 'pointer' }}>rules & depth</summary>
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {m.rules && <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}><span style={mono9}>RULES · </span>{m.rules}</div>}
+                      {m.depth && <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}><span style={mono9}>DEPTH · </span>{m.depth}</div>}
+                      {m.integration && <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}><span style={mono9}>CONNECTS · </span>{m.integration}</div>}
+                    </div>
                   </details>
                 )}
               </Card>
@@ -192,153 +299,335 @@ function GDDDetail({ project }: { project: Project }) {
         </Section>
       )}
 
-      {/* Mechanics */}
-      {gdd.mechanics?.length > 0 && (
-        <Section title={`Mechanics · ${gdd.mechanics.length}`}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {gdd.mechanics.map((m, i) => (
-              <Card key={i}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-0)', flex: 1 }}>{toStr(m.name)}</span>
-                  <Badge label={toStr(m.type)} color={MECHANIC_COLOR[toStr(m.type)] ?? 'var(--text-3)'} />
+      {/* ── Narrative & World ── */}
+      {(gdd.project.setting || gdd.project.lore || (gdd.story_acts?.length ?? 0) > 0 || (gdd.factions?.length ?? 0) > 0) && (
+        <Section title="Narrative & World">
+          {gdd.project.setting && (
+            <Card>
+              <div style={{ ...mono9, marginBottom: 6 }}>Setting</div>
+              <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.65 }}>{gdd.project.setting}</p>
+            </Card>
+          )}
+          {gdd.project.lore && (
+            <Card>
+              <div style={{ ...mono9, marginBottom: 6 }}>Lore</div>
+              <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.65 }}>{gdd.project.lore}</p>
+            </Card>
+          )}
+          {(gdd.story_acts?.length ?? 0) > 0 && (
+            <div>
+              <div style={{ ...mono9, marginBottom: 10 }}>Story Acts</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {gdd.story_acts!.map((a, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <div style={{
+                      flexShrink: 0, width: 28, height: 28, borderRadius: 99,
+                      background: 'color-mix(in oklch, var(--cat-design) 15%, var(--bg-2))',
+                      border: '1px solid color-mix(in oklch, var(--cat-design) 30%, transparent)',
+                      display: 'grid', placeItems: 'center',
+                      fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--cat-design)',
+                    }}>{a.act}</div>
+                    <div style={{ flex: 1, paddingTop: 3 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-0)', marginBottom: 4 }}>{a.title}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6 }}>{a.summary}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {(gdd.factions?.length ?? 0) > 0 && (
+            <div>
+              <div style={{ ...mono9, marginBottom: 10 }}>Factions</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+                {gdd.factions!.map((f, i) => {
+                  const alignLower = f.alignment?.toLowerCase() ?? ''
+                  const alignColor = alignLower.includes('allied') ? 'var(--cat-design)' : alignLower.includes('enemy') ? 'var(--cat-output)' : 'var(--text-3)'
+                  return (
+                    <Card key={i}>
+                      <div style={{ fontWeight: 700, fontSize: 12, color: 'var(--text-0)', marginBottom: 5 }}>{f.name}</div>
+                      <Badge label={f.alignment} color={alignColor} />
+                      {f.goals && <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, marginTop: 6, marginBottom: 4 }}>{f.goals}</p>}
+                      {f.player_relationship && <div style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic' }}>{f.player_relationship}</div>}
+                    </Card>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          {(gdd.themes?.length ?? 0) > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {gdd.themes!.map((t, i) => (
+                <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12, alignItems: 'flex-start' }}>
+                  <span style={{ color: 'var(--cat-design)', fontWeight: 700, flexShrink: 0 }}>›</span>
+                  <div><span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{t.theme}</span>{t.manifestation && <span style={{ color: 'var(--text-3)' }}> — {t.manifestation}</span>}</div>
                 </div>
-                <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.55 }}>{toStr(m.description)}</p>
-              </Card>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </Section>
       )}
 
-      {/* Levels */}
-      {gdd.levels?.length > 0 && (
-        <Section title={`Levels · ${gdd.levels.length}`}>
+      {/* ── Environments / Levels ── */}
+      {(gdd.levels?.length ?? 0) > 0 && (
+        <Section title={`Environments · ${gdd.levels.length}`}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {gdd.levels.map((l, i) => (
               <Card key={i}>
                 {l.preview_url && (
-                  <div style={{ margin: '-12px -14px 12px', borderRadius: '8px 8px 0 0', overflow: 'hidden', height: 160, position: 'relative' }}>
+                  <div style={{ margin: '-12px -14px 12px', borderRadius: '8px 8px 0 0', overflow: 'hidden', height: 160 }}>
                     <img src={assetUrl(l.preview_url)} alt={l.name}
                       style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                       onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }}
                     />
                   </div>
                 )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                  <span style={{
-                    fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)',
-                    background: 'var(--bg-3)', border: '1px solid var(--line)', borderRadius: 4, padding: '1px 7px',
-                  }}>
-                    {String(l.order).padStart(2, '0')}
-                  </span>
-                  <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-0)', flex: 1 }}>{toStr(l.name)}</span>
-                  <Badge label={toStr(l.difficulty)} color={DIFFICULTY_COLOR[toStr(l.difficulty)] ?? 'var(--text-3)'} />
-                  <Badge label={envLabel(l.environment)} color="var(--cat-level)" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  {l.order != null && (
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', background: 'var(--bg-3)', border: '1px solid var(--line)', borderRadius: 4, padding: '1px 7px' }}>
+                      {String(l.order).padStart(2, '0')}
+                    </span>
+                  )}
+                  <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-0)', flex: 1 }}>{toStr(l.name)}</span>
+                  {l.difficulty && <Badge label={toStr(l.difficulty)} color="var(--cat-level)" />}
                 </div>
-                <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 6 }}>{toStr(l.description)}</p>
-                {l.background_prompt && (
-                  <details>
-                    <summary style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', cursor: 'pointer' }}>
-                      background prompt
-                    </summary>
-                    <p style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5, marginTop: 4 }}>{toStr(l.background_prompt)}</p>
-                  </details>
-                )}
+                {l.visual_feel && <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, marginBottom: 6 }}><span style={mono9}>VISUAL · </span>{l.visual_feel}</div>}
+                {l.gameplay_role && <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, marginBottom: 6 }}><span style={mono9}>ROLE · </span>{l.gameplay_role}</div>}
+                {l.narrative_significance && <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5, fontStyle: 'italic' }}>{l.narrative_significance}</div>}
+                {!l.visual_feel && l.description && <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.55 }}>{toStr(l.description)}</p>}
               </Card>
             ))}
           </div>
         </Section>
       )}
 
-      {/* Art + Audio + Dev */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-        <div>
-          <Section title="Art Direction">
-            <Card>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-3)' }}>style</span>
-                  <span style={{ color: 'var(--text-1)' }}>{gdd.art_direction?.style ?? '–'}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-3)' }}>palette</span>
-                  <span style={{ color: 'var(--text-1)' }}>{gdd.art_direction?.palette ?? '–'}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-3)' }}>resolution</span>
-                  <span style={{ color: 'var(--text-1)' }}>{gdd.art_direction?.resolution ?? '–'}</span>
-                </div>
-                {gdd.art_direction?.references?.length > 0 && (
-                  <div style={{ marginTop: 4 }}>
-                    <div style={{ color: 'var(--text-3)', marginBottom: 4 }}>references</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                      {gdd.art_direction.references.map((r, i) => (
-                        <span key={i} style={{
-                          fontSize: 9, padding: '1px 6px', borderRadius: 3,
-                          background: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--line)',
-                        }}>{toStr(r)}</span>
-                      ))}
+      {/* ── Art Direction ── */}
+      <Section title="Art Direction">
+        <Card>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {gdd.art_direction?.style && (
+              <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.65 }}>{gdd.art_direction.style}</p>
+            )}
+            {paletteIsArray
+              ? (gdd.art_direction.palette as import('@/lib/types').GDDPaletteSwatch[]).map((p, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', width: 90, flexShrink: 0 }}>{p.role}</div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-1)' }}>{p.color_description}</div>
+                      {p.usage && <div style={{ fontSize: 10, color: 'var(--text-3)' }}>{p.usage}</div>}
                     </div>
                   </div>
-                )}
-              </div>
-            </Card>
-          </Section>
-
-          <Section title="Audio Direction">
-            <Card>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-3)' }}>mood</span>
-                  <span style={{ color: 'var(--text-1)' }}>{gdd.audio_direction?.music_mood ?? '–'}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-3)' }}>style</span>
-                  <span style={{ color: 'var(--text-1)' }}>{gdd.audio_direction?.music_style ?? '–'}</span>
-                </div>
-                {gdd.audio_direction?.sfx_notes && (
-                  <div style={{ marginTop: 4 }}>
-                    <div style={{ color: 'var(--text-3)', marginBottom: 3 }}>sfx notes</div>
-                    <div style={{ color: 'var(--text-2)', fontSize: 11, lineHeight: 1.5 }}>{gdd.audio_direction.sfx_notes}</div>
+                ))
+              : gdd.art_direction?.palette && (
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, display: 'flex', gap: 8 }}>
+                    <span style={{ color: 'var(--text-3)' }}>palette</span>
+                    <span style={{ color: 'var(--text-1)' }}>{gdd.art_direction.palette as string}</span>
                   </div>
-                )}
+                )
+            }
+            {refsAreObjects
+              ? (
+                <div>
+                  <div style={{ ...mono9, marginBottom: 6 }}>References</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {(gdd.art_direction.references as import('@/lib/types').GDDArtRef[]).map((r, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-asset)', width: 140, flexShrink: 0 }}>{r.reference}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-2)' }}>{r.what_we_take}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+              : (gdd.art_direction?.references?.length ?? 0) > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {(gdd.art_direction.references as string[]).map((r, i) => (
+                      <span key={i} style={{ fontSize: 9, padding: '1px 6px', borderRadius: 3, background: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--line)' }}>{r}</span>
+                    ))}
+                  </div>
+                )
+            }
+            {gdd.art_direction?.character_style && (
+              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55 }}>
+                <span style={mono9}>CHARACTERS · </span>{gdd.art_direction.character_style}
               </div>
-            </Card>
-          </Section>
-        </div>
+            )}
+            {gdd.art_direction?.environment_style && (
+              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55 }}>
+                <span style={mono9}>ENVIRONMENTS · </span>{gdd.art_direction.environment_style}
+              </div>
+            )}
+            {gdd.art_direction?.technical_targets && (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', padding: '6px 8px', background: 'var(--bg-1)', borderRadius: 5, border: '1px solid var(--line)' }}>
+                {gdd.art_direction.technical_targets}
+              </div>
+            )}
+          </div>
+        </Card>
+      </Section>
 
-        <div>
-          <Section title="Development">
+      {/* ── Audio Direction ── */}
+      <Section title="Audio Direction">
+        <Card>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+            {gdd.audio_direction?.music_genre
+              ? <>
+                  {gdd.audio_direction.music_genre && <div><span style={{ color: 'var(--text-3)' }}>genre · </span><span style={{ color: 'var(--text-1)' }}>{gdd.audio_direction.music_genre}</span></div>}
+                  {gdd.audio_direction.instrumentation && <div><span style={{ color: 'var(--text-3)' }}>instruments · </span><span style={{ color: 'var(--text-2)' }}>{gdd.audio_direction.instrumentation}</span></div>}
+                  {gdd.audio_direction.adaptive_music && <div><span style={{ color: 'var(--text-3)' }}>adaptive · </span><span style={{ color: 'var(--text-2)' }}>{gdd.audio_direction.adaptive_music}</span></div>}
+                  {gdd.audio_direction.sound_design_style && <div><span style={{ color: 'var(--text-3)' }}>sfx · </span><span style={{ color: 'var(--text-2)' }}>{gdd.audio_direction.sound_design_style}</span></div>}
+                  {gdd.audio_direction.voice_over && <div><span style={{ color: 'var(--text-3)' }}>voice over · </span><span style={{ color: 'var(--text-2)' }}>{gdd.audio_direction.voice_over}</span></div>}
+                  {gdd.audio_direction.ambience && <div><span style={{ color: 'var(--text-3)' }}>ambience · </span><span style={{ color: 'var(--text-2)' }}>{gdd.audio_direction.ambience}</span></div>}
+                </>
+              : <>
+                  {gdd.audio_direction?.music_mood && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-3)' }}>mood</span><span style={{ color: 'var(--text-1)' }}>{gdd.audio_direction.music_mood}</span></div>}
+                  {gdd.audio_direction?.music_style && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-3)' }}>style</span><span style={{ color: 'var(--text-1)' }}>{gdd.audio_direction.music_style}</span></div>}
+                  {gdd.audio_direction?.sfx_notes && <div style={{ color: 'var(--text-2)', fontSize: 11, lineHeight: 1.5 }}><span style={{ color: 'var(--text-3)' }}>sfx · </span>{gdd.audio_direction.sfx_notes}</div>}
+                </>
+            }
+          </div>
+        </Card>
+      </Section>
+
+      {/* ── Progression ── */}
+      {((gdd.game_phases?.length ?? 0) > 0 || (gdd.player_abilities?.length ?? 0) > 0) && (
+        <Section title="Progression">
+          {(gdd.game_phases?.length ?? 0) > 0 && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              {gdd.game_phases!.map((p, i) => (
+                <div key={i} style={{ flex: '1 1 140px', background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: 'var(--text-0)', marginBottom: 2 }}>{p.phase}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 6 }}>{p.time_range}</div>
+                  {p.key_unlock && <Badge label={p.key_unlock} color="var(--cat-gate)" />}
+                </div>
+              ))}
+            </div>
+          )}
+          {(gdd.player_abilities?.length ?? 0) > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {gdd.player_abilities!.map((a, i) => (
+                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 12 }}>
+                  <div style={{ flexShrink: 0 }}><Badge label={a.ability} color="var(--cat-design)" /></div>
+                  <span style={{ color: 'var(--text-2)', flex: 1, lineHeight: 1.5 }}>{a.description}</span>
+                  {a.cooldown_cost && <span style={{ color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 10, whiteSpace: 'nowrap', paddingTop: 2 }}>{a.cooldown_cost}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* ── Economy ── */}
+      {gdd.economy?.model && (
+        <Section title="Economy">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <Card>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>CORE FEATURES</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  {(gdd.development?.core_features ?? []).map((f, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--text-2)' }}>
-                      <span style={{ color: 'var(--cat-code)' }}>›</span>
-                      {typeof f === 'string' ? f : (f as Record<string,string>).name ?? (f as Record<string,string>).description ?? ''}
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-0)', marginBottom: 4 }}>{gdd.economy.model}</div>
+              {gdd.economy.price && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--cat-design)', marginBottom: 10 }}>{gdd.economy.price}</div>}
+              {(gdd.economy.currencies?.length ?? 0) > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {gdd.economy.currencies.map((c, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11 }}>
+                      <Badge label={c.currency} color="var(--cat-asset)" />
+                      <span style={{ color: 'var(--text-3)' }}>{c.how_earned}</span>
                     </div>
                   ))}
                 </div>
-                {(gdd.development?.out_of_scope ?? []).length > 0 && (
-                  <>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginTop: 6 }}>OUT OF SCOPE</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      {(gdd.development?.out_of_scope ?? []).map((f, i) => (
-                        <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--text-3)' }}>
-                          <span style={{ color: 'var(--cat-output)' }}>✕</span>
-                          {typeof f === 'string' ? f : (f as Record<string,string>).name ?? (f as Record<string,string>).description ?? ''}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
+              )}
             </Card>
-          </Section>
-        </div>
-      </div>
+            {(gdd.economy.reward_structure?.length ?? 0) > 0 && (
+              <Card>
+                <div style={{ ...mono9, marginBottom: 8 }}>Reward Structure</div>
+                {gdd.economy.reward_structure.map((r, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, fontSize: 11, marginBottom: 5 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-1)', flex: 1 }}>{r.reward_type}</span>
+                    <span style={{ color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>{r.frequency}</span>
+                  </div>
+                ))}
+              </Card>
+            )}
+          </div>
+        </Section>
+      )}
 
-      {/* Lightbox */}
+      {/* ── Magic Moments ── */}
+      {(gdd.magic_moments?.length ?? 0) > 0 && (
+        <Section title="Magic Moments">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {gdd.magic_moments!.map((m, i) => (
+              <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <div style={{
+                  flexShrink: 0, width: 22, height: 22, borderRadius: 99,
+                  background: 'color-mix(in oklch, var(--cat-audio) 15%, var(--bg-2))',
+                  border: '1px solid color-mix(in oklch, var(--cat-audio) 30%, transparent)',
+                  display: 'grid', placeItems: 'center',
+                  fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--cat-audio)',
+                }}>{i + 1}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.65, paddingTop: 2 }}>{m}</div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* ── Development ── */}
+      <Section title="Development">
+        <Card>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {gdd.development?.suggested_engine && <Badge label={gdd.development.suggested_engine} color="var(--cat-code)" />}
+              {gdd.development?.language && <Badge label={gdd.development.language} color="var(--cat-gate)" />}
+              {gdd.development?.estimated_scope && <Badge label={gdd.development.estimated_scope} color="var(--text-3)" />}
+            </div>
+            {(gdd.development?.tools?.length ?? 0) > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {gdd.development!.tools!.map((t, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 10, fontSize: 11 }}>
+                    <span style={{ color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 10, width: 130, flexShrink: 0 }}>{t.category}</span>
+                    <span style={{ color: 'var(--text-2)' }}>{t.tool}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(gdd.development?.tools?.length ?? 0) === 0 && (gdd.development?.core_features?.length ?? 0) > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {gdd.development!.core_features!.map((f, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--text-2)' }}>
+                    <span style={{ color: 'var(--cat-code)' }}>›</span>
+                    {typeof f === 'string' ? f : (f as Record<string,string>).name ?? ''}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Card>
+      </Section>
+
+      {/* ── Concept origin ── */}
+      {ideaCandidate && (
+        <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid var(--line-2)' }}>
+          <div style={{ ...mono9, marginBottom: 12 }}>Concept origin</div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+            {ideaCandidate.idea_data.image_url && (
+              <img src={ideaCandidate.idea_data.image_url} alt={ideaCandidate.title}
+                style={{ width: 160, aspectRatio: '16/9', objectFit: 'cover', borderRadius: 6, flexShrink: 0, border: '1px solid var(--line-2)' }}
+              />
+            )}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-0)' }}>{ideaCandidate.title}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6 }}>{ideaCandidate.idea_data.elevator_pitch}</div>
+              {ideaCandidate.original_description && (
+                <div style={{ paddingTop: 8, borderTop: '1px solid var(--line-2)' }}>
+                  <div style={{ ...mono9, marginBottom: 4 }}>Original description</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6, fontStyle: 'italic' }}>"{ideaCandidate.original_description}"</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Lightbox ── */}
       {lightbox && (
         <div
           onClick={() => setLightbox(null)}
@@ -424,7 +713,7 @@ function SpritesDetail({ project }: { project: Project }) {
     <div>
       <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>
         Style: <strong style={{ color: 'var(--cat-asset)' }}>{g?.art_direction?.style ?? '–'}</strong>
-        &nbsp;·&nbsp;Palette: <strong style={{ color: 'var(--text-1)' }}>{g?.art_direction?.palette ?? '–'}</strong>
+        &nbsp;·&nbsp;Palette: <strong style={{ color: 'var(--text-1)' }}>{Array.isArray(g?.art_direction?.palette) ? (g!.art_direction.palette as import('@/lib/types').GDDPaletteSwatch[]).map(p => p.role).join(', ') : (g?.art_direction?.palette ?? '–')}</strong>
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
         {chars.map((c, i) => {
@@ -440,9 +729,9 @@ function SpritesDetail({ project }: { project: Project }) {
                 </div>
               </div>
               <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 10 }}>{c.description}</p>
-              {c.abilities?.length > 0 && (
+              {(c.abilities?.length ?? 0) > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
-                  {c.abilities.map((a, j) => (
+                  {c.abilities!.map((a, j) => (
                     <span key={j} style={{
                       fontSize: 9, fontFamily: 'var(--font-mono)', padding: '1px 6px',
                       borderRadius: 3, background: 'var(--bg-3)', color: 'var(--text-3)', border: '1px solid var(--line)',
@@ -787,6 +1076,7 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
   const [approvingNode, setApprovingNode] = useState(false)
   const [error,         setError]        = useState<string | null>(null)
   const [zoomedUrl,     setZoomedUrl]    = useState<string | null>(null)
+  const [refiningImage, setRefiningImage] = useState<{ id: string; url: string } | null>(null)
 
   const nodeApproved = !!((project.concept?.pipeline?.image_reference as Record<string, unknown> | undefined)?.approved)
 
@@ -865,6 +1155,22 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
     })
   }
 
+  function handleRefined({ image_url, refined_from_id }: { image_url: string; refined_from_id: string }) {
+    const nextRound = Math.max(...pool.map(i => i.round), 0) + 1
+    const newImg: ImageRef = {
+      id:              `refined-${Date.now()}`,
+      project_id:      project.id,
+      character_key:   'global',
+      image_url,
+      storage_path:    '',
+      round:           nextRound,
+      selected:        false,
+      refined_from_id,
+      created_at:      new Date().toISOString(),
+    }
+    setPool(prev => [...prev, newImg])
+  }
+
   const isApproved  = status?.status === 'approved'
   const atPoolLimit = status?.at_pool_limit ?? false
   const poolByRound = pool.reduce<Record<number, ImageRef[]>>((acc, img) => {
@@ -911,7 +1217,7 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
             🔒 Node approved — regeneration locked
           </div>
         )}
-        {!nodeApproved && !atPoolLimit && (
+        {!nodeApproved && !isApproved && !atPoolLimit && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
             <input
               type="number" min={1} max={10} value={genCount}
@@ -940,7 +1246,7 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
             </span>
           </div>
         )}
-        {!nodeApproved && atPoolLimit && (
+        {!nodeApproved && !isApproved && atPoolLimit && (
           <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)', marginBottom: 12 }}>
             Pool limit reached ({maxPool} images)
           </div>
@@ -962,6 +1268,18 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
                 <img src={img.image_url} alt="" style={{ width: 140, height: 140, display: 'block', objectFit: 'cover' }} />
                 {img.selected && (
                   <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
+                )}
+                {img.refined_from_id && (
+                  <div style={{ position: 'absolute', top: 6, right: 6, fontSize: 8, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 3, background: 'rgba(0,0,0,0.6)', color: 'var(--cat-asset)' }}>refined</div>
+                )}
+                {img.selected && (
+                  <button
+                    onClick={e => { e.stopPropagation(); setRefiningImage({ id: img.id, url: img.image_url }) }}
+                    style={{ position: 'absolute', bottom: 6, left: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
+                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+                    title="Refinar imagen"
+                  >⚙</button>
                 )}
                 <button
                   onClick={e => { e.stopPropagation(); setZoomedUrl(img.image_url) }}
@@ -1057,6 +1375,17 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
       )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+
+      {/* Modal de refinamiento */}
+      {refiningImage && (
+        <RefinementModal
+          imageUrl={refiningImage.url}
+          imageId={refiningImage.id}
+          project={project}
+          onRefined={handleRefined}
+          onClose={() => setRefiningImage(null)}
+        />
+      )}
 
       {/* Lightbox */}
       {zoomedUrl && (
