@@ -87,8 +87,7 @@ export default function ProjectCard({ project }: { project: Project }) {
         cursor: 'pointer',
       }}
         onMouseEnter={e => {
-          const hoverColor = STATUS_COLOR[project.status] ?? 'var(--line)'
-          ;(e.currentTarget as HTMLDivElement).style.borderColor = hoverColor
+          ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--action)'
           ;(e.currentTarget as HTMLDivElement).style.boxShadow = `0 4px 20px rgba(0,0,0,0.3)`
         }}
         onMouseLeave={e => {
