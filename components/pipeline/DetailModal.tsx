@@ -1409,7 +1409,7 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
         // Construir cadena de ancestros: imagen actual + todos sus predecesores via refined_from_id
         const poolById = Object.fromEntries(pool.map(i => [i.id, i]))
         const chain: typeof pool = []
-        let cur = poolById[refiningImage.id]
+        let cur: ImageRef | undefined = poolById[refiningImage.id]
         while (cur) {
           chain.push(cur)
           cur = cur.refined_from_id ? poolById[cur.refined_from_id] : undefined
