@@ -1063,7 +1063,7 @@ const STATUS_COLOR: Record<string, string> = {
   empty:     'var(--text-3)',
   pending:   'var(--cat-gate)',
   generated: 'var(--cat-asset)',
-  approved:  'var(--cat-code)',
+  approved:  'var(--state-success)',
 }
 
 function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; onNodeApproved: () => void }) {
@@ -1606,8 +1606,8 @@ function ModelingCharactersOutput({ project }: { project: Project }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {nodeApproved && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'color-mix(in oklch, var(--cat-code) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--cat-code) 25%, transparent)', borderRadius: 6 }}>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)' }}>✓ Node approved — {approved.length}/{chars.length} models</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'color-mix(in oklch, var(--state-success) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--state-success) 25%, transparent)', borderRadius: 6 }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--state-success)' }}>✓ Node approved — {approved.length}/{chars.length} models</span>
         </div>
       )}
 
@@ -1627,14 +1627,14 @@ function ModelingCharactersOutput({ project }: { project: Project }) {
       {!cardsCollapsed && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
         {withModels.map(c => {
           const isSelected  = selected === c.character_key
-          const statusColor = c.status_3d === 'approved' ? 'var(--cat-code)' : 'var(--cat-asset)'
+          const statusColor = c.status_3d === 'approved' ? 'var(--state-success)' : 'var(--cat-asset)'
           return (
             <div
               key={c.character_key}
               onClick={() => setSelected(c.character_key)}
               style={{
-                background: isSelected ? 'color-mix(in oklch, var(--cat-asset) 10%, var(--bg-2))' : 'var(--bg-2)',
-                border: `1px solid ${isSelected ? 'var(--cat-asset)' : c.status_3d === 'approved' ? 'color-mix(in oklch, var(--cat-code) 35%, transparent)' : 'var(--line-2)'}`,
+                background: isSelected ? 'color-mix(in oklch, var(--action) 10%, var(--bg-2))' : 'var(--bg-2)',
+                border: `1px solid ${isSelected ? 'var(--action)' : c.status_3d === 'approved' ? 'color-mix(in oklch, var(--state-success) 35%, transparent)' : 'var(--line-2)'}`,
                 borderRadius: 8, overflow: 'hidden', cursor: 'pointer', transition: 'all 120ms',
               }}
             >
@@ -1657,7 +1657,7 @@ function ModelingCharactersOutput({ project }: { project: Project }) {
                   >⊕</button>
                 )}
                 {isSelected && (
-                  <div style={{ position: 'absolute', inset: 0, border: '2px solid var(--cat-asset)', borderRadius: 'inherit', pointerEvents: 'none' }} />
+                  <div style={{ position: 'absolute', inset: 0, border: '2px solid var(--action)', borderRadius: 'inherit', pointerEvents: 'none' }} />
                 )}
               </div>
               <div style={{ padding: '6px 8px' }}>
@@ -1837,7 +1837,8 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
   const [approvingNode, setApprovingNode] = useState(false)
   const [error,        setError]        = useState<string | null>(null)
   const [zoomedUrl,    setZoomedUrl]    = useState<string | null>(null)
-  const [freshUrl,     setFreshUrl]     = useState<string | null>(null)
+  const [freshUrl,        setFreshUrl]        = useState<string | null>(null)
+  const [pendingVersionId, setPendingVersionId] = useState<string | null>(null)
   const [refiningChar, setRefiningChar] = useState<{ url: string; key: string } | null>(null)
 
   const loadStatus = useCallback(async () => {
@@ -1914,12 +1915,15 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
 
   async function handleRestoreVersion(versionId: string) {
     if (!selectedChar) return
+    setPendingVersionId(versionId)
     try {
       const v = await restoreCharacterVersion(project.id, selectedChar, versionId)
       setFreshUrl(v.storage_url)
       await loadStatus()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error restoring version')
+    } finally {
+      setPendingVersionId(null)
     }
   }
 
@@ -1956,8 +1960,8 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
                 key={c.character_key}
                 onClick={() => selectChar(c.character_key)}
                 style={{
-                  background: selectedChar === c.character_key ? 'color-mix(in oklch, var(--cat-code) 10%, var(--bg-2))' : 'var(--bg-2)',
-                  border: `1px solid ${selectedChar === c.character_key ? 'var(--cat-code)' : 'var(--line-2)'}`,
+                  background: selectedChar === c.character_key ? 'color-mix(in oklch, var(--action) 10%, var(--bg-2))' : 'var(--bg-2)',
+                  border: `1px solid ${selectedChar === c.character_key ? 'var(--action)' : 'var(--line-2)'}`,
                   borderRadius: 8, padding: '12px 14px', cursor: 'pointer',
                   transition: 'all 100ms',
                 }}
@@ -2014,7 +2018,7 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
             {/* Render image + version history */}
             <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
               {displayUrl ? (
-                <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: `2px solid ${selected.status === 'approved' ? 'var(--cat-code)' : 'var(--line-2)'}` }}>
+                <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: `2px solid ${selected.status === 'approved' ? 'var(--state-success)' : 'var(--line-2)'}` }}>
                   <img src={displayUrl} alt={selected.character_name} style={{ width: 200, height: 200, display: 'block', objectFit: 'cover' }} />
                   <button
                     onClick={() => setZoomedUrl(displayUrl)}
@@ -2033,7 +2037,7 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
                     >🖌</button>
                   )}
                   {selected.status === 'approved' && (
-                    <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
+                    <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--state-success)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
                   )}
                 </div>
               ) : (
@@ -2042,41 +2046,6 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
                 </div>
               )}
 
-              {/* Version history strip — shown only when more than 1 version exists */}
-              {selected.all_versions && selected.all_versions.length > 1 && (
-                <div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
-                    Version history
-                  </div>
-                  <div style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 2, width: 200 }}>
-                    {selected.all_versions.map(v => {
-                      const isCurrent = v.is_current
-                      return (
-                        <button
-                          key={v.id}
-                          onClick={() => { if (!isCurrent) handleRestoreVersion(v.id) }}
-                          title={isCurrent ? `v${v.version_number} — current` : `Restore v${v.version_number}`}
-                          style={{
-                            flexShrink: 0, padding: 0, border: `2px solid ${isCurrent ? 'var(--cat-code)' : 'var(--line-2)'}`,
-                            borderRadius: 5, overflow: 'hidden', cursor: isCurrent ? 'default' : 'pointer',
-                            background: 'transparent', position: 'relative',
-                          }}
-                        >
-                          <img src={v.storage_url} alt={`v${v.version_number}`} style={{ width: 54, height: 54, display: 'block', objectFit: 'cover', objectPosition: 'top' }} />
-                          <div style={{
-                            position: 'absolute', bottom: 0, left: 0, right: 0,
-                            background: 'rgba(0,0,0,0.55)',
-                            fontFamily: 'var(--font-mono)', fontSize: 8, color: isCurrent ? 'var(--cat-code)' : '#fff',
-                            textAlign: 'center', padding: '1px 0',
-                          }}>
-                            v{v.version_number}
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Action controls */}
@@ -2117,12 +2086,48 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
               )}
 
               {selected.status === 'approved' && (
-                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-code)' }}>✓ Character approved</div>
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--state-success)' }}>✓ Character approved</div>
               )}
 
               {selected.total_versions > 0 && (
                 <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
                   {selected.total_versions} version{selected.total_versions !== 1 ? 's' : ''} generated
+                </div>
+              )}
+
+              {/* Version history — inline below version count */}
+              {selected.all_versions && selected.all_versions.length > 1 && (
+                <div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
+                    Version history
+                  </div>
+                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                    {selected.all_versions.map(v => {
+                      const isCurrent = pendingVersionId ? v.id === pendingVersionId : v.is_current
+                      return (
+                        <button
+                          key={v.id}
+                          onClick={() => { if (!isCurrent) handleRestoreVersion(v.id) }}
+                          title={isCurrent ? `v${v.version_number} — current` : `Restore v${v.version_number}`}
+                          style={{
+                            flexShrink: 0, padding: 0, border: `2px solid ${isCurrent ? 'var(--action)' : 'var(--line-2)'}`,
+                            borderRadius: 6, overflow: 'hidden', cursor: isCurrent ? 'default' : 'pointer',
+                            background: 'transparent', position: 'relative',
+                          }}
+                        >
+                          <img src={v.storage_url} alt={`v${v.version_number}`} style={{ width: 60, height: 60, display: 'block', objectFit: 'cover', objectPosition: 'top' }} />
+                          <div style={{
+                            position: 'absolute', bottom: 0, left: 0, right: 0,
+                            background: 'rgba(0,0,0,0.55)',
+                            fontFamily: 'var(--font-mono)', fontSize: 8, color: isCurrent ? 'var(--action)' : '#fff',
+                            textAlign: 'center', padding: '2px 0',
+                          }}>
+                            v{v.version_number}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
             </div>
@@ -2133,7 +2138,7 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
       {/* Approve full node */}
       {allApproved && (
         <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-code)' }}>
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-success)' }}>
             All characters approved
           </span>
           <button
@@ -2177,7 +2182,7 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
           imageUrl={refiningChar.url}
           imageId={refiningChar.key}
           project={project}
-          storagePath={`projects/${project.id}/charaters/${refiningChar.key}/${refiningChar.key}_${Date.now()}.png`}
+          storagePath={`projects/${project.id}/charaters/${refiningChar.key}_${Date.now()}.png`}
           allVersions={selected?.all_versions}
           onRefined={handleRefined}
           onClose={() => setRefiningChar(null)}

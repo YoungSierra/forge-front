@@ -1,7 +1,7 @@
 'use client'
 
-import React, { memo } from 'react'
-import { Handle, Position } from '@xyflow/react'
+import React, { memo, useEffect } from 'react'
+import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react'
 
 export type ForgeNodeStatus = 'idle' | 'running' | 'complete' | 'error' | 'locked' | 'gate-pending' | 'pending_review'
 
@@ -187,9 +187,11 @@ function Preview({ type, content, color }: { type: PreviewType; content?: string
   return null
 }
 
-function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean }) {
+function ForgeNode({ id, data, selected }: { id: string; data: ForgeNodeData; selected: boolean }) {
   const color     = CAT_VAR[data.category]
   const typeColor = TYPE_VAR[data.category]
+  const updateNodeInternals = useUpdateNodeInternals()
+  useEffect(() => { updateNodeInternals(id) }, [id, updateNodeInternals])
 
   const stateClass = [
     'forge-node',
@@ -277,17 +279,19 @@ function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean 
         </div>
       )}
 
-      {/* Port labels + Handles */}
+      {/* Input handle — rendered outside node-ports so top is relative to node root */}
+      {!data.compact && (data.inputs ?? []).length > 0 && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          style={{ '--socket-color': typeColor, top: '20px' } as React.CSSProperties}
+        />
+      )}
+
+      {/* Port labels + output handle */}
       {!data.compact && (
         <div className="node-ports">
           <div className="node-port node-port--in">
-            {(data.inputs ?? []).length > 0 && (
-              <Handle
-                type="target"
-                position={Position.Left}
-                style={{ '--socket-color': typeColor } as React.CSSProperties}
-              />
-            )}
             <span className="port-label">{data.inputs?.[0]?.label}</span>
           </div>
           <div className="node-port node-port--out">
@@ -308,7 +312,7 @@ function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean 
         <Handle
           type="target"
           position={Position.Left}
-          style={{ '--socket-color': typeColor } as React.CSSProperties}
+          style={{ '--socket-color': typeColor, top: '20px' } as React.CSSProperties}
         />
       )}
       {data.compact && (data.outputs ?? []).length > 0 && (

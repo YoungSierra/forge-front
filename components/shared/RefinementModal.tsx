@@ -199,11 +199,11 @@ export default function RefinementModal({ imageUrl, imageId, project, storagePat
               {/* Result */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ ...mono, fontSize: 9, color: 'var(--cat-asset)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Refined</div>
+                  <div style={{ ...mono, fontSize: 9, color: 'var(--state-success)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Refined</div>
                   <div style={{ ...mono, fontSize: 9, color: 'var(--text-3)' }}>— new version</div>
                 </div>
                 <div style={{ position: 'relative' }}>
-                  <img src={resultUrl!} alt="refined" style={{ width: '100%', borderRadius: 8, border: '2px solid var(--cat-asset)', objectFit: 'cover', display: 'block' }} />
+                  <img src={resultUrl!} alt="refined" style={{ width: '100%', borderRadius: 8, border: '2px solid var(--state-success)', objectFit: 'cover', display: 'block' }} />
                 </div>
               </div>
             </div>
@@ -280,7 +280,7 @@ export default function RefinementModal({ imageUrl, imageId, project, storagePat
                             title={item.label}
                             style={{
                               flexShrink: 0, padding: 0,
-                              border: `2px solid ${isActive ? 'var(--cat-asset)' : item.isCurrent ? 'var(--cat-code)' : 'var(--line-2)'}`,
+                              border: `2px solid ${isActive ? 'var(--action)' : item.isCurrent ? 'var(--state-success)' : 'var(--line-2)'}`,
                               borderRadius: 5, overflow: 'hidden', cursor: 'pointer',
                               background: 'transparent', position: 'relative',
                             }}
@@ -290,7 +290,7 @@ export default function RefinementModal({ imageUrl, imageId, project, storagePat
                               position: 'absolute', bottom: 0, left: 0, right: 0,
                               background: 'rgba(0,0,0,0.6)',
                               fontFamily: 'var(--font-mono)', fontSize: 8,
-                              color: isActive ? 'var(--cat-asset)' : item.isCurrent ? 'var(--cat-code)' : '#fff',
+                              color: isActive ? 'var(--action)' : item.isCurrent ? 'var(--state-success)' : '#fff',
                               textAlign: 'center', padding: '1px 0',
                             }}>
                               {item.label}
@@ -317,6 +317,7 @@ export default function RefinementModal({ imageUrl, imageId, project, storagePat
                     <input
                       type="range" min={5} max={120} value={brushSize}
                       onChange={e => setBrushSize(Number(e.target.value))}
+                      className="forge-range"
                       style={{ flex: 1 }}
                     />
                     <span style={{ ...mono, fontSize: 10, color: 'var(--text-3)', width: 32, textAlign: 'right' }}>{brushSize}px</span>
@@ -391,7 +392,7 @@ export default function RefinementModal({ imageUrl, imageId, project, storagePat
                     <span style={{ ...mono, fontSize: 10, color: 'var(--text-3)', animation: 'item-pulse 1.6s ease-in-out infinite' }}>
                       {fakeProgress < 30 ? 'Sending to ComfyUI…' : fakeProgress < 65 ? 'Generating…' : 'Almost ready…'}
                     </span>
-                    <span style={{ ...mono, fontSize: 10, color: 'var(--cat-asset)' }}>{Math.round(fakeProgress)}%</span>
+                    <span style={{ ...mono, fontSize: 10, color: 'var(--action)' }}>{Math.round(fakeProgress)}%</span>
                   </div>
                   <div style={{ width: '100%', height: 3, background: 'var(--bg-3)', borderRadius: 99, overflow: 'hidden' }}>
                     <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, var(--action), var(--action-hover))', width: `${fakeProgress}%`, transition: 'width 0.4s ease' }} />
@@ -401,7 +402,7 @@ export default function RefinementModal({ imageUrl, imageId, project, storagePat
                 <button
                   onClick={handleRun}
                   disabled={!selectedWf}
-                  style={{ padding: '8px 16px', borderRadius: 6, border: 'none', cursor: !selectedWf ? 'not-allowed' : 'pointer', background: 'var(--cat-asset)', color: '#0a0a0c', fontSize: 12, ...mono, fontWeight: 700, opacity: !selectedWf ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                  style={{ padding: '8px 16px', borderRadius: 6, border: 'none', cursor: !selectedWf ? 'not-allowed' : 'pointer', background: 'var(--action)', color: 'var(--action-fg)', fontSize: 12, ...mono, fontWeight: 700, opacity: !selectedWf ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                 >
                   ▶ Refine image
                 </button>

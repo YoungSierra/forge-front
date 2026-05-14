@@ -495,6 +495,43 @@ html, body {
 .port-row.in  { padding-left: 12px; }
 .port-row.out { justify-content: flex-end; padding-right: 12px; }
 
+/* ─── Range input — brush size slider ─── */
+.forge-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--bg-4);
+  outline: none;
+  cursor: pointer;
+}
+.forge-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--action);
+  cursor: pointer;
+  box-shadow: 0 0 6px color-mix(in oklch, var(--action) 50%, transparent);
+  transition: transform 100ms, box-shadow 100ms;
+}
+.forge-range::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 10px color-mix(in oklch, var(--action) 65%, transparent);
+}
+.forge-range::-moz-range-thumb {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--action);
+  border: none;
+  cursor: pointer;
+}
+.forge-range::-moz-range-track {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--bg-4);
+}
+
 /* ─── Cables ─── */
 .forge-edge {
   fill: none;
