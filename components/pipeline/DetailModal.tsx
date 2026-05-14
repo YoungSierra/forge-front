@@ -1578,7 +1578,7 @@ function ModelingCharactersOutput({ project }: { project: Project }) {
         </span>
         <button
           onClick={() => setCardsCollapsed(v => !v)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 12, padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)', fontSize: 10 }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 10, padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)' }}
           title={cardsCollapsed ? 'Show characters' : 'Collapse'}
         >
           {cardsCollapsed ? '▼ show' : '▲ collapse'}
