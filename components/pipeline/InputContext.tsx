@@ -1,8 +1,8 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import type { Project, ImageRef } from '@/lib/types'
-import { assetUrl, getImageReferencePool } from '@/lib/api'
+import type { Project, ImageRef, CharacterRenderStatus } from '@/lib/types'
+import { assetUrl, getImageReferencePool, getCharatersStatus } from '@/lib/api'
 
 /* ─── Types ─── */
 
@@ -32,7 +32,11 @@ const SOURCE_META: Record<string, { label: string; color: string }> = {
   hud:                  { label: 'HUD',                   color: 'var(--cat-asset)'  },
   splash_art:           { label: 'Splash Art',            color: 'var(--cat-output)' },
   marketing:            { label: 'Marketing',             color: 'var(--cat-output)' },
-  modeling:             { label: 'Modeling',              color: 'var(--cat-asset)'  },
+  modeling_characters:  { label: 'Modeling (Characters)', color: 'var(--cat-asset)'  },
+  modeling_environments:{ label: 'Modeling (Envs)',       color: 'var(--cat-asset)'  },
+  modeling_props:       { label: 'Modeling (Props)',      color: 'var(--cat-asset)'  },
+  environments:         { label: 'Environments',          color: 'var(--cat-level)'  },
+  props:                { label: 'Props',                 color: 'var(--cat-asset)'  },
   charaters:            { label: 'Characters',            color: 'var(--cat-design)' },
   vfx:                  { label: 'VFX',                   color: 'var(--cat-asset)'  },
   texturing:            { label: 'Texturing',             color: 'var(--cat-asset)'  },
@@ -169,11 +173,39 @@ export function getInputSources(stepKey: string, project: Project): InputSource[
         { label: 'Concept Art',      color: 'var(--cat-asset)',  data: getPipeline(p, 'concept_art') },
       ]
 
-    case 'modeling':
+    case 'modeling_characters':
       return [
-        { label: 'Characters (GDD)', color: 'var(--cat-design)', data: g?.characters },
-        { label: 'Art Direction',    color: 'var(--cat-asset)',  data: g?.art_direction },
-        { label: 'Concept Art',      color: 'var(--cat-design)', data: getPipeline(p, 'concept_art') },
+        { label: 'Characters (GDD)',  color: 'var(--cat-design)', data: g?.characters },
+        { label: 'Art Direction',     color: 'var(--cat-asset)',  data: g?.art_direction },
+        { label: 'Characters Render', color: 'var(--cat-level)',  data: getPipeline(p, 'charaters') },
+      ]
+
+    case 'environments':
+      return [
+        { label: 'Levels (GDD)',  color: 'var(--cat-level)',  data: g?.levels },
+        { label: 'Art Direction', color: 'var(--cat-asset)',  data: g?.art_direction },
+        { label: 'Visual Guide',  color: 'var(--cat-design)', data: getPipeline(p, 'visual_guide') },
+      ]
+
+    case 'props':
+      return [
+        { label: 'Mechanics',     color: 'var(--cat-gate)',   data: g?.mechanics },
+        { label: 'Art Direction', color: 'var(--cat-asset)',  data: g?.art_direction },
+        { label: 'Levels (GDD)',  color: 'var(--cat-level)',  data: g?.levels },
+      ]
+
+    case 'modeling_environments':
+      return [
+        { label: 'Environments Concept', color: 'var(--cat-level)',  data: getPipeline(p, 'environments') },
+        { label: 'Levels (GDD)',         color: 'var(--cat-level)',  data: g?.levels },
+        { label: 'Art Direction',        color: 'var(--cat-asset)',  data: g?.art_direction },
+      ]
+
+    case 'modeling_props':
+      return [
+        { label: 'Props Concept',  color: 'var(--cat-asset)',  data: getPipeline(p, 'props') },
+        { label: 'Mechanics',      color: 'var(--cat-gate)',   data: g?.mechanics },
+        { label: 'Art Direction',  color: 'var(--cat-asset)',  data: g?.art_direction },
       ]
 
     case 'texturing':
@@ -415,6 +447,116 @@ function renderSourceData(data: unknown): React.ReactNode {
   return renderGenericValue(data)
 }
 
+/* ─── Characters source — carga renders aprobados del nodo charaters ─── */
+
+type GddCharacter = Record<string, unknown>
+
+function CharatersSource({ project }: { project: Project }) {
+  const [renders,   setRenders]   = useState<CharacterRenderStatus[]>([])
+  const [loading,   setLoading]   = useState(true)
+  const [zoomedUrl, setZoomedUrl] = useState<string | null>(null)
+
+  const gddChars: GddCharacter[] = (project.concept?.pipeline?.gdd as Record<string, unknown>)?.characters as GddCharacter[] ?? []
+
+  useEffect(() => {
+    getCharatersStatus(project.id)
+      .then(setRenders)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [project.id])
+
+  useEffect(() => {
+    if (!zoomedUrl) return
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); setZoomedUrl(null) } }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [zoomedUrl])
+
+  if (loading) return <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>Loading…</div>
+  if (!gddChars.length && !renders.length) return <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', fontStyle: 'italic' }}>No characters found</div>
+
+  const renderByKey = Object.fromEntries(renders.map(r => [r.character_key, r]))
+  const DETAIL_FIELDS: [string, string][] = [
+    ['role', 'Role'], ['age', 'Age'], ['appearance', 'Appearance'],
+    ['personality', 'Personality'], ['motivation', 'Motivation'],
+    ['backstory', 'Backstory'], ['arc', 'Arc'], ['gameplay_role', 'Gameplay'],
+  ]
+
+  return (
+    <>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {gddChars.map((c, i) => {
+          const name = String(c.name ?? `Character ${i + 1}`)
+          const key  = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+          const render = renderByKey[key]
+          const imgUrl = render?.current_version?.storage_url ? assetUrl(render.current_version.storage_url) : null
+
+          return (
+            <div key={key} style={{ background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--line-2)', overflow: 'hidden' }}>
+              {/* Header: imagen + nombre + rol */}
+              <div style={{ display: 'flex', gap: 10, padding: '10px 12px', borderBottom: '1px solid var(--line-2)' }}>
+                {imgUrl ? (
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <img
+                      src={imgUrl}
+                      alt={name}
+                      style={{ width: 64, height: 64, borderRadius: 6, objectFit: 'cover', objectPosition: 'top', border: '1px solid var(--line-2)', display: 'block' }}
+                    />
+                    <button
+                      onClick={() => setZoomedUrl(imgUrl)}
+                      style={{ position: 'absolute', bottom: 3, right: 3, width: 18, height: 18, borderRadius: 3, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 10, opacity: 0.75 }}
+                      onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                      onMouseLeave={e => (e.currentTarget.style.opacity = '0.75')}
+                    >⊕</button>
+                  </div>
+                ) : (
+                  <div style={{ width: 64, height: 64, borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-3)', display: 'grid', placeItems: 'center', flexShrink: 0, fontSize: 22, color: 'var(--text-3)' }}>
+                    {name[0]?.toUpperCase()}
+                  </div>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-0)', marginBottom: 4 }}>{name}</div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {!!c.role && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--cat-design)', background: 'color-mix(in oklch, var(--cat-design) 12%, transparent)', padding: '1px 6px', borderRadius: 99 }}>{String(c.role)}</span>}
+                    {!!c.age  && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-3)', padding: '1px 6px', borderRadius: 99 }}>age {String(c.age)}</span>}
+                    {render && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: render.status === 'approved' ? 'var(--cat-code)' : 'var(--cat-gate)', background: render.status === 'approved' ? 'color-mix(in oklch, var(--cat-code) 12%, transparent)' : 'color-mix(in oklch, var(--cat-gate) 12%, transparent)', padding: '1px 6px', borderRadius: 99 }}>{render.status}</span>}
+                  </div>
+                </div>
+              </div>
+              {/* Detalle campos GDD */}
+              <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {DETAIL_FIELDS.map(([field, label]) => {
+                  const val = c[field]
+                  if (!val) return null
+                  return (
+                    <div key={field} style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: 6 }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', paddingTop: 2 }}>{label}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.5 }}>{String(val)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {zoomedUrl && (
+        <div
+          onClick={() => setZoomedUrl(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}
+        >
+          <button
+            onClick={() => setZoomedUrl(null)}
+            style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, width: 36, height: 36, display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 18 }}
+          >✕</button>
+          <img src={zoomedUrl} alt="" onClick={e => e.stopPropagation()} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 10, boxShadow: '0 24px 80px rgba(0,0,0,0.8)' }} />
+        </div>
+      )}
+    </>
+  )
+}
+
 /* ─── Image reference source — carga async las imágenes seleccionadas ─── */
 
 function ImageRefSource({ projectId }: { projectId: string }) {
@@ -520,7 +662,9 @@ export function InputContext({ stepKey, project, nodeContext }: { stepKey: strin
             <div style={{ paddingLeft: 11, borderLeft: `1px solid color-mix(in oklch, ${source.color} 25%, var(--line-2))` }}>
               {source.key === 'image_reference'
                 ? <ImageRefSource projectId={project.id} />
-                : renderSourceData(source.data)}
+                : source.key === 'charaters'
+                  ? <CharatersSource project={project} />
+                  : renderSourceData(source.data)}
             </div>
           </div>
         )

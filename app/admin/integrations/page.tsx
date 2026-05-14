@@ -368,9 +368,27 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
   const [nonMaskFiles, setNonMaskFiles] = useState<Record<string, File>>({})
   const [brushSize, setBrushSize]       = useState(30)
   const maskRef = useRef<MaskPainterHandle>(null)
+  const [fakeProgress, setFakeProgress] = useState(0)
 
-  const imageExtras = Object.entries(extra).filter(([, pt]) => pt.type === 'image')
-  const isMaskMode  = workflow.mask_capable && imageExtras.length > 0
+  useEffect(() => {
+    if (!running) {
+      if (result) setFakeProgress(100)
+      return
+    }
+    setFakeProgress(0)
+    const iv = setInterval(() => {
+      setFakeProgress(prev => {
+        if (prev >= 88) return prev
+        const step = prev < 30 ? 2.5 : prev < 60 ? 0.9 : 0.35
+        return Math.min(88, prev + step)
+      })
+    }, 300)
+    return () => clearInterval(iv)
+  }, [running, result])
+
+  const imageExtras   = Object.entries(extra).filter(([, pt]) => pt.type === 'image')
+  const isMaskMode    = workflow.mask_capable && imageExtras.length > 0
+  const isRefinement  = !!workflow.refinement_capable
 
   function set(key: string, val: string) { setValues(prev => ({ ...prev, [key]: val })) }
 
@@ -420,179 +438,198 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
   const needsImage = isMaskMode ? !imageFile : (imageExtras.length > 0 && Object.keys(nonMaskFiles).length === 0)
 
   return (
-    <div onClick={e => e.target === e.currentTarget && onClose()} style={{
+    <div style={{
       position: 'fixed', inset: 0, zIndex: 3000,
       background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
     }}>
       <div style={{
         background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12,
-        width: '100%', maxWidth: 1100, height: '72vh', minHeight: 480,
+        width: '100%', maxWidth: 1200, height: '82vh', minHeight: 520,
         boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
-        display: 'flex', flexDirection: 'row', overflow: 'hidden',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
 
-        {/* ── Panel izquierdo: controles ── */}
-        <div style={{
-          width: 320, flexShrink: 0, borderRight: '1px solid var(--line-2)',
-          padding: 24, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-0)' }}>Test workflow</div>
-              <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', marginTop: 2 }}>{workflow.name}</div>
-            </div>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--text-3)' }}>✕</button>
+        {/* ── Header ── */}
+        <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-0)' }}>Test workflow</div>
+            <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', marginTop: 2 }}>{workflow.name}</div>
           </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--text-3)' }}>✕</button>
+        </div>
 
-          {/* Standard points */}
+        {/* ── Controls bar (ancho completo) ── */}
+        <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', flexShrink: 0 }}>
           {inject.prompt?.node && (
-            <div>
+            <div style={{ flex: '2 1 180px' }}>
               <label style={labelStyle}>prompt</label>
-              <textarea style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 72, resize: 'vertical' }}
+              <textarea style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 58, resize: 'none' }}
                 value={values['prompt'] ?? ''} onChange={e => set('prompt', e.target.value)} />
             </div>
           )}
-          {(inject.width?.node || inject.height?.node) && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              {inject.width?.node  && <div style={{ flex: 1 }}><label style={labelStyle}>width</label><input  type="number" style={inputStyle} value={values['width']  ?? '512'} onChange={e => set('width',  e.target.value)} /></div>}
-              {inject.height?.node && <div style={{ flex: 1 }}><label style={labelStyle}>height</label><input type="number" style={inputStyle} value={values['height'] ?? '512'} onChange={e => set('height', e.target.value)} /></div>}
+          {inject.width?.node && (
+            <div style={{ flex: '0 0 76px' }}>
+              <label style={labelStyle}>width</label>
+              <input type="number" style={inputStyle} value={values['width'] ?? '512'} onChange={e => set('width', e.target.value)} />
+            </div>
+          )}
+          {inject.height?.node && (
+            <div style={{ flex: '0 0 76px' }}>
+              <label style={labelStyle}>height</label>
+              <input type="number" style={inputStyle} value={values['height'] ?? '512'} onChange={e => set('height', e.target.value)} />
             </div>
           )}
           {hasSeed && (
-            <div>
-              <label style={labelStyle}>seed <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(clear to use random)</span></label>
+            <div style={{ flex: '0 0 110px' }}>
+              <label style={labelStyle}>seed <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(blank = random)</span></label>
               <input type="number" style={inputStyle} value={values['seed'] ?? ''} onChange={e => set('seed', e.target.value)} placeholder="random" />
             </div>
           )}
 
-          {/* Extra injection points */}
-          {Object.entries(extra).length > 0 && (
-            <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Extra injection points</div>
-              {Object.entries(extra).map(([key, pt]) => (
-                <div key={key}>
-                  <label style={labelStyle}>
-                    {key} <span style={{ color: 'var(--cat-code)', textTransform: 'none', letterSpacing: 0 }}>{pt.type}</span>
-                    {pt.type === 'image' && isMaskMode && <span style={{ color: 'var(--cat-asset)', textTransform: 'none', letterSpacing: 0 }}> — pick image, paint the area</span>}
-                  </label>
-                  {pt.type === 'image' && isMaskMode ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <span style={{
-                          fontSize: 11, fontFamily: 'monospace', padding: '6px 14px', borderRadius: 6,
-                          border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-1)', cursor: 'pointer',
-                        }}>
-                          {imageFile ? `✓ ${imageFile.name}` : '📁 Choose image…'}
-                        </span>
-                        <input type="file" accept="image/*" style={{ display: 'none' }}
-                          onChange={e => setImageFile(e.target.files?.[0] || null)} />
-                      </label>
-                      {imageFile && (
-                        <>
-                          <MaskPainter ref={maskRef} imageFile={imageFile} brushSize={brushSize} />
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <label style={{ ...labelStyle, marginBottom: 0, whiteSpace: 'nowrap' }}>Brush</label>
-                            <input type="range" min={5} max={120} value={brushSize}
-                              onChange={e => setBrushSize(Number(e.target.value))} style={{ flex: 1 }} />
-                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', width: 32, textAlign: 'right' }}>{brushSize}px</span>
-                            <button type="button" onClick={() => maskRef.current?.clear()} style={{
-                              fontSize: 10, fontFamily: 'monospace', padding: '3px 10px', borderRadius: 5,
-                              cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)',
-                            }}>Clear</button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ) : pt.type === 'image' ? (
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                      <span style={{
-                        fontSize: 11, fontFamily: 'monospace', padding: '6px 14px', borderRadius: 6,
-                        border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-1)', cursor: 'pointer',
-                      }}>
-                        {nonMaskFiles[key] ? `✓ ${nonMaskFiles[key].name}` : '📁 Choose image…'}
-                      </span>
-                      <input type="file" accept="image/*" style={{ display: 'none' }}
-                        onChange={e => {
-                          const file = e.target.files?.[0]
-                          if (file) setNonMaskFiles(prev => ({ ...prev, [key]: file }))
-                        }} />
-                    </label>
-                  ) : pt.type === 'string' ? (
-                    <textarea style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 60, resize: 'vertical' }}
-                      value={values[key] ?? ''} onChange={e => set(key, e.target.value)} />
-                  ) : (
-                    <input type={TYPE_INPUT[pt.type] ?? 'text'} style={inputStyle}
-                      value={values[key] ?? ''} onChange={e => set(key, e.target.value)} />
-                  )}
-                </div>
-              ))}
+          {/* Extras no-imagen */}
+          {Object.entries(extra).filter(([, pt]) => pt.type !== 'image').map(([key, pt]) => (
+            <div key={key} style={{ flex: pt.type === 'string' ? '1 1 160px' : '0 0 100px' }}>
+              <label style={labelStyle}>{key} <span style={{ color: 'var(--cat-code)', textTransform: 'none', letterSpacing: 0 }}>{pt.type}</span></label>
+              {pt.type === 'string'
+                ? <textarea style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 58, resize: 'none' }} value={values[key] ?? ''} onChange={e => set(key, e.target.value)} />
+                : <input type={TYPE_INPUT[pt.type] ?? 'text'} style={inputStyle} value={values[key] ?? ''} onChange={e => set(key, e.target.value)} />
+              }
+            </div>
+          ))}
+
+          {/* Image picker — mask mode */}
+          {isMaskMode && (
+            <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={labelStyle}>image <span style={{ color: 'var(--cat-asset)', textTransform: 'none', letterSpacing: 0 }}>— paint the area below</span></label>
+              <label style={{ cursor: 'pointer' }}>
+                <span style={{ fontSize: 11, fontFamily: 'monospace', padding: '6px 14px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-1)', whiteSpace: 'nowrap', display: 'inline-block' }}>
+                  {imageFile ? `✓ ${imageFile.name}` : '📁 Choose image…'}
+                </span>
+                <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => setImageFile(e.target.files?.[0] || null)} />
+              </label>
             </div>
           )}
 
-          {error && (
-            <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
-          )}
-
-          {/* Resultado imagen 2D */}
-          {result && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓ Generated</div>
-              <img src={result} alt="result" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line-2)', display: 'block' }} />
-              <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>Open full size ↗</a>
+          {/* Image pickers — non-mask */}
+          {!isMaskMode && imageExtras.map(([key]) => (
+            <div key={key} style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={labelStyle}>{key} <span style={{ color: 'var(--cat-code)', textTransform: 'none', letterSpacing: 0 }}>image</span></label>
+              <label style={{ cursor: 'pointer' }}>
+                <span style={{ fontSize: 11, fontFamily: 'monospace', padding: '6px 14px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-1)', whiteSpace: 'nowrap', display: 'inline-block' }}>
+                  {nonMaskFiles[key] ? `✓ ${nonMaskFiles[key].name}` : '📁 Choose image…'}
+                </span>
+                <input type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) setNonMaskFiles(prev => ({ ...prev, [key]: f })) }} />
+              </label>
             </div>
-          )}
+          ))}
 
-          {/* Botón run */}
-          <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* Run button — siempre al final */}
+          <div style={{ flex: '0 0 auto', marginLeft: 'auto', alignSelf: 'flex-end', display: 'flex', flexDirection: 'column', gap: 6 }}>
             {preparedJson && (
               <button type="button" onClick={() => setShowJson(v => !v)} style={{ fontSize: 9, fontFamily: 'monospace', padding: '4px 10px', borderRadius: 5, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)', alignSelf: 'flex-start' }}>
-                {showJson ? 'Hide JSON' : 'Show prepared JSON'}
+                {showJson ? 'Hide JSON' : 'Show JSON'}
               </button>
             )}
-            {showJson && preparedJson && (
-              <textarea readOnly value={preparedJson}
-                style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 9, height: 140, resize: 'vertical', color: 'var(--text-2)' }} />
-            )}
             <button type="button" onClick={handleRun} disabled={running || needsImage}
-              style={{ ...btnStyle(!running && !needsImage, true), display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              style={{ ...btnStyle(!running && !needsImage, true), display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
               {running
                 ? <><span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />Running…</>
                 : needsImage ? 'Pick an image first'
                 : '▶ Run workflow'}
             </button>
           </div>
-        </div>
 
-        {/* ── Panel derecho: viewer 3D ── */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#0d0d0d' }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              3D Preview
-            </span>
-            <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-4)' }}>
-              drag a .glb to load locally
-            </span>
-          </div>
-          <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-            <ModelViewer
-              url={glbUrls[0]}
-              style={{ position: 'absolute', inset: 0, height: '100%', borderRadius: 0, border: 'none' }}
-            />
-          </div>
-          {glbUrls.length > 0 && (
-            <div style={{ padding: '10px 16px', borderTop: '1px solid var(--line-2)', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-              {glbUrls.map((url, i) => (
-                <a key={i} href={url} target="_blank" rel="noreferrer"
-                  style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-asset)' }}>
-                  ↓ model_{i + 1}.glb
-                </a>
-              ))}
+          {/* Error + JSON */}
+          {error && (
+            <div style={{ flex: '1 1 100%', fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
+          )}
+          {showJson && preparedJson && (
+            <div style={{ flex: '1 1 100%' }}>
+              <textarea readOnly value={preparedJson}
+                style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 9, height: 110, resize: 'vertical', color: 'var(--text-2)' }} />
             </div>
           )}
         </div>
+
+        {/* ── Paneles inferiores ── */}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+
+          {/* Panel izquierdo: solo si hay image inputs */}
+          {imageExtras.length > 0 && <div style={{ width: '50%', flexShrink: 0, borderRight: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Original</span>
+              {isMaskMode && imageFile && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <label style={{ ...labelStyle, marginBottom: 0, whiteSpace: 'nowrap' }}>Brush</label>
+                  <input type="range" min={5} max={120} value={brushSize} onChange={e => setBrushSize(Number(e.target.value))} style={{ width: 80 }} />
+                  <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', width: 28, textAlign: 'right' }}>{brushSize}px</span>
+                  <button type="button" onClick={() => maskRef.current?.clear()} style={{ fontSize: 10, fontFamily: 'monospace', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)' }}>Clear</button>
+                </div>
+              )}
+            </div>
+            <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0a0c' }}>
+              {isMaskMode && imageFile ? (
+                <MaskPainter ref={maskRef} imageFile={imageFile} brushSize={brushSize} />
+              ) : Object.values(nonMaskFiles)[0] ? (
+                <img
+                  src={URL.createObjectURL(Object.values(nonMaskFiles)[0])}
+                  alt="input"
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6, display: 'block' }}
+                />
+              ) : (
+                <div style={{ textAlign: 'center', opacity: 0.25 }}>
+                  <div style={{ fontSize: 36, lineHeight: 1 }}>◧</div>
+                  <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', marginTop: 10 }}>
+                    {isMaskMode ? 'Pick an image above to start painting' : 'No image input'}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>}
+
+          {/* Panel derecho: resultado 2D o viewer 3D */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#0d0d0d' }}>
+            <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Result</span>
+              {result && glbUrls.length === 0 && <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>Open full size ↗</a>}
+              {!result && glbUrls.length === 0 && !running && <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-4)' }}>drag a .glb to load locally</span>}
+            </div>
+
+            <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: running || result ? 16 : 0, overflow: 'hidden' }}>
+              {running ? (
+                <div style={{ width: '72%', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', animation: 'item-pulse 1.6s ease-in-out infinite' }}>
+                      {fakeProgress < 30 ? 'Sending to ComfyUI…' : fakeProgress < 65 ? 'Generating…' : 'Almost ready…'}
+                    </span>
+                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-audio)' }}>{Math.round(fakeProgress)}%</span>
+                  </div>
+                  <div style={{ width: '100%', height: 3, background: 'var(--bg-3)', borderRadius: 99, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, var(--cat-audio), var(--cat-design))', width: `${fakeProgress}%`, transition: 'width 0.4s ease' }} />
+                  </div>
+                </div>
+              ) : result && glbUrls.length === 0 ? (
+                <img src={result} alt="result" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 8, display: 'block' }} />
+              ) : (
+                <ModelViewer url={glbUrls[0]} style={{ position: 'absolute', inset: 0, height: '100%', borderRadius: 0, border: 'none' }} />
+              )}
+            </div>
+
+            {glbUrls.length > 0 && !running && (
+              <div style={{ padding: '10px 16px', borderTop: '1px solid var(--line-2)', display: 'flex', gap: 16, flexWrap: 'wrap', flexShrink: 0 }}>
+                {glbUrls.map((url, i) => (
+                  <a key={i} href={url} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-asset)' }}>
+                    ↓ model_{i + 1}.glb
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } } @keyframes item-pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }`}</style>
     </div>
   )
 }
@@ -620,7 +657,7 @@ function ImageTester({ model, onClose }: { model: string; onClose: () => void })
   }
 
   return (
-    <div onClick={e => e.target === e.currentTarget && onClose()} style={{
+    <div style={{
       position: 'fixed', inset: 0, zIndex: 3000,
       background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,

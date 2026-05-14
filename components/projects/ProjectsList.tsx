@@ -9,11 +9,41 @@ import { useAuth } from '@/lib/auth-context'
 
 const PAGE_SIZES = [6, 12, 18, 24]
 
+type SortKey = 'created_desc' | 'created_asc' | 'updated_desc' | 'name_asc' | 'name_desc' | 'genre_asc' | 'progress_desc'
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'created_desc',  label: 'Newest first' },
+  { value: 'created_asc',   label: 'Oldest first' },
+  { value: 'updated_desc',  label: 'Last modified' },
+  { value: 'name_asc',      label: 'Name A → Z' },
+  { value: 'name_desc',     label: 'Name Z → A' },
+  { value: 'genre_asc',     label: 'Genre A → Z' },
+  { value: 'progress_desc', label: 'Most progress' },
+]
+
+function sortProjects(list: Project[], key: SortKey): Project[] {
+  return [...list].sort((a, b) => {
+    switch (key) {
+      case 'created_desc':  return (b.created_at ?? '').localeCompare(a.created_at ?? '')
+      case 'created_asc':   return (a.created_at ?? '').localeCompare(b.created_at ?? '')
+      case 'updated_desc':  return (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? '')
+      case 'name_asc':      return a.name.localeCompare(b.name)
+      case 'name_desc':     return b.name.localeCompare(a.name)
+      case 'genre_asc':     return (a.genre ?? '').localeCompare(b.genre ?? '')
+      case 'progress_desc': {
+        const pa = (a.node_approved_count ?? a.approved_wizard_count ?? 0)
+        const pb = (b.node_approved_count ?? b.approved_wizard_count ?? 0)
+        return pb - pa
+      }
+    }
+  })
+}
+
 export default function ProjectsList() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
   const [search, setSearch]     = useState('')
+  const [sortKey, setSortKey]   = useState<SortKey>('created_desc')
   const [pageSize, setPageSize] = useState(12)
   const [page, setPage]         = useState(0)
   const { user } = useAuth()
@@ -26,14 +56,17 @@ export default function ProjectsList() {
       .finally(() => setLoading(false))
   }, [user])
 
-  useEffect(() => { setPage(0) }, [search, pageSize])
+  useEffect(() => { setPage(0) }, [search, pageSize, sortKey])
 
   const q = search.toLowerCase()
-  const filtered = projects.filter(p =>
-    p.name.toLowerCase().includes(q) ||
-    (p.genre ?? '').toLowerCase().includes(q) ||
-    (p.description ?? '').toLowerCase().includes(q) ||
-    (p.target_engine ?? '').toLowerCase().includes(q)
+  const filtered = sortProjects(
+    projects.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      (p.genre ?? '').toLowerCase().includes(q) ||
+      (p.description ?? '').toLowerCase().includes(q) ||
+      (p.target_engine ?? '').toLowerCase().includes(q)
+    ),
+    sortKey,
   )
   const totalPages = Math.ceil(filtered.length / pageSize)
   const paginated  = filtered.slice(page * pageSize, (page + 1) * pageSize)
@@ -93,6 +126,17 @@ export default function ProjectsList() {
             }}
           />
         </div>
+        <select
+          value={sortKey}
+          onChange={e => setSortKey(e.target.value as SortKey)}
+          style={{
+            background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6,
+            padding: '4px 8px', fontSize: 11, color: 'var(--text-1)', fontFamily: 'var(--font-mono)',
+            cursor: 'pointer', outline: 'none',
+          }}
+        >
+          {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
         <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginLeft: 'auto' }}>
           {filtered.length} project{filtered.length !== 1 ? 's' : ''}
         </span>

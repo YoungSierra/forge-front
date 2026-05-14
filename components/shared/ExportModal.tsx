@@ -197,7 +197,6 @@ export default function ExportModal({ project, nodes, onClose, onRepoSaved }: Pr
 
   return (
     <div
-      onClick={e => e.target === e.currentTarget && onClose()}
       style={{
         position: 'fixed', inset: 0, zIndex: 3000,
         background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',

@@ -245,9 +245,16 @@ function GenCheckItem({ label, status, detail }: { label: string; status: 'runni
 
 // ─── Idea panel components ────────────────────────────────────────────────────
 
-function IdeaCardComponent({ idea, onZoom, onUse }: { idea: IdeaCard; onZoom: () => void; onUse: () => void }) {
+function IdeaCardComponent({ idea, onZoom, onUse, isSelected }: { idea: IdeaCard; onZoom: () => void; onUse: () => void; isSelected?: boolean }) {
   return (
-    <div style={{ borderRadius: 8, border: '1px solid var(--line-2)', overflow: 'hidden', background: 'var(--bg-2)' }}>
+    <div style={{
+      borderRadius: 8,
+      border: isSelected ? '2px solid var(--cat-design)' : '1px solid var(--line-2)',
+      boxShadow: isSelected ? '0 0 0 3px color-mix(in oklch, var(--cat-design) 25%, transparent)' : 'none',
+      overflow: 'hidden',
+      background: 'var(--bg-2)',
+      transition: 'border-color 150ms, box-shadow 150ms',
+    }}>
       <div
         onClick={onZoom}
         style={{ width: '100%', aspectRatio: '16/9', overflow: 'hidden', position: 'relative', cursor: 'zoom-in', background: 'var(--bg-3)' }}
@@ -286,7 +293,6 @@ function IdeaCardComponent({ idea, onZoom, onUse }: { idea: IdeaCard; onZoom: ()
 function IdeaZoomOverlay({ idea, onClose, onUse }: { idea: IdeaCard; onClose: () => void; onUse: () => void }) {
   return (
     <div
-      onClick={onClose}
       style={{ position: 'fixed', inset: 0, zIndex: 3500, background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}
     >
       <div
@@ -365,10 +371,11 @@ export default function NewProjectModal({
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Ideas panel
-  const [ideas, setIdeas]             = useState<IdeaCard[]>([])
-  const [ideaLoading, setIdeaLoading] = useState(false)
-  const [ideaError, setIdeaError]     = useState<string | null>(null)
-  const [zoomIdea, setZoomIdea]       = useState<IdeaCard | null>(null)
+  const [ideas, setIdeas]                   = useState<IdeaCard[]>([])
+  const [ideaLoading, setIdeaLoading]       = useState(false)
+  const [ideaError, setIdeaError]           = useState<string | null>(null)
+  const [zoomIdea, setZoomIdea]             = useState<IdeaCard | null>(null)
+  const [selectedIdeaTitle, setSelectedIdeaTitle] = useState<string | null>(null)
   const [ideaProgress, setIdeaProgress] = useState(0)
   const ideaProgressTimer               = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -402,7 +409,7 @@ export default function NewProjectModal({
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Escape key
-  const handleKey = useCallback((e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }, [onClose])
+  const handleKey = useCallback((_e: KeyboardEvent) => { /* solo cierra con botón X */ }, [])
   useEffect(() => {
     if (!open) return
     window.addEventListener('keydown', handleKey)
@@ -457,7 +464,7 @@ export default function NewProjectModal({
       const result = await generateIdeas({
         prompt: ideaPrompt.trim(),
         genre, tone, scope, engine,
-        count:   addMore ? 1 : 7,
+        count:   addMore ? 1 : 3,
         exclude: addMore ? ideas.map(i => i.title) : [],
       })
       // Salta al 100% y limpia
@@ -476,8 +483,22 @@ export default function NewProjectModal({
 
   function handleUseIdea(idea: IdeaCard) {
     const originalDescription = ideaPrompt.trim()
-    setIdeaPrompt(`${idea.title}\n\n${idea.elevator_pitch}\n\nCore mechanic: ${idea.core_mechanic}\n\nUnique hook: ${idea.unique_hook}`)
+    const lines = [
+      idea.title,
+      '',
+      idea.elevator_pitch,
+      '',
+      `Genre: ${idea.genre}`,
+      `Tone: ${idea.tone}`,
+      idea.visual_style ? `Visual style: ${idea.visual_style}` : '',
+      '',
+      `Core mechanic: ${idea.core_mechanic}`,
+      `Unique hook: ${idea.unique_hook}`,
+      idea.tags?.length ? `Tags: ${idea.tags.join(', ')}` : '',
+    ].filter(l => l !== undefined && l !== null)
+    setIdeaPrompt(lines.join('\n'))
     setNameInput(idea.title)
+    setSelectedIdeaTitle(idea.title)
     setZoomIdea(null)
     if (draftProjectId) {
       saveIdeaCandidate(draftProjectId, idea, originalDescription).catch(e =>
@@ -627,7 +648,7 @@ export default function NewProjectModal({
         background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(3px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
       }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      onClick={e => e.stopPropagation()}
     >
       <div style={{
         background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12,
@@ -976,6 +997,7 @@ export default function NewProjectModal({
                 idea={idea}
                 onZoom={() => setZoomIdea(idea)}
                 onUse={() => handleUseIdea(idea)}
+                isSelected={selectedIdeaTitle === idea.title}
               />
             ))}
 

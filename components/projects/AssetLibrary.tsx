@@ -10,6 +10,8 @@ const CATEGORY_LABEL: Record<string, string> = {
   icons: 'Icons', hud: 'HUD', splash_art: 'Splash Art', marketing: 'Marketing',
   audio: 'Audio', sfx: 'SFX', code: 'Code', uiux: 'UI/UX',
   visual_guide: 'Visual Guide', art_direction_intake: 'Art Direction',
+  modeling_characters: 'Modeling (Chars)', modeling_environments: 'Modeling (Envs)', modeling_props: 'Modeling (Props)',
+  environments: 'Environments', props: 'Props',
   modeling: 'Modeling', texturing: 'Texturing', rigging: 'Rigging',
   animation: 'Animation', vfx: 'VFX', lighting: 'Lighting',
   cinematics: 'Cinematics', voice: 'Voice', playtesting: 'Playtesting',
@@ -23,6 +25,8 @@ const CATEGORY_COLOR: Record<string, string> = {
   splash_art: 'var(--cat-output)', marketing: 'var(--cat-output)', audio: 'var(--cat-audio)',
   sfx: 'var(--cat-audio)', code: 'var(--cat-code)', uiux: 'var(--cat-gate)',
   visual_guide: 'var(--cat-design)', art_direction_intake: 'var(--cat-design)',
+  modeling_characters: 'var(--cat-asset)', modeling_environments: 'var(--cat-level)', modeling_props: 'var(--cat-asset)',
+  environments: 'var(--cat-level)', props: 'var(--cat-asset)',
   modeling: 'var(--cat-asset)', texturing: 'var(--cat-asset)', rigging: 'var(--cat-asset)',
   animation: 'var(--cat-asset)', vfx: 'var(--cat-output)', lighting: 'var(--cat-design)',
   cinematics: 'var(--cat-output)', voice: 'var(--cat-audio)', playtesting: 'var(--cat-gate)',
@@ -76,7 +80,7 @@ function AssetCard({ asset, onClick }: { asset: AssetWithVersions; onClick: () =
           <img
             src={url}
             alt={asset.name}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }}
             onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
           />
         ) : (

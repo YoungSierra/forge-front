@@ -24,6 +24,7 @@ import ForgeToolbar from './ForgeToolbar'
 import ForgeStatusBar from './ForgeStatusBar'
 import ContextMenu, { type ContextMenuState } from './ContextMenu'
 import NewProjectModal from './NewProjectModal'
+import NodeAssetPreview from './NodeAssetPreview'
 import type { Project } from '@/lib/types'
 import { getTemplate, CATALOG_ALL, TEMPLATES, type TemplateCatalogNode } from '@/lib/templates'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
@@ -442,6 +443,41 @@ function PipelineApp({
     setCtxMenu({ x: e.clientX, y: e.clientY, flowX: flow.x, flowY: flow.y, edgeId: edge.id })
   }, [screenToFlowPosition])
 
+  /* ── Node asset preview on hover ── */
+  const PREVIEW_KEYS = useMemo(() => new Set(['image_reference', 'charaters']), [])
+  type HoverState = { stepKey: string; anchor: { left: number; top: number; width: number; height: number } } | null
+  const [hoverPreview, setHoverPreview] = useState<HoverState>(null)
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const scheduleClose = useCallback(() => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    closeTimerRef.current = setTimeout(() => setHoverPreview(null), 160)
+  }, [])
+
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+  }, [])
+
+  const onNodeMouseEnter: NodeMouseHandler = useCallback((_e, node) => {
+    if (!liveProject?.id) return
+    const stepKey = (node.data as unknown as ForgeNodeData).stepKey ?? ''
+    if (!PREVIEW_KEYS.has(stepKey)) return
+    cancelClose()
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+    hoverTimerRef.current = setTimeout(() => {
+      const el = document.querySelector(`[data-id="${node.id}"]`) as HTMLElement | null
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      setHoverPreview({ stepKey, anchor: { left: r.left, top: r.top, width: r.width, height: r.height } })
+    }, 320)
+  }, [liveProject?.id, PREVIEW_KEYS, cancelClose])
+
+  const onNodeMouseLeave: NodeMouseHandler = useCallback(() => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+    scheduleClose()
+  }, [scheduleClose])
+
   /* ── Actions ── */
   function handleApplyTemplate(templateId: string) {
     const fixed = buildFixedNodes(liveProject)
@@ -799,6 +835,8 @@ function PipelineApp({
             onPaneContextMenu={onPaneContextMenu}
             onNodeContextMenu={onNodeContextMenu}
             onEdgeContextMenu={onEdgeContextMenu}
+            onNodeMouseEnter={onNodeMouseEnter}
+            onNodeMouseLeave={onNodeMouseLeave}
             fitView
             fitViewOptions={{ padding: 0.12, maxZoom: 0.8 }}
             minZoom={0.06}
@@ -841,6 +879,16 @@ function PipelineApp({
           />
         )}
       </div>
+
+      {hoverPreview && liveProject?.id && (
+        <NodeAssetPreview
+          stepKey={hoverPreview.stepKey}
+          projectId={liveProject.id}
+          anchor={hoverPreview.anchor}
+          onOverlayEnter={cancelClose}
+          onOverlayLeave={scheduleClose}
+        />
+      )}
 
       <InspectorPanel
         node={selectedNode}

@@ -103,7 +103,6 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
   return (
     <div
       style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <div style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, width: '100%', maxWidth: 480, maxHeight: canManage ? '80vh' : '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Header */}
