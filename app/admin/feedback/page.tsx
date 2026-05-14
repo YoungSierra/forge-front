@@ -278,7 +278,7 @@ export default function FeedbackAdminPage() {
                   </button>
                 )}
                 {selected.status !== 'resolved' && (
-                  <button onClick={() => handleUpdateStatus(selected, 'resolved')} disabled={saving} style={{ padding: '7px 14px', borderRadius: 6, border: 'none', background: 'var(--cat-code)', color: '#0a0a0c', fontSize: 11, fontFamily: 'monospace', fontWeight: 600, cursor: 'pointer' }}>
+                  <button onClick={() => handleUpdateStatus(selected, 'resolved')} disabled={saving} style={{ padding: '7px 14px', borderRadius: 6, border: 'none', background: 'var(--action)', color: 'var(--action-fg)', fontSize: 11, fontFamily: 'monospace', fontWeight: 600, cursor: 'pointer' }}>
                     {saving ? 'Saving...' : 'Mark resolved'}
                   </button>
                 )}

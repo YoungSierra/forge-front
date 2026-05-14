@@ -11,6 +11,7 @@ import MembersModal from '@/components/projects/MembersModal'
 import PipelineSuggestionModal from './PipelineSuggestionModal'
 import { useAuth } from '@/lib/auth-context'
 import { getProjectMembers } from '@/lib/api'
+import { useTheme } from '@/lib/theme'
 
 type PipelinePhase = 'idle' | 'running' | 'error'
 
@@ -114,6 +115,7 @@ function MembersButton({ project, currentMemberId }: { project: Project; current
 
 export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, runProgress, nodes = [] }: Props) {
   const { user } = useAuth()
+  const { theme, toggle: toggleTheme } = useTheme()
   const [currentMemberId,       setCurrentMemberId]       = useState<string | null>(null)
   const [showPipelineModal,     setShowPipelineModal]     = useState(false)
 
@@ -138,11 +140,13 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
     <header className="forge-toolbar">
       {/* Brand */}
       <div className="brand">
-        <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
-          <div className="brand-mark" />
-          <span className="brand-name">FORGE</span>
+        <Link href="/" className="forge-logo">
+          <svg width="20" height="20" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
+            <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
+          </svg>
+          <span className="forge-logo-wordmark" style={{ fontSize: 14 }}>Forge</span>
         </Link>
-        <span className="brand-sub">AI Pipeline</span>
       </div>
 
       {/* Breadcrumb */}
@@ -226,6 +230,34 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
       )}
 
       <ReviewBadge />
+
+      <div className="tb-divider" />
+
+      {/* Theme toggle — brand v0.1 */}
+      <div className="theme-toggle" role="group" aria-label="Theme">
+        <button
+          type="button"
+          className={theme === 'dark' ? 'is-active' : ''}
+          onClick={() => theme !== 'dark' && toggleTheme()}
+          title="Dark mode"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+          Dark
+        </button>
+        <button
+          type="button"
+          className={theme === 'light' ? 'is-active' : ''}
+          onClick={() => theme !== 'light' && toggleTheme()}
+          title="Light mode"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          </svg>
+          Light
+        </button>
+      </div>
 
       <div className="tb-divider" />
 

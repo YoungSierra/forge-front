@@ -6,7 +6,6 @@ import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { getMemberByAuth, updateAdminUser, invalidateMemberCache } from '@/lib/api'
 import { createClient } from '@/lib/supabase'
-import { useTheme } from '@/lib/theme'
 
 const menuItemStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 8,
@@ -31,7 +30,6 @@ const labelStyle: React.CSSProperties = {
 export default function UserMenu() {
   const { user, signOut } = useAuth()
   const router = useRouter()
-  const { theme, toggle: toggleTheme } = useTheme()
   const [open, setOpen]       = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [profileModal, setProfileModal] = useState(false)
@@ -147,17 +145,6 @@ export default function UserMenu() {
                 ADMIN Tools
               </Link>
             )}
-
-            {/* Theme toggle */}
-            <button
-              onClick={toggleTheme}
-              style={{ ...menuItemStyle, borderBottom: '1px solid var(--line-2)' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-3)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-0)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-2)' }}
-            >
-              <span style={{ fontSize: 13, lineHeight: 1 }}>{theme === 'dark' ? '○' : '●'}</span>
-              {theme === 'dark' ? 'Light mode' : 'Dark mode'}
-            </button>
 
             {/* Profile */}
             <button

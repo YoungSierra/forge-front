@@ -10,16 +10,13 @@ export default function Header() {
       padding: '0 24px', borderBottom: '1px solid var(--line)',
       background: 'var(--bg-1)', position: 'sticky', top: 0, zIndex: 30,
     }}>
-      <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
-        <div style={{
-          width: 18, height: 18, flexShrink: 0,
-          background: 'conic-gradient(from 45deg, var(--cat-asset), var(--cat-code), var(--cat-audio), var(--cat-gate), var(--cat-asset))',
-          clipPath: 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)',
-        }} />
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', letterSpacing: '0.01em' }}>FORGE</span>
-        <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'monospace', borderLeft: '1px solid var(--line)', paddingLeft: 8, marginLeft: 2 }}>
-          AI Pipeline
-        </span>
+      <Link href="/" className="forge-logo">
+        <svg width="20" height="20" viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
+          <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
+        </svg>
+        <span className="forge-logo-wordmark" style={{ fontSize: 13 }}>Forge</span>
+        <span className="forge-logo-sub">AI Pipeline</span>
       </Link>
       <UserMenu />
     </header>

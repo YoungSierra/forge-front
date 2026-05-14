@@ -94,12 +94,15 @@ export default function ProjectsList() {
   if (projects.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 16, textAlign: 'center' }}>
-        <div style={{ width: 48, height: 48, flexShrink: 0, background: 'conic-gradient(from 45deg, var(--cat-asset), var(--cat-code), var(--cat-audio), var(--cat-gate), var(--cat-asset))', clipPath: 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)', opacity: 0.4 }} />
+        <svg width="48" height="48" viewBox="0 0 32 32" aria-hidden="true" style={{ opacity: 0.3, flexShrink: 0 }}>
+            <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
+            <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
+          </svg>
         <div>
           <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', marginBottom: 4 }}>No projects yet</p>
           <p style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'monospace' }}>Start your first prototype</p>
         </div>
-        <Link href="/projects/new" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 16px', background: 'var(--cat-code)', color: '#0a0a0c', borderRadius: 5, fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
+        <Link href="/projects/new" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 16px', background: 'var(--action)', color: 'var(--action-fg)', borderRadius: 5, fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
           + New project
         </Link>
       </div>
@@ -178,7 +181,7 @@ export default function ProjectsList() {
             <button
               key={i}
               onClick={() => setPage(i)}
-              style={{ background: i === page ? 'var(--cat-code)' : 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '5px 10px', fontSize: 11, color: i === page ? '#0a0a0c' : 'var(--text-2)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: i === page ? 600 : 400, minWidth: 32 }}
+              style={{ background: i === page ? 'var(--action)' : 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '5px 10px', fontSize: 11, color: i === page ? 'var(--action-fg)' : 'var(--text-2)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: i === page ? 600 : 400, minWidth: 32 }}
             >{i + 1}</button>
           ))}
           <button

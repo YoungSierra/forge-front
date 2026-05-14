@@ -93,7 +93,7 @@ function ApprovalGateNode({ data }: { data: ApprovalGateNodeData }) {
             <button
               onClick={data.onApprove}
               className="text-[9px] font-bold uppercase tracking-wider px-2.5 py-1 rounded transition-colors"
-              style={{ background: '#16a34a33', color: '#16a34a', border: '1px solid #16a34a66' }}
+              style={{ background: 'color-mix(in oklch, var(--action) 18%, transparent)', color: 'var(--action)', border: '1px solid color-mix(in oklch, var(--action) 40%, transparent)' }}
             >
               Approve
             </button>

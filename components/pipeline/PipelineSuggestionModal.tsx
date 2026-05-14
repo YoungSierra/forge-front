@@ -188,12 +188,10 @@ export default function PipelineSuggestionModal({ project, onConfirm, onSkip }: 
 
           {loading && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '40px 0' }}>
-              <div style={{
-                width: 28, height: 28,
-                background: 'conic-gradient(from 45deg, var(--cat-asset), var(--cat-code), var(--cat-audio), var(--cat-gate), var(--cat-asset))',
-                clipPath: 'polygon(50% 0,100% 50%,50% 100%,0 50%)',
-                animation: 'spin 1.2s linear infinite',
-              }} />
+              <svg width="28" height="28" viewBox="0 0 32 32" style={{ animation: 'spin 2s linear infinite', flexShrink: 0 }}>
+                <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
+                <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
+              </svg>
               <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)' }}>
                 Analyzing GDD…
@@ -242,8 +240,8 @@ export default function PipelineSuggestionModal({ project, onConfirm, onSkip }: 
                         {/* Toggle visual */}
                         <div style={{
                           width: 18, height: 18, borderRadius: 4, flexShrink: 0, marginTop: 1,
-                          background: isActive ? 'var(--cat-code)' : 'var(--bg-3)',
-                          border: `1px solid ${isActive ? 'var(--cat-code)' : 'var(--line-2)'}`,
+                          background: isActive ? 'var(--action)' : 'var(--bg-3)',
+                          border: `1px solid ${isActive ? 'var(--action)' : 'var(--line-2)'}`,
                           display: 'grid', placeItems: 'center',
                           fontSize: 11, color: '#0a0a0c', fontWeight: 700,
                           transition: 'all 100ms',
@@ -301,7 +299,7 @@ export default function PipelineSuggestionModal({ project, onConfirm, onSkip }: 
               <button
                 onClick={handleConfirm}
                 disabled={saving}
-                style={{ padding: '7px 20px', borderRadius: 6, border: 'none', cursor: saving ? 'not-allowed' : 'pointer', background: 'var(--cat-code)', color: '#0a0a0c', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, opacity: saving ? 0.7 : 1 }}
+                style={{ padding: '7px 20px', borderRadius: 6, border: 'none', cursor: saving ? 'not-allowed' : 'pointer', background: 'var(--action)', color: 'var(--action-fg)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, opacity: saving ? 0.7 : 1 }}
               >
                 {saving ? 'Saving…' : 'Apply pipeline →'}
               </button>

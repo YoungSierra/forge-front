@@ -180,7 +180,7 @@ export default function UsersAdminPage() {
               <RoleSelector value={createRole} onChange={setCreateRole} />
               {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
               {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-code)', padding: '6px 8px' }}>{success}</div>}
-              <button type="submit" disabled={saving} style={{ padding: '8px 0', borderRadius: 6, border: 'none', background: 'var(--cat-code)', color: '#0a0a0c', fontSize: 12, fontFamily: 'monospace', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
+              <button type="submit" disabled={saving} style={{ padding: '8px 0', borderRadius: 6, border: 'none', background: 'var(--action)', color: 'var(--action-fg)', fontSize: 12, fontFamily: 'monospace', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
                 {saving ? 'Creating...' : 'Create user'}
               </button>
             </form>

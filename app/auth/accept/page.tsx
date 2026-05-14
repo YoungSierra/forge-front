@@ -106,10 +106,13 @@ export default function AcceptInvitePage() {
       <div className="login-grid" />
       <div className="login-card">
         <div className="login-brand">
-          <div className="login-brand-mark" />
+          <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true" style={{ flexShrink: 0 }}>
+            <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
+            <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
+          </svg>
           <div className="login-brand-text">
-            <div className="login-brand-name">FORGE</div>
-            <div className="login-brand-tag">AI Game Prototype Generator</div>
+            <div className="login-brand-name">Forge</div>
+            <div className="login-brand-tag">AI Game Pipeline</div>
           </div>
         </div>
         <div className="login-divider" />
@@ -120,7 +123,7 @@ export default function AcceptInvitePage() {
           </div>
         ) : (
           <>
-            <div className="login-title">Welcome to FORGE</div>
+            <div className="login-title">Welcome to Forge</div>
             <div className="login-sub" style={{ marginBottom: 20 }}>
               Complete your profile to get started.
             </div>
@@ -136,7 +139,7 @@ export default function AcceptInvitePage() {
                 <input
                   type="text" value={displayName} onChange={e => setDisplayName(e.target.value)}
                   required autoFocus style={inputStyle}
-                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--cat-code)')}
+                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--ember)')}
                   onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
                 />
               </div>
@@ -146,7 +149,7 @@ export default function AcceptInvitePage() {
                 <input
                   type="password" value={password} onChange={e => setPassword(e.target.value)}
                   required style={inputStyle}
-                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--cat-code)')}
+                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--ember)')}
                   onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
                 />
               </div>
@@ -156,7 +159,7 @@ export default function AcceptInvitePage() {
                 <input
                   type="password" value={pwConfirm} onChange={e => setPwConfirm(e.target.value)}
                   required style={inputStyle}
-                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--cat-code)')}
+                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--ember)')}
                   onBlur={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
                 />
               </div>

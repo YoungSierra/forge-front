@@ -214,7 +214,7 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
               <button
                 onClick={handleAdd}
                 disabled={!selectedMember || adding}
-                style={{ width: '100%', padding: '8px', borderRadius: 6, border: 'none', cursor: selectedMember ? 'pointer' : 'not-allowed', background: selectedMember ? 'var(--cat-code)' : 'var(--bg-4)', color: selectedMember ? '#0a0a0c' : 'var(--text-3)', fontSize: 12, fontWeight: 600, transition: 'all 120ms' }}
+                style={{ width: '100%', padding: '8px', borderRadius: 6, border: 'none', cursor: selectedMember ? 'pointer' : 'not-allowed', background: selectedMember ? 'var(--action)' : 'var(--bg-4)', color: selectedMember ? 'var(--action-fg)' : 'var(--text-3)', fontSize: 12, fontWeight: 600, transition: 'all 120ms' }}
               >
                 {adding ? 'Adding...' : '+ Add to project'}
               </button>

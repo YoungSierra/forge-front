@@ -122,12 +122,12 @@ export default function FeedbackWidget() {
 
   return (
     <>
-      {/* Floating button */}
+      {/* Floating button — esquina inferior izquierda para no solapar el inspector */}
       <button
         onClick={() => setOpen(true)}
         title="Send feedback"
         style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 900,
+          position: 'fixed', bottom: 24, left: 24, zIndex: 900,
           background: 'var(--bg-3)', border: '1px solid var(--line-2)',
           borderRadius: 99, padding: '7px 14px',
           fontSize: 11, fontFamily: 'monospace', color: 'var(--text-2)',
@@ -144,7 +144,7 @@ export default function FeedbackWidget() {
       {/* Modal */}
       {open && (
         <div
-          style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', padding: 24, pointerEvents: 'none' }}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-start', padding: 24, pointerEvents: 'none' }}
         >
           <div style={{ pointerEvents: 'all', background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, width: 360, boxShadow: '0 8px 40px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
@@ -230,8 +230,8 @@ export default function FeedbackWidget() {
                   disabled={!description.trim() || sending}
                   style={{
                     padding: '9px', borderRadius: 6, border: 'none',
-                    background: description.trim() ? 'var(--cat-code)' : 'var(--bg-4)',
-                    color: description.trim() ? '#0a0a0c' : 'var(--text-3)',
+                    background: description.trim() ? 'var(--action)' : 'var(--bg-4)',
+                    color: description.trim() ? 'var(--action-fg)' : 'var(--text-3)',
                     fontSize: 12, fontWeight: 600, cursor: description.trim() ? 'pointer' : 'not-allowed',
                     transition: 'all 120ms',
                   }}

@@ -5,11 +5,13 @@ import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import UserMenu from '@/components/layout/UserMenu'
 import { useAuth } from '@/lib/auth-context'
+import { useTheme } from '@/lib/theme'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { member, loading } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
+  const { theme, toggle: toggleTheme } = useTheme()
 
   useEffect(() => {
     if (!loading && member?.role !== 'admin') router.replace('/')
@@ -30,6 +32,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         display: 'flex', alignItems: 'center', gap: 16,
         flexShrink: 0,
       }}>
+        <Link href="/" className="forge-logo" style={{ paddingRight: 10, marginRight: 4, borderRight: '1px solid var(--line-2)' }}>
+          <svg width="18" height="18" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
+            <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
+          </svg>
+          <span className="forge-logo-wordmark" style={{ fontSize: 13 }}>Forge</span>
+        </Link>
+
         <Link href="/" className="admin-back" style={{
           display: 'flex', alignItems: 'center', gap: 6,
           fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)',
@@ -62,7 +72,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 fontWeight: active ? 600 : 400,
                 display: 'inline-flex', alignItems: 'center',
                 height: 44, boxSizing: 'border-box',
-                borderBottom: `2px solid ${active ? 'var(--cat-code)' : 'transparent'}`,
+                borderBottom: `2px solid ${active ? 'var(--action)' : 'transparent'}`,
                 paddingTop: 2,
               }}
             >
@@ -72,6 +82,31 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         })}
 
         <div style={{ flex: 1 }} />
+
+        <div className="theme-toggle" role="group" aria-label="Theme">
+          <button
+            type="button"
+            className={theme === 'dark' ? 'is-active' : ''}
+            onClick={() => theme !== 'dark' && toggleTheme()}
+            title="Dark mode"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+            Dark
+          </button>
+          <button
+            type="button"
+            className={theme === 'light' ? 'is-active' : ''}
+            onClick={() => theme !== 'light' && toggleTheme()}
+            title="Light mode"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+            </svg>
+            Light
+          </button>
+        </div>
 
         <UserMenu />
       </div>

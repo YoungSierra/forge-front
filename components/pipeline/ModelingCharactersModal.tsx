@@ -310,7 +310,7 @@ export default function ModelingCharactersModal({ project, onClose, onApproved }
                     style={{
                       padding: '8px 24px', borderRadius: 6, border: 'none',
                       cursor: approvingNode ? 'not-allowed' : 'pointer',
-                      background: 'var(--cat-code)', color: '#0a0a0c',
+                      background: 'var(--action)', color: 'var(--action-fg)',
                       fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,
                       opacity: approvingNode ? 0.6 : 1,
                     }}

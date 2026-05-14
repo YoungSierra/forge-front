@@ -93,8 +93,8 @@ function Btn({ label, onClick, accent, disabled, small }: { label: string; onCli
       disabled={disabled}
       style={{
         padding: small ? '6px 14px' : '9px 18px', borderRadius: 6, border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
-        background: accent ? 'var(--cat-code)' : 'var(--bg-3)',
-        color: accent ? '#0a0a0c' : 'var(--text-0)',
+        background: accent ? 'var(--action)' : 'var(--bg-3)',
+        color: accent ? 'var(--action-fg)' : 'var(--text-0)',
         fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600, opacity: disabled ? 0.5 : 1,
         width: '100%',
       }}
@@ -203,12 +203,10 @@ function ValidationFeedback({ result }: { result: ValidationResult }) {
 function Spinner({ label }: { label: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '48px 0' }}>
-      <div style={{
-        width: 32, height: 32,
-        background: 'conic-gradient(from 45deg, var(--cat-asset), var(--cat-code), var(--cat-audio), var(--cat-gate), var(--cat-asset))',
-        clipPath: 'polygon(50% 0,100% 50%,50% 100%,0 50%)',
-        animation: 'modal-spin 1.2s linear infinite',
-      }} />
+      <svg width="32" height="32" viewBox="0 0 32 32" style={{ animation: 'modal-spin 2s linear infinite', flexShrink: 0 }}>
+        <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
+        <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
+      </svg>
       <style>{`@keyframes modal-spin { to { transform: rotate(360deg); } }`}</style>
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', textAlign: 'center', lineHeight: 1.7 }}>{label}</div>
     </div>

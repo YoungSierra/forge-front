@@ -421,8 +421,8 @@ export default function ExportModal({ project, nodes, onClose, onRepoSaved }: Pr
             padding: '10px', borderRadius: 8, fontSize: 12,
             fontFamily: 'var(--font-mono)', fontWeight: 600,
             cursor: canExport ? 'pointer' : 'not-allowed', border: 'none',
-            background: canExport ? 'var(--cat-code)' : 'var(--bg-3)',
-            color: canExport ? '#000' : 'var(--text-3)',
+            background: canExport ? 'var(--action)' : 'var(--bg-3)',
+            color: canExport ? 'var(--action-fg)' : 'var(--text-3)',
             transition: 'background 0.15s',
           }}
         >

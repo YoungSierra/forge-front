@@ -121,7 +121,7 @@ export default function LoginPage() {
     <div style={{
       position: 'fixed', inset: 0, background: '#0a0a0c',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'var(--font-geist-sans, system-ui, sans-serif)',
+      fontFamily: 'var(--font-inter, system-ui, sans-serif)',
     }}>
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none',
@@ -133,15 +133,14 @@ export default function LoginPage() {
 
       <div style={cardStyle}>
         {/* Brand */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 22 }}>
-          <div style={{
-            width: 32, height: 32, flexShrink: 0,
-            background: 'conic-gradient(from 45deg, #2563eb, #16a34a, #d97706, #ea580c, #2563eb)',
-            clipPath: 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)',
-          }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22 }}>
+          <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true" style={{ flexShrink: 0 }}>
+            <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
+            <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
+          </svg>
           <div>
-            <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: '0.14em', color: '#f0f0f2', lineHeight: 1 }}>FORGE</div>
-            <div style={{ fontFamily: 'var(--font-geist-mono, monospace)', fontSize: 9, color: '#50505e', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 3 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.02em', color: '#f0f0f2', lineHeight: 1, fontFamily: 'var(--font-inter, system-ui, sans-serif)' }}>Forge</div>
+            <div style={{ fontFamily: 'var(--font-jetbrains-mono, monospace)', fontSize: 9, color: '#50505e', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 3 }}>
               AI Game Pipeline
             </div>
           </div>
@@ -157,7 +156,7 @@ export default function LoginPage() {
             </div>
           ) : (
             <>
-              <div style={{ fontSize: 15, fontWeight: 600, color: '#f0f0f2', marginBottom: 3 }}>Welcome to FORGE</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: '#f0f0f2', marginBottom: 3 }}>Welcome to Forge</div>
               <div style={{ fontSize: 12, color: '#50505e', marginBottom: 20 }}>Complete your profile to get started.</div>
 
               <form onSubmit={handleInviteSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -169,7 +168,7 @@ export default function LoginPage() {
                   <label style={labelStyle}>Display name</label>
                   <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} required autoFocus
                     style={inputStyle}
-                    onFocus={e => { e.currentTarget.style.borderColor = '#4ade80' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
                     onBlur={e =>  { e.currentTarget.style.borderColor = '#2a2a36' }}
                   />
                 </div>
@@ -177,7 +176,7 @@ export default function LoginPage() {
                   <label style={labelStyle}>Password</label>
                   <input type="password" value={invitePw} onChange={e => setInvitePw(e.target.value)} required
                     style={inputStyle}
-                    onFocus={e => { e.currentTarget.style.borderColor = '#4ade80' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
                     onBlur={e =>  { e.currentTarget.style.borderColor = '#2a2a36' }}
                   />
                 </div>
@@ -185,7 +184,7 @@ export default function LoginPage() {
                   <label style={labelStyle}>Confirm password</label>
                   <input type="password" value={invitePwC} onChange={e => setInvitePwC(e.target.value)} required
                     style={inputStyle}
-                    onFocus={e => { e.currentTarget.style.borderColor = '#4ade80' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
                     onBlur={e =>  { e.currentTarget.style.borderColor = '#2a2a36' }}
                   />
                 </div>
@@ -196,8 +195,8 @@ export default function LoginPage() {
                 )}
                 <button type="submit" disabled={inviteSaving} style={{
                   height: 38, borderRadius: 5, border: 'none', marginTop: 4,
-                  background: inviteSaving ? '#166534' : '#16a34a',
-                  color: '#0a0a0c', fontSize: 13, fontWeight: 600,
+                  background: inviteSaving ? 'var(--action-hover)' : 'var(--action)',
+                  color: 'var(--action-fg)', fontSize: 13, fontWeight: 600,
                   cursor: inviteSaving ? 'wait' : 'pointer', width: '100%',
                 }}>
                   {inviteSaving ? 'Activating…' : 'Activate account'}
@@ -216,7 +215,7 @@ export default function LoginPage() {
                 <label htmlFor="email" style={labelStyle}>Email</label>
                 <input id="email" type="email" value={email} required onChange={e => setEmail(e.target.value)}
                   autoComplete="email" placeholder="you@studio.com" style={inputStyle}
-                  onFocus={e => { e.currentTarget.style.borderColor = '#4ade80' }}
+                  onFocus={e => { e.currentTarget.style.borderColor = '#ff8a3d' }}
                   onBlur={e =>  { e.currentTarget.style.borderColor = '#2a2a36' }}
                 />
               </div>
@@ -229,7 +228,7 @@ export default function LoginPage() {
                     onChange={e => setPassword(e.target.value)}
                     autoComplete="current-password" placeholder="••••••••"
                     style={{ ...inputStyle, padding: '9px 38px 9px 11px' }}
-                    onFocus={e => { e.currentTarget.style.borderColor = '#4ade80' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
                     onBlur={e =>  { e.currentTarget.style.borderColor = '#2a2a36' }}
                   />
                   <button type="button" tabIndex={-1} onClick={() => setShowPassword(v => !v)}
@@ -250,8 +249,8 @@ export default function LoginPage() {
 
               <button type="submit" disabled={loading} style={{
                 height: 38, borderRadius: 5, border: 'none', marginTop: 4,
-                background: loading ? '#166534' : '#16a34a',
-                color: '#0a0a0c', fontSize: 13, fontWeight: 600,
+                background: loading ? 'var(--action-hover)' : 'var(--action)',
+                color: 'var(--action-fg)', fontSize: 13, fontWeight: 600,
                 cursor: loading ? 'wait' : 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                 transition: 'filter 120ms', width: '100%',

@@ -24,6 +24,7 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   groq:       ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
   together:   ['meta-llama/Llama-3-70b-chat-hf', 'mistralai/Mixtral-8x7B-Instruct-v0.1'],
   openrouter: ['meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-r1', 'anthropic/claude-3.5-sonnet'],
+  minimax:    ['MiniMax-M2.7', 'MiniMax-Text-01', 'abab6.5s-chat'],
 }
 
 const IMAGE_MODELS_BY_PROVIDER: Record<string, string[]> = {
@@ -61,8 +62,8 @@ const inputStyle: React.CSSProperties = {
 const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer' }
 const btnStyle = (active = true, accent = false): React.CSSProperties => ({
   padding: '7px 14px', borderRadius: 6, border: 'none', cursor: active ? 'pointer' : 'not-allowed',
-  background: accent ? 'var(--cat-code)' : 'var(--bg-3)',
-  color: accent ? '#0a0a0c' : 'var(--text-0)',
+  background: accent ? 'var(--action)' : 'var(--bg-3)',
+  color: accent ? 'var(--action-fg)' : 'var(--text-0)',
   fontSize: 11, fontFamily: 'monospace', fontWeight: 600, opacity: active ? 1 : 0.5,
 })
 

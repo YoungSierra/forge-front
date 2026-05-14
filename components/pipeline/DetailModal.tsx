@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm'
 import type { Project } from '@/lib/types'
 import type { GlobalRefStatus, ImageRef } from '@/lib/types'
 import { exportGDDToPDF, } from '@/lib/gdd-pdf'
-import { assetUrl, getImageReferenceStatus, getImageReferencePool, generateImageReferenceRound, approveImageReferenceSelection, approveNode, getCharatersStatus, generateCharacterRender, approveCharacterRender, approveCharatersNode, saveRefinedCharacterRender, getIdeaCandidate, getGDDRaw, getADIRaw, getModelingCharactersStatus } from '@/lib/api'
+import { assetUrl, getImageReferenceStatus, getImageReferencePool, generateImageReferenceRound, approveImageReferenceSelection, saveRefinedImageReference, approveNode, getCharatersStatus, generateCharacterRender, approveCharacterRender, approveCharatersNode, saveRefinedCharacterRender, restoreCharacterVersion, getIdeaCandidate, getGDDRaw, getADIRaw, getModelingCharactersStatus } from '@/lib/api'
 import type { IdeaCard } from '@/lib/api'
 import type { CharacterRenderStatus, AssetVersion, ModelingCharacterStatus } from '@/lib/types'
 import { InputContext, getInputSources } from './InputContext'
@@ -1082,7 +1082,7 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
   const [zoomedUrl,     setZoomedUrl]    = useState<string | null>(null)
   const [refiningImage, setRefiningImage] = useState<{ id: string; url: string } | null>(null)
 
-  const nodeApproved = !!((project.concept?.pipeline?.image_reference as Record<string, unknown> | undefined)?.approved)
+  const nodeApproved = !!((project.concept?.pipeline?.image_reference as Record<string, unknown> | undefined)?.node_locked)
 
   const loadStatus = useCallback(async () => {
     try {
@@ -1144,7 +1144,7 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
   async function handleApproveNode() {
     setApprovingNode(true); setError(null)
     try {
-      await approveNode(project.id, 'image_reference', {})
+      await approveNode(project.id, 'image_reference', { node_locked: true })
       onNodeApproved()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error approving node')
@@ -1159,20 +1159,14 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
     })
   }
 
-  function handleRefined({ image_url, refined_from_id }: { image_url: string; refined_from_id: string }) {
-    const nextRound = Math.max(...pool.map(i => i.round), 0) + 1
-    const newImg: ImageRef = {
-      id:              `refined-${Date.now()}`,
-      project_id:      project.id,
-      character_key:   'global',
-      image_url,
-      storage_path:    '',
-      round:           nextRound,
-      selected:        false,
-      refined_from_id,
-      created_at:      new Date().toISOString(),
-    }
-    setPool(prev => [...prev, newImg])
+  async function handleRefined({ image_url, refined_from_id }: { image_url: string; refined_from_id: string }) {
+    const saved = await saveRefinedImageReference(project.id, image_url, refined_from_id)
+    // Actualizar pool: deseleccionar original, agregar nueva imagen seleccionada
+    setPool(prev => [
+      ...prev.map(i => i.id === refined_from_id ? { ...i, selected: false } : i),
+      saved,
+    ])
+    await loadStatus()
   }
 
   const isApproved  = status?.status === 'approved'
@@ -1186,6 +1180,9 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
     <div style={{ padding: 24, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>Loading…</div>
   )
 
+  const selectedImages = pool.filter(i => selectedIds.has(i.id))
+  const approvedImages = pool.filter(i => i.selected)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
@@ -1193,14 +1190,9 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
         <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)', background: 'color-mix(in oklch, var(--cat-output) 10%, var(--bg-2))', padding: '8px 12px', borderRadius: 6 }}>{error}</div>
       )}
 
-      <Section title="Global Reference Pool">
-        {/* Game concept prompt */}
-        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-2)', borderRadius: 6, padding: '8px 10px', marginBottom: 6 }}>
-          <strong style={{ color: 'var(--text-2)' }}>Prompt used:</strong>{' '}
-          {promptUsed || '—'}
-        </div>
-
-        {/* Status badge + counters */}
+      {/* ─── TOP: Selected / approved references ─── */}
+      <Section title="Selected References">
+        {/* Status badge + counters — always at top */}
         {status && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
             <span style={{
@@ -1215,76 +1207,50 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
           </div>
         )}
 
-        {/* Generate controls */}
-        {nodeApproved && (
+        {nodeApproved ? (
           <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
             🔒 Node approved — regeneration locked
           </div>
-        )}
-        {!nodeApproved && !isApproved && !atPoolLimit && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-            <input
-              type="number" min={1} max={10} value={genCount}
-              onChange={e => setGenCount(Math.min(10, Math.max(1, Number(e.target.value))))}
-              style={{
-                width: 56, background: 'var(--bg-2)', border: '1px solid var(--line-2)',
-                borderRadius: 5, padding: '5px 8px', fontSize: 11, color: 'var(--text-0)',
-                fontFamily: 'var(--font-mono)',
-              }}
-            />
+        ) : isApproved && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, padding: '10px 14px', borderRadius: 8, background: 'color-mix(in oklch, var(--cat-code) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--cat-code) 25%, transparent)' }}>
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-code)', flex: 1 }}>
+              ✓ 2 reference images approved — ready to lock node
+            </span>
             <button
-              onClick={handleGenerate} disabled={generating}
+              onClick={handleApproveNode}
+              disabled={approvingNode}
               style={{
-                padding: '6px 14px', borderRadius: 5, border: 'none', cursor: generating ? 'not-allowed' : 'pointer',
-                background: 'var(--cat-code)', color: '#0a0a0c',
-                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, opacity: generating ? 0.6 : 1,
-                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '7px 18px', borderRadius: 6, border: 'none',
+                cursor: approvingNode ? 'not-allowed' : 'pointer',
+                background: 'var(--action)', color: 'var(--action-fg)',
+                fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                opacity: approvingNode ? 0.6 : 1, flexShrink: 0,
               }}
             >
-              {generating
-                ? <><span style={{ display: 'inline-block', width: 10, height: 10, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />Generating…</>
-                : `▶ Generate ${genCount} image${genCount !== 1 ? 's' : ''}`}
+              {approvingNode ? 'Approving…' : 'Approve Image Reference node →'}
             </button>
-            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
-              {pool.length}/{maxPool} in pool
-            </span>
-          </div>
-        )}
-        {!nodeApproved && !isApproved && atPoolLimit && (
-          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)', marginBottom: 12 }}>
-            Pool limit reached ({maxPool} images)
           </div>
         )}
 
-        {poolLoading && (
-          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>Loading images…</div>
-        )}
-
-        {!poolLoading && pool.length === 0 && (
-          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>No images yet. Generate the first round.</div>
-        )}
-
-        {/* Approved: flat row — selected green, deselected gray */}
-        {!poolLoading && isApproved && pool.length > 0 && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {pool.map(img => (
-              <div key={img.id} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', border: `2px solid ${img.selected ? 'var(--cat-code)' : 'var(--line-2)'}`, flexShrink: 0, opacity: img.selected ? 1 : 0.4 }}>
-                <img src={img.image_url} alt="" style={{ width: 140, height: 140, display: 'block', objectFit: 'cover' }} />
-                {img.selected && (
-                  <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
-                )}
+        {poolLoading ? (
+          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>Loading…</div>
+        ) : isApproved ? (
+          /* Approved: locked selection with refine + zoom */
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {approvedImages.map(img => (
+              <div key={img.id} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', border: '2px solid var(--cat-code)', flexShrink: 0 }}>
+                <img src={img.image_url} alt="reference" style={{ width: 200, height: 200, display: 'block', objectFit: 'cover' }} />
+                <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
                 {img.refined_from_id && (
                   <div style={{ position: 'absolute', top: 6, right: 6, fontSize: 8, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 3, background: 'rgba(0,0,0,0.6)', color: 'var(--cat-asset)' }}>refined</div>
                 )}
-                {img.selected && (
-                  <button
-                    onClick={e => { e.stopPropagation(); setRefiningImage({ id: img.id, url: img.image_url }) }}
-                    style={{ position: 'absolute', bottom: 6, left: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
-                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-                    title="Refine image"
-                  >🖌</button>
-                )}
+                <button
+                  onClick={e => { e.stopPropagation(); setRefiningImage({ id: img.id, url: img.image_url }) }}
+                  style={{ position: 'absolute', bottom: 6, left: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
+                  onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                  onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+                  title="Refine image"
+                >🖌</button>
                 <button
                   onClick={e => { e.stopPropagation(); setZoomedUrl(img.image_url) }}
                   style={{ position: 'absolute', bottom: 6, right: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
@@ -1294,104 +1260,178 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
                 >⊕</button>
               </div>
             ))}
+            {approvedImages.length === 0 && (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>No images selected.</div>
+            )}
+          </div>
+        ) : selectedImages.length > 0 ? (
+          /* In-progress selection: live preview + approve button */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {selectedImages.map(img => (
+                <div key={img.id} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', border: '2px solid var(--cat-code)', flexShrink: 0 }}>
+                  <img src={img.image_url} alt="reference" style={{ width: 180, height: 180, display: 'block', objectFit: 'cover' }} />
+                  <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
+                  <button
+                    onClick={e => { e.stopPropagation(); toggleImage(img.id) }}
+                    style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: 4, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 11 }}
+                    title="Deselect"
+                  >✕</button>
+                  <button
+                    onClick={e => { e.stopPropagation(); setZoomedUrl(img.image_url) }}
+                    style={{ position: 'absolute', bottom: 6, right: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
+                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+                    title="Zoom"
+                  >⊕</button>
+                </div>
+              ))}
+            </div>
+            {!nodeApproved && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: selectedIds.size === 2 ? 'var(--cat-code)' : 'var(--text-3)' }}>
+                  {selectedIds.size}/2 selected
+                </span>
+                <button
+                  onClick={handleApproveSelection}
+                  disabled={selectedIds.size !== 2 || approving}
+                  style={{
+                    padding: '6px 16px', borderRadius: 5, border: 'none',
+                    cursor: selectedIds.size !== 2 || approving ? 'not-allowed' : 'pointer',
+                    background: selectedIds.size === 2 ? 'var(--action)' : 'var(--bg-3)',
+                    color: selectedIds.size === 2 ? 'var(--action-fg)' : 'var(--text-3)',
+                    fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                    opacity: approving ? 0.6 : 1,
+                  }}
+                >
+                  {approving ? 'Saving…' : 'Approve selection'}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Nothing picked yet */
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', padding: '6px 0' }}>
+            Select 2 images from the pool below to approve them as references.
           </div>
         )}
 
-        {/* Pending: grouped by round, selectable */}
-        {!poolLoading && !isApproved && Object.entries(poolByRound).map(([round, images]) => (
-          <div key={round} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 8 }}>Round {round}</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 }}>
-              {images.map(img => {
-                const sel = selectedIds.has(img.id)
-                return (
-                  <div
-                    key={img.id}
-                    onClick={() => !nodeApproved && toggleImage(img.id)}
-                    style={{
-                      position: 'relative', cursor: nodeApproved ? 'default' : 'pointer', borderRadius: 6, overflow: 'hidden',
-                      border: `2px solid ${sel ? 'var(--cat-code)' : 'var(--line-2)'}`,
-                      transition: 'border-color 100ms',
-                    }}
-                  >
-                    <img src={img.image_url} alt="" style={{ width: '100%', display: 'block', aspectRatio: '1', objectFit: 'cover' }} />
-                    {sel && (
-                      <div style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
-                    )}
-                    <button
-                      onClick={e => { e.stopPropagation(); setZoomedUrl(img.image_url) }}
-                      style={{ position: 'absolute', bottom: 6, right: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
-                      onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                      onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-                      title="Zoom"
-                    >⊕</button>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        ))}
+      </Section>
 
-        {/* Approve selection — exactly 2 required */}
-        {pool.length > 0 && !isApproved && !nodeApproved && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 8, borderTop: '1px solid var(--line-2)' }}>
-            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: selectedIds.size === 2 ? 'var(--cat-code)' : 'var(--text-3)' }}>
-              {selectedIds.size}/2 selected
-            </span>
-            <button
-              onClick={handleApproveSelection}
-              disabled={selectedIds.size !== 2 || approving}
-              style={{
-                padding: '6px 16px', borderRadius: 5, border: 'none',
-                cursor: selectedIds.size !== 2 || approving ? 'not-allowed' : 'pointer',
-                background: selectedIds.size === 2 ? 'var(--cat-code)' : 'var(--bg-3)',
-                color: selectedIds.size === 2 ? '#0a0a0c' : 'var(--text-3)',
-                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                opacity: approving ? 0.6 : 1,
-              }}
-            >
-              {approving ? 'Saving…' : 'Approve selection'}
-            </button>
-          </div>
+      {/* ─── BOTTOM: Global Reference Pool ─── */}
+      <Section title="Global Reference Pool">
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-2)', borderRadius: 6, padding: '8px 10px', marginBottom: 6 }}>
+          <strong style={{ color: 'var(--text-2)' }}>Prompt used:</strong>{' '}
+          {promptUsed || '—'}
+        </div>
+
+        {!isApproved && (
+          <>
+          {!nodeApproved && !atPoolLimit && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+              <input
+                type="number" min={1} max={10} value={genCount}
+                onChange={e => setGenCount(Math.min(10, Math.max(1, Number(e.target.value))))}
+                style={{ width: 56, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '5px 8px', fontSize: 11, color: 'var(--text-0)', fontFamily: 'var(--font-mono)' }}
+              />
+              <button
+                onClick={handleGenerate} disabled={generating}
+                style={{
+                  padding: '6px 14px', borderRadius: 5, border: 'none', cursor: generating ? 'not-allowed' : 'pointer',
+                  background: 'var(--action)', color: 'var(--action-fg)',
+                  fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, opacity: generating ? 0.6 : 1,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                {generating
+                  ? <><span style={{ display: 'inline-block', width: 10, height: 10, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />Generating…</>
+                  : `▶ Generate ${genCount} image${genCount !== 1 ? 's' : ''}`}
+              </button>
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
+                {pool.length}/{maxPool} in pool
+              </span>
+            </div>
+          )}
+          {!nodeApproved && atPoolLimit && (
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)', marginBottom: 12 }}>
+              Pool limit reached ({maxPool} images)
+            </div>
+          )}
+
+          {poolLoading && (
+            <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>Loading images…</div>
+          )}
+          {!poolLoading && pool.length === 0 && (
+            <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>No images yet. Generate the first round.</div>
+          )}
+
+          {!poolLoading && Object.entries(poolByRound).map(([round, images]) => (
+            <div key={round} style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 8 }}>Round {round}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 }}>
+                {images.map(img => {
+                  const sel = selectedIds.has(img.id)
+                  return (
+                    <div
+                      key={img.id}
+                      onClick={() => !nodeApproved && toggleImage(img.id)}
+                      style={{
+                        position: 'relative', cursor: nodeApproved ? 'default' : 'pointer',
+                        borderRadius: 6, overflow: 'hidden',
+                        border: `2px solid ${sel ? 'var(--cat-code)' : 'var(--line-2)'}`,
+                        transition: 'border-color 100ms',
+                      }}
+                    >
+                      <img src={img.image_url} alt="" style={{ width: '100%', display: 'block', aspectRatio: '1', objectFit: 'cover' }} />
+                      {sel && (
+                        <div style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
+                      )}
+                      <button
+                        onClick={e => { e.stopPropagation(); setZoomedUrl(img.image_url) }}
+                        style={{ position: 'absolute', bottom: 6, right: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
+                        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+                        title="Zoom"
+                      >⊕</button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+          </>
         )}
       </Section>
 
-      {/* Approve full node */}
-      {isApproved && !nodeApproved && (
-        <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-code)' }}>
-            2 reference images selected
-          </span>
-          <button
-            onClick={handleApproveNode}
-            disabled={approvingNode}
-            style={{
-              padding: '8px 20px', borderRadius: 6, border: 'none',
-              cursor: approvingNode ? 'not-allowed' : 'pointer',
-              background: 'var(--cat-code)', color: '#0a0a0c',
-              fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              opacity: approvingNode ? 0.6 : 1,
-            }}
-          >
-            {approvingNode ? 'Approving…' : 'Approve Image Reference node'}
-          </button>
-        </div>
-      )}
-
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
 
-      {/* Modal de refinamiento */}
-      {refiningImage && (
-        <RefinementModal
-          imageUrl={refiningImage.url}
-          imageId={refiningImage.id}
-          project={project}
-          onRefined={handleRefined}
-          onClose={() => setRefiningImage(null)}
-        />
-      )}
+      {refiningImage && (() => {
+        // Construir cadena de ancestros: imagen actual + todos sus predecesores via refined_from_id
+        const poolById = Object.fromEntries(pool.map(i => [i.id, i]))
+        const chain: typeof pool = []
+        let cur = poolById[refiningImage.id]
+        while (cur) {
+          chain.push(cur)
+          cur = cur.refined_from_id ? poolById[cur.refined_from_id] : undefined
+        }
+        return (
+          <RefinementModal
+            imageUrl={refiningImage.url}
+            imageId={refiningImage.id}
+            project={project}
+            storagePath={`projects/${project.id}/image_reference/global/${refiningImage.id}_${Date.now()}.png`}
+            historyImages={chain.map((img, i) => ({
+              id:        img.id,
+              url:       img.image_url,
+              label:     i === 0 ? 'current' : `v${chain.length - i}`,
+              isCurrent: i === 0,
+            }))}
+            onRefined={handleRefined}
+            onClose={() => setRefiningImage(null)}
+          />
+        )
+      })()}
 
-      {/* Lightbox */}
       {zoomedUrl && (
         <div
           onClick={() => setZoomedUrl(null)}
@@ -1438,11 +1478,6 @@ function ImageReferenceOutput({ project }: { project: Project }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {promptUsed && (
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-2)', background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 12px', lineHeight: 1.6 }}>
-          <strong style={{ color: 'var(--text-3)' }}>Prompt used:</strong>{' '}{promptUsed}
-        </div>
-      )}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         {pool.map(img => (
           <div key={img.id} style={{ position: 'relative', flexShrink: 0 }}>
@@ -1461,6 +1496,11 @@ function ImageReferenceOutput({ project }: { project: Project }) {
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>No reference images selected yet.</div>
         )}
       </div>
+      {promptUsed && (
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-2)', background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 12px', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--text-3)' }}>Prompt used:</strong>{' '}{promptUsed}
+        </div>
+      )}
       {zoomedUrl && (
         <div onClick={() => setZoomedUrl(null)} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
           <button onClick={() => setZoomedUrl(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, width: 36, height: 36, display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 18 }}>✕</button>
@@ -1864,14 +1904,22 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
     } finally { setApprovingNode(false) }
   }
 
-  async function handleRefined({ image_url }: { image_url: string; refined_from_id: string }) {
+  async function handleRefined({ image_url, refined_from_id }: { image_url: string; refined_from_id: string }) {
+    const charKey = refined_from_id || selectedChar
+    if (!charKey) throw new Error('No character selected')
+    await saveRefinedCharacterRender(project.id, charKey, image_url)
+    setFreshUrl(image_url)
+    await loadStatus()
+  }
+
+  async function handleRestoreVersion(versionId: string) {
     if (!selectedChar) return
     try {
-      await saveRefinedCharacterRender(project.id, selectedChar, image_url)
-      setFreshUrl(image_url)
+      const v = await restoreCharacterVersion(project.id, selectedChar, versionId)
+      setFreshUrl(v.storage_url)
       await loadStatus()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error saving refined render')
+      setError(e instanceof Error ? e.message : 'Error restoring version')
     }
   }
 
@@ -1963,8 +2011,8 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
 
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-            {/* Render image */}
-            <div style={{ flexShrink: 0 }}>
+            {/* Render image + version history */}
+            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
               {displayUrl ? (
                 <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: `2px solid ${selected.status === 'approved' ? 'var(--cat-code)' : 'var(--line-2)'}` }}>
                   <img src={displayUrl} alt={selected.character_name} style={{ width: 200, height: 200, display: 'block', objectFit: 'cover' }} />
@@ -1993,6 +2041,42 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
                   No render yet
                 </div>
               )}
+
+              {/* Version history strip — shown only when more than 1 version exists */}
+              {selected.all_versions && selected.all_versions.length > 1 && (
+                <div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
+                    Version history
+                  </div>
+                  <div style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 2, width: 200 }}>
+                    {selected.all_versions.map(v => {
+                      const isCurrent = v.is_current
+                      return (
+                        <button
+                          key={v.id}
+                          onClick={() => { if (!isCurrent) handleRestoreVersion(v.id) }}
+                          title={isCurrent ? `v${v.version_number} — current` : `Restore v${v.version_number}`}
+                          style={{
+                            flexShrink: 0, padding: 0, border: `2px solid ${isCurrent ? 'var(--cat-code)' : 'var(--line-2)'}`,
+                            borderRadius: 5, overflow: 'hidden', cursor: isCurrent ? 'default' : 'pointer',
+                            background: 'transparent', position: 'relative',
+                          }}
+                        >
+                          <img src={v.storage_url} alt={`v${v.version_number}`} style={{ width: 54, height: 54, display: 'block', objectFit: 'cover', objectPosition: 'top' }} />
+                          <div style={{
+                            position: 'absolute', bottom: 0, left: 0, right: 0,
+                            background: 'rgba(0,0,0,0.55)',
+                            fontFamily: 'var(--font-mono)', fontSize: 8, color: isCurrent ? 'var(--cat-code)' : '#fff',
+                            textAlign: 'center', padding: '1px 0',
+                          }}>
+                            v{v.version_number}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Action controls */}
@@ -2007,7 +2091,7 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
                   disabled={generating}
                   style={{
                     padding: '8px 16px', borderRadius: 6, border: 'none', cursor: generating ? 'not-allowed' : 'pointer',
-                    background: 'var(--cat-code)', color: '#0a0a0c',
+                    background: 'var(--action)', color: 'var(--action-fg)',
                     fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, opacity: generating ? 0.6 : 1,
                     display: 'flex', alignItems: 'center', gap: 6,
                   }}
@@ -2058,7 +2142,7 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
             style={{
               padding: '8px 20px', borderRadius: 6, border: 'none',
               cursor: approvingNode ? 'not-allowed' : 'pointer',
-              background: 'var(--cat-code)', color: '#0a0a0c',
+              background: 'var(--action)', color: 'var(--action-fg)',
               fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,
               opacity: approvingNode ? 0.6 : 1,
             }}
@@ -2093,6 +2177,8 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
           imageUrl={refiningChar.url}
           imageId={refiningChar.key}
           project={project}
+          storagePath={`projects/${project.id}/charaters/${refiningChar.key}/${refiningChar.key}_${Date.now()}.png`}
+          allVersions={selected?.all_versions}
           onRefined={handleRefined}
           onClose={() => setRefiningChar(null)}
         />
@@ -2490,7 +2576,7 @@ export default function DetailModal({ stepKey, project, pendingData, onClose, no
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>
             {project.name}
           </div>
-          {(contentKey === 'art_direction_intake') && project.concept?.pipeline?.art_direction_intake && (
+          {(contentKey === 'art_direction_intake') && (pendingData != null || project.concept?.pipeline?.art_direction_intake) && (
             <button
               onClick={() => handleViewRaw(() => getADIRaw(project.id), 'art_direction_intake/raw.md')}
               disabled={rawLoading}

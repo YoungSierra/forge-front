@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { getAssets, getProjects, assetUrl } from '@/lib/api'
 import type { AssetWithVersions, AssetVersion, Project } from '@/lib/types'
+import ModelViewer from '@/components/shared/ModelViewer'
 
 const CATEGORY_LABEL: Record<string, string> = {
   gdd: 'GDD', sprites: 'Sprites', characters: 'Characters', charaters: 'Characters',
@@ -45,6 +46,12 @@ function isImage(url: string) {
   return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(ext ?? '')
 }
 
+function isGlb(url: string) {
+  if (!url) return false
+  const ext = url.split('?')[0].split('.').pop()?.toLowerCase()
+  return ext === 'glb' || ext === 'gltf'
+}
+
 function currentVersion(asset: AssetWithVersions): AssetVersion | undefined {
   return asset.asset_versions?.find(v => v.is_current) ?? asset.asset_versions?.[0]
 }
@@ -54,6 +61,7 @@ function AssetCard({ asset, onClick }: { asset: AssetWithVersions; onClick: () =
   const ver = currentVersion(asset)
   const url = ver?.storage_url ? assetUrl(ver.storage_url) : ''
   const hasImage = isImage(url)
+  const has3D    = isGlb(url)
   const catColor = CATEGORY_COLOR[asset.step_key] ?? 'var(--text-3)'
   const catLabel = CATEGORY_LABEL[asset.step_key] ?? asset.step_key
   const hasVersions = (asset.asset_versions?.length ?? 0) > 1
@@ -83,12 +91,21 @@ function AssetCard({ asset, onClick }: { asset: AssetWithVersions; onClick: () =
             style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }}
             onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
           />
+        ) : has3D ? (
+          // Placeholder con ícono de cubo 3D y label de categoría
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6,
+            background: `color-mix(in oklch, ${catColor} 6%, var(--bg-3))` }}>
+            <div style={{ fontSize: 26, opacity: 0.7, animation: 'rotate3d 4s linear infinite', transformStyle: 'preserve-3d' }}>⬡</div>
+            <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: catColor, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.8 }}>
+              3D Model
+            </div>
+          </div>
         ) : (
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6 }}>
             <div style={{ fontSize: 22, opacity: 0.3 }}>
               {asset.step_key === 'audio' || asset.step_key === 'sfx' ? '♪' : asset.step_key === 'code' ? '</>' : '◈'}
             </div>
-            <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase' }}>
+            <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', textTransform: 'uppercase' }}>
               {catLabel}
             </div>
           </div>
@@ -96,8 +113,8 @@ function AssetCard({ asset, onClick }: { asset: AssetWithVersions; onClick: () =
         {hasVersions && (
           <div style={{
             position: 'absolute', top: 6, right: 6,
-            background: 'rgba(0,0,0,0.7)', borderRadius: 4, padding: '2px 6px',
-            fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-2)',
+            background: 'rgba(0,0,0,0.72)', borderRadius: 4, padding: '2px 6px',
+            fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.9)',
           }}>
             v{ver?.version_number ?? 1} / {asset.asset_versions.length}
           </div>
@@ -139,6 +156,7 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
   const [viewingVersion, setViewingVersion] = useState<AssetVersion | undefined>(currentVersion(asset))
   const url = viewingVersion?.storage_url ? assetUrl(viewingVersion.storage_url) : ''
   const hasImage = isImage(url)
+  const has3D    = isGlb(url)
   const catColor = CATEGORY_COLOR[asset.step_key] ?? 'var(--text-3)'
   const sortedVersions = [...(asset.asset_versions ?? [])].sort((a, b) => b.version_number - a.version_number)
 
@@ -161,7 +179,7 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
         background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12,
         display: 'flex', maxWidth: 1100, width: '100%', maxHeight: '90vh', overflow: 'hidden',
       }}>
-        {/* Image panel */}
+        {/* Panel de preview: imagen, modelo 3D, o placeholder genérico */}
         <div style={{ flex: 1, background: 'var(--bg-0)', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400, position: 'relative' }}>
           {hasImage ? (
             <img
@@ -169,6 +187,9 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
               alt={asset.name}
               style={{ maxWidth: '100%', maxHeight: '80vh', objectFit: 'contain' }}
             />
+          ) : has3D ? (
+            // Viewer interactivo para GLB — drag para rotar, scroll para zoom
+            <ModelViewer url={url} style={{ width: '100%', height: '100%', minHeight: 400 }} />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, opacity: 0.4 }}>
               <div style={{ fontSize: 48 }}>
@@ -227,7 +248,7 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
             )}
             {viewingVersion?.created_at && (
               <div>
-                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Generated</div>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Generated</div>
                 <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
                   {new Date(viewingVersion.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
                 </div>
@@ -238,7 +259,7 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
           {/* Version history */}
           {sortedVersions.length > 0 && (
             <div style={{ flex: 1, overflow: 'auto', padding: '14px 20px' }}>
-              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
                 Versions ({sortedVersions.length})
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -266,12 +287,12 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
                         )}
                       </div>
                       {v.model_used && (
-                        <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: 9, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {v.model_used}
                         </div>
                       )}
                       {v.created_at && (
-                        <div style={{ fontSize: 9, color: 'var(--text-3)', marginTop: 2 }}>
+                        <div style={{ fontSize: 9, color: 'var(--text-2)', marginTop: 2 }}>
                           {new Date(v.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </div>
                       )}
@@ -303,7 +324,7 @@ export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: 
     getProjects().then(ps => setProjects([...ps].sort((a, b) => a.name.localeCompare(b.name)))).catch(() => {})
   }, [])
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     setLoading(true)
     setPage(0)
     getAssets({ project_id: projectId || undefined })
@@ -311,6 +332,8 @@ export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: 
       .catch(() => setAllAssets([]))
       .finally(() => setLoading(false))
   }, [projectId])
+
+  useEffect(() => { reload() }, [reload])
 
   useEffect(() => { setPage(0) }, [stepKey, pageSize])
 
@@ -398,6 +421,19 @@ export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: 
           <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
             {loading ? '…' : `${assets.length} asset${assets.length !== 1 ? 's' : ''}`}
           </span>
+          <button
+            onClick={reload}
+            disabled={loading}
+            title="Reload assets"
+            style={{
+              background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6,
+              padding: '4px 9px', fontSize: 12, color: loading ? 'var(--text-3)' : 'var(--text-1)',
+              cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)',
+              display: 'flex', alignItems: 'center', gap: 5, opacity: loading ? 0.5 : 1,
+            }}
+          >
+            <span style={loading ? { display: 'inline-block', animation: 'spin 0.8s linear infinite' } : undefined}>⟳</span>
+          </button>
           <select
             value={pageSize}
             onChange={e => setPageSize(Number(e.target.value))}
@@ -418,7 +454,7 @@ export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: 
               {[1,2,3,4,5,6].map(i => (
                 <div key={i} style={{ borderRadius: 8, border: '1px solid var(--line-2)', background: 'var(--bg-2)', aspectRatio: '4/3', opacity: 0.4, animation: 'pulse 1.5s ease-in-out infinite' }} />
               ))}
-              <style>{`@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.2} }`}</style>
+              <style>{`@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.2} } @keyframes spin { to { transform: rotate(360deg) } } @keyframes rotate3d { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }`}</style>
             </div>
           ) : assets.length === 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 12, textAlign: 'center' }}>
@@ -453,7 +489,7 @@ export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: 
                     key={i}
                     onClick={() => setPage(i)}
                     style={{
-                      background: i === page ? 'var(--cat-code)' : 'var(--bg-2)',
+                      background: i === page ? 'var(--action)' : 'var(--bg-2)',
                       border: '1px solid var(--line-2)', borderRadius: 6,
                       padding: '5px 10px', fontSize: 11,
                       color: i === page ? '#0a0a0c' : 'var(--text-2)',

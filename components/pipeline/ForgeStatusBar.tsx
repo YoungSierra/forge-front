@@ -36,7 +36,7 @@ export default function ForgeStatusBar({ nodes, edges, selectedId, log, zoom }: 
       <div className="sb-spacer" />
       {log && <div className="sb-log">› {log}</div>}
       <div className="sb-item" style={{ marginLeft: 'auto' }}>
-        <span style={{ color: 'var(--text-3)' }}>FORGE AI Pipeline</span>
+        <span style={{ color: 'var(--text-3)' }}>Forge AI Pipeline</span>
       </div>
     </footer>
   )

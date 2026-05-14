@@ -1,6 +1,21 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+
+// ── Caché de generaciones en curso — persiste entre re-renders y remounts ──
+// Permite que el panel recupere su estado "Generating…" y el resultado
+// cuando el usuario navega a otro nodo y vuelve.
+const GEN_BUSY    = new Set<string>()                 // keys "projectId:stepKey" actualmente generando
+const GEN_RESULTS = new Map<string, unknown>()         // keys "projectId:stepKey" → resultado
+
+// Suscriptores que quieren saber cuando GEN_BUSY cambia (para el banner del inspector)
+const GEN_LISTENERS = new Set<() => void>()
+function notifyGenChange() { GEN_LISTENERS.forEach(fn => fn()) }
+function subscribeGen(fn: () => void): () => void { GEN_LISTENERS.add(fn); return () => { GEN_LISTENERS.delete(fn) } }
+
+// Helpers que notifican automáticamente al modificar GEN_BUSY
+function genStart(key: string) { GEN_BUSY.add(key);    notifyGenChange() }
+function genEnd(key: string)   { GEN_BUSY.delete(key); notifyGenChange() }
 import type { Node } from '@xyflow/react'
 import type { ForgeNodeData } from './ForgeNode'
 import { CAT_VAR } from './ForgeNode'
@@ -225,8 +240,8 @@ function ActionBtn({
   label: string; onClick: () => void; variant?: 'run' | 'approve' | 'reject' | 'ghost'; disabled?: boolean
 }) {
   const styles: Record<string, React.CSSProperties> = {
-    run:     { background: 'var(--cat-code)', color: '#0a0a0c', border: '1px solid transparent' },
-    approve: { background: 'color-mix(in oklch, var(--cat-code) 14%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--cat-code) 45%, transparent)', color: 'var(--cat-code)' },
+    run:     { background: 'var(--action)', color: 'var(--action-fg)', border: '1px solid transparent' },
+    approve: { background: 'color-mix(in oklch, var(--action) 14%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--action) 45%, transparent)', color: 'var(--action)' },
     reject:  { background: 'color-mix(in oklch, var(--cat-output) 12%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--cat-output) 40%, transparent)', color: 'var(--cat-output)' },
     ghost:   { background: 'var(--bg-2)', border: '1px solid var(--line-2)', color: 'var(--text-1)' },
   }
@@ -1029,12 +1044,10 @@ function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) 
   if (phase === 'validating' || phase === 'generating') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '24px 0' }}>
-        <div style={{
-          width: 28, height: 28,
-          background: 'conic-gradient(from 45deg, var(--cat-asset), var(--cat-code), var(--cat-audio), var(--cat-gate), var(--cat-asset))',
-          clipPath: 'polygon(50% 0,100% 50%,50% 100%,0 50%)',
-          animation: 'spin 1.2s linear infinite',
-        }} />
+        <svg width="28" height="28" viewBox="0 0 32 32" style={{ animation: 'spin 2s linear infinite', flexShrink: 0 }}>
+          <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
+          <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
+        </svg>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', textAlign: 'center', lineHeight: 1.6 }}>
           {phase === 'validating' ? 'Validating idea…' : 'Generating GDD…'}
@@ -1517,7 +1530,7 @@ function ExportPanel({ project, onRefresh, onLog }: { project: Project; onRefres
         <a
           href={exportUrl}
           download
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 32, borderRadius: 5, background: 'var(--cat-code)', color: '#0a0a0c', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 32, borderRadius: 5, background: 'var(--action)', color: 'var(--action-fg)', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}
         >
           ⬇ Download package
         </a>
@@ -1528,15 +1541,14 @@ function ExportPanel({ project, onRefresh, onLog }: { project: Project; onRefres
   )
 }
 
-function GDDSummaryPanel({ project }: { project: Project }) {
+function GDDSummaryPanel({ project, approved }: { project: Project; approved: boolean }) {
   const gdd = project.concept?.pipeline?.gdd
   const [showInput, setShowInput] = useState(false)
   const saved = loadGDDInput(project.id)
 
   if (!gdd) return null
 
-  const gddApproved = (project.current_wizard_step ?? 0) > 1
-    || (project.generation_jobs ?? []).some(j => j.current_step === 'step_1_concept' && j.status === 'approved')
+  const gddApproved = approved
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1627,9 +1639,23 @@ function RuleList({ rules }: { rules: unknown[] }) {
 
 /* ─── Art Direction Intake Panel ─── */
 function ArtDirectionIntakePanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<ArtDirectionIntakeResult | null>(null)
+  const genKey = `${project.id}:art_direction_intake`
+
+  // Inicializar desde caché de módulo para que el estado persista entre remounts
+  const [busy, setBusy]     = useState(() => GEN_BUSY.has(genKey))
+  const [result, setResult] = useState<ArtDirectionIntakeResult | null>(
+    () => GEN_RESULTS.get(genKey) as ArtDirectionIntakeResult ?? null
+  )
   const [tab, setTab] = useState<'world' | 'visual' | 'ui'>('world')
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    // Al remontar, sincronizar con la caché (puede haber terminado mientras estaba desmontado)
+    if (!GEN_BUSY.has(genKey) && busy) setBusy(false)
+    const cached = GEN_RESULTS.get(genKey)
+    if (cached && !result) setResult(cached as ArtDirectionIntakeResult)
+    return () => { mountedRef.current = false }
+  }, [genKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const stored = project.concept?.pipeline?.art_direction_intake as (ArtDirectionIntakeResult & { approved?: boolean }) | undefined
   const [localApproved, setLocalApproved] = useState(false)
@@ -1638,15 +1664,21 @@ function ArtDirectionIntakePanel({ project, onRefresh, onLog, onResult, locked, 
 
   async function generate() {
     setBusy(true)
+    genStart(genKey)
     setLocalApproved(false)
     try {
       onLog('Generating art direction intake…')
       const data = await generateArtDirectionIntake(project.id, nodeContext)
-      setResult(data)
-      onResult?.(data)
+      genEnd(genKey)
+      GEN_RESULTS.set(genKey, data)
+      onResult?.(data)   // InspectorPanel siempre montado — persiste el resultado
       onLog('Art direction intake ready — review and approve')
-    } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
-    finally { setBusy(false) }
+      if (mountedRef.current) { setResult(data); setBusy(false) }
+    } catch (e) {
+      genEnd(genKey)
+      onLog(e instanceof Error ? e.message : 'Error')
+      if (mountedRef.current) setBusy(false)
+    }
   }
 
   async function approve() {
@@ -1655,11 +1687,12 @@ function ArtDirectionIntakePanel({ project, onRefresh, onLog, onResult, locked, 
     setBusy(true)
     try {
       await approveNode(project.id, 'art_direction_intake', data)
+      GEN_RESULTS.delete(genKey)   // ya persistido en DB, limpiar caché
       setLocalApproved(true)
       onRefresh()
       onLog('Art direction intake approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
-    finally { setBusy(false) }
+    finally { if (mountedRef.current) setBusy(false) }
   }
 
   const TABS = [
@@ -1842,9 +1875,21 @@ function ArtDirectionIntakePanel({ project, onRefresh, onLog, onResult, locked, 
 }
 
 function VisualGuidePanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
-  const [busy, setBusy] = useState(false)
-  const [guide, setGuide] = useState<VisualGuide | null>(null)
+  const genKey = `${project.id}:visual_guide`
+
+  const [busy, setBusy]   = useState(() => GEN_BUSY.has(genKey))
+  const [guide, setGuide] = useState<VisualGuide | null>(
+    () => GEN_RESULTS.get(genKey) as VisualGuide ?? null
+  )
   const [tab, setTab] = useState<'palette' | 'rules' | 'refs'>('palette')
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    if (!GEN_BUSY.has(genKey) && busy) setBusy(false)
+    const cached = GEN_RESULTS.get(genKey)
+    if (cached && !guide) setGuide(cached as VisualGuide)
+    return () => { mountedRef.current = false }
+  }, [genKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const stored = project.concept?.pipeline?.visual_guide as (VisualGuide & { approved?: boolean }) | undefined
   const [localApproved, setLocalApproved] = useState(false)
@@ -1853,15 +1898,21 @@ function VisualGuidePanel({ project, onRefresh, onLog, onResult, locked, nodeCon
 
   async function generate() {
     setBusy(true)
+    genStart(genKey)
     setLocalApproved(false)
     try {
       onLog('Generating visual style guide…')
       const result = await generateVisualGuide(project.id, nodeContext)
-      setGuide(result)
+      genEnd(genKey)
+      GEN_RESULTS.set(genKey, result)
       onResult?.(result)
       onLog('Visual guide ready — review and approve')
-    } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
-    finally { setBusy(false) }
+      if (mountedRef.current) { setGuide(result); setBusy(false) }
+    } catch (e) {
+      genEnd(genKey)
+      onLog(e instanceof Error ? e.message : 'Error')
+      if (mountedRef.current) setBusy(false)
+    }
   }
 
   async function approve() {
@@ -1870,11 +1921,12 @@ function VisualGuidePanel({ project, onRefresh, onLog, onResult, locked, nodeCon
     setBusy(true)
     try {
       await approveNode(project.id, 'visual_guide', data)
+      GEN_RESULTS.delete(genKey)
       setLocalApproved(true)
       onRefresh()
       onLog('Visual guide approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
-    finally { setBusy(false) }
+    finally { if (mountedRef.current) setBusy(false) }
   }
 
   const TABS = [
@@ -2119,9 +2171,21 @@ function ConceptCard({ item, size = 'char' }: { item: { name: string; prompt: st
 }
 
 function ConceptArtPanel({ project, onRefresh, onLog, onResult, locked, nodeContext }: { project: Project; onRefresh: () => void; onLog: (m: string) => void; onResult?: (d: unknown) => void; locked?: boolean; nodeContext?: InputContext }) {
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<ConceptArtResult | null>(null)
+  const genKey = `${project.id}:concept_art`
+
+  const [busy, setBusy]     = useState(() => GEN_BUSY.has(genKey))
+  const [result, setResult] = useState<ConceptArtResult | null>(
+    () => GEN_RESULTS.get(genKey) as ConceptArtResult ?? null
+  )
   const [tab, setTab] = useState<'chars' | 'envs'>('chars')
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    if (!GEN_BUSY.has(genKey) && busy) setBusy(false)
+    const cached = GEN_RESULTS.get(genKey)
+    if (cached && !result) setResult(cached as ConceptArtResult)
+    return () => { mountedRef.current = false }
+  }, [genKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const stored = project.concept?.pipeline?.concept_art as (ConceptArtResult & { approved?: boolean }) | undefined
   const [localApproved, setLocalApproved] = useState(false)
@@ -2130,15 +2194,21 @@ function ConceptArtPanel({ project, onRefresh, onLog, onResult, locked, nodeCont
 
   async function generate() {
     setBusy(true)
+    genStart(genKey)
     setLocalApproved(false)
     try {
       onLog('Generating concept art… (may take 30–60s)')
       const res = await generateConceptArt(project.id, nodeContext)
-      setResult(res)
+      genEnd(genKey)
+      GEN_RESULTS.set(genKey, res)
       onResult?.(res)
       onLog(`Concept art ready (${res.character_concepts.length} chars, ${res.environment_concepts.length} envs) — review and approve`)
-    } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
-    finally { setBusy(false) }
+      if (mountedRef.current) { setResult(res); setBusy(false) }
+    } catch (e) {
+      genEnd(genKey)
+      onLog(e instanceof Error ? e.message : 'Error')
+      if (mountedRef.current) setBusy(false)
+    }
   }
 
   async function approve() {
@@ -2147,11 +2217,12 @@ function ConceptArtPanel({ project, onRefresh, onLog, onResult, locked, nodeCont
     setBusy(true)
     try {
       await approveNode(project.id, 'concept_art', data)
+      GEN_RESULTS.delete(genKey)
       setLocalApproved(true)
       onRefresh()
       onLog('Concept art approved')
     } catch (e) { onLog(e instanceof Error ? e.message : 'Error') }
-    finally { setBusy(false) }
+    finally { if (mountedRef.current) setBusy(false) }
   }
 
   const TABS = [
@@ -2827,7 +2898,27 @@ interface Props {
   onRequestRegenerate?: (projectId: string) => void
 }
 
+// Nodos sin botón View Detail
+const NO_DETAIL_STEPS = new Set(['export', 'playtesting'])
+
 export default function InspectorPanel({ node, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode, nodeContext, onRequestNewProject, onRequestRegenerate }: Props) {
+  // Banner reactivo: muestra generaciones en curso aunque el usuario esté en otro nodo
+  const [, forceUpdate] = useState(0)
+  useEffect(() => subscribeGen(() => forceUpdate(n => n + 1)), [])
+
+  // Estado del modal de detalle — vive en el padre para que el footer esté fuera del scroll
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [pendingData, setPendingData] = useState<unknown>(null)
+
+  // Resetear al cambiar de nodo
+  useEffect(() => { setDetailOpen(false); setPendingData(null) }, [node?.id])
+
+  const currentStepKey = node ? ((node.data as unknown as ForgeNodeData).stepKey ?? node.id) : ''
+  const projectId = project?.id ?? ''
+  const busyOnOtherNode = project
+    ? [...GEN_BUSY].find(k => k.startsWith(`${projectId}:`) && k !== `${projectId}:${currentStepKey}`)
+    : undefined
+  const busyStepLabel = busyOnOtherNode ? busyOnOtherNode.replace(`${projectId}:`, '').replace(/_/g, ' ') : null
 
   /* No selection */
   if (!node) {
@@ -2847,6 +2938,8 @@ export default function InspectorPanel({ node, project, onRefresh, onApproved, o
 
   const data = node.data as unknown as ForgeNodeData
   const color = CAT_VAR[data.category]
+  const stepKey = data.stepKey ?? node.id
+  const hasDetail = !!project && !data.comingSoon && !NO_DETAIL_STEPS.has(stepKey)
 
   const STATUS_LABEL: Record<string, string> = {
     idle:           'Idle — ready to run',
@@ -2868,6 +2961,22 @@ export default function InspectorPanel({ node, project, onRefresh, onApproved, o
         </div>
       </div>
 
+      {/* Banner de generación en curso en otro nodo */}
+      {busyStepLabel && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 7,
+          padding: '5px 12px',
+          background: 'color-mix(in oklch, var(--cat-design) 8%, var(--bg-2))',
+          borderBottom: '1px solid color-mix(in oklch, var(--cat-design) 22%, transparent)',
+        }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--cat-design)', animation: 'ledPulse 0.8s infinite', display: 'inline-block' }}>⟳</span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)' }}>
+            <span style={{ color: 'var(--cat-design)' }}>{busyStepLabel}</span> generating…
+          </span>
+        </div>
+      )}
+
+      {/* Cuerpo scrollable */}
       <div className="insp-body">
         <NodeContent
           node={node}
@@ -2881,8 +2990,27 @@ export default function InspectorPanel({ node, project, onRefresh, onApproved, o
           nodeContext={nodeContext}
           onRequestNewProject={onRequestNewProject}
           onRequestRegenerate={onRequestRegenerate}
+          onOpenDetail={() => setDetailOpen(true)}
+          onPendingResult={setPendingData}
         />
       </div>
+
+      {/* Footer fijo — visible aunque haya mucho contenido */}
+      {hasDetail && (
+        <div className="insp-footer">
+          <ViewDetailBtn onClick={() => setDetailOpen(true)} />
+        </div>
+      )}
+
+      {detailOpen && project && (
+        <DetailModal
+          stepKey={stepKey}
+          project={project}
+          pendingData={pendingData}
+          onClose={() => setDetailOpen(false)}
+          nodeContext={nodeContext}
+        />
+      )}
     </aside>
   )
 }
@@ -2893,7 +3021,7 @@ function ViewDetailBtn({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-        width: '100%', height: 28, borderRadius: 5, marginTop: 4,
+        width: '100%', height: 28, borderRadius: 5,
         fontSize: 11, cursor: 'pointer', transition: 'all 100ms',
         fontFamily: 'var(--font-sans)',
         background: 'var(--bg-2)',
@@ -2932,7 +3060,7 @@ function ApproveRow({ approved, nodeId, onApproveNode }: {
 
 function NodeContent({
   node, data, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode, nodeContext,
-  onRequestNewProject, onRequestRegenerate,
+  onRequestNewProject, onRequestRegenerate, onOpenDetail, onPendingResult,
 }: {
   node: Node
   data: ForgeNodeData
@@ -2945,25 +3073,28 @@ function NodeContent({
   nodeContext?: import('@/lib/nodeExecutionContext').InputContext
   onRequestNewProject?: () => void
   onRequestRegenerate?: (projectId: string) => void
+  onOpenDetail?: () => void
+  onPendingResult?: (data: unknown) => void
 }) {
   const { user } = useAuth()
   const [memberId, setMemberId] = useState<string | null>(null)
   useEffect(() => { if (user?.id) getMemberByAuth(user.id).then(m => setMemberId(m?.id ?? null)) }, [user?.id])
 
-  const [modalOpen, setModalOpen] = useState<boolean | 'generate' | 'detail'>(false)
-  const [pendingResult, setPendingResult] = useState<unknown>(null)
+  // generateOpen: solo para los nodos con modal de generación propio (charaters, modeling_characters, image_reference)
+  const [generateOpen, setGenerateOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const stepKey = data.stepKey ?? node.id
   const locked = data.status === 'locked' || data.status === 'pending_review'
-
-  useEffect(() => { setPendingResult(null) }, [stepKey])
 
   /* ── GDD node ── */
   if (stepKey === 'gdd') {
     if (!project) {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '40px 0', textAlign: 'center' }}>
-          <div style={{ width: 40, height: 40, background: 'conic-gradient(from 45deg, var(--cat-asset), var(--cat-code), var(--cat-audio), var(--cat-gate), var(--cat-asset))', clipPath: 'polygon(50% 0,100% 50%,50% 100%,0 50%)', opacity: 0.5 }} />
+          <svg width="40" height="40" viewBox="0 0 32 32" style={{ opacity: 0.3, flexShrink: 0 }}>
+            <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
+            <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
+          </svg>
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', marginBottom: 4 }}>No project yet</div>
             <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>Create a project to generate the GDD</div>
@@ -2985,7 +3116,7 @@ function NodeContent({
 
     return (
       <>
-        <GDDSummaryPanel project={project} />
+        <GDDSummaryPanel project={project} approved={!!data.approved} />
         <ReviewActions
           project={project}
           stepKey="gdd"
@@ -2999,26 +3130,20 @@ function NodeContent({
         {!data.approved && (
           <ActionBtn label="↺ Regenerate GDD" onClick={() => onRequestRegenerate?.(project.id)} variant="ghost" />
         )}
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
       </>
     )
   }
 
   /* ── GDD Gate ── */
   if (stepKey === 'gdd-gate' && project) {
-    const gddApproved = (project.current_wizard_step ?? 0) > 1
+    const gddApproved = (project.generation_jobs ?? []).some(j => j.current_step === 'gdd' && j.status === 'approved')
     return (
-      <>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <SectionTitle>GDD Gate</SectionTitle>
-          <MonoRow k="artifact" v="GDD Document" accent />
-          <MonoRow k="status" v={gddApproved ? 'approved' : 'pending'} />
-          {gddApproved && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ GDD approved — pipeline unlocked</div>}
-          <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        </div>
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <SectionTitle>GDD Gate</SectionTitle>
+        <MonoRow k="artifact" v="GDD Document" accent />
+        <MonoRow k="status" v={gddApproved ? 'approved' : 'pending'} />
+        {gddApproved && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ GDD approved — pipeline unlocked</div>}
+      </div>
     )
   }
 
@@ -3032,49 +3157,19 @@ function NodeContent({
   }
 
   if (stepKey === 'sprites' || stepKey === 'sprites-gate') {
-    return (
-      <>
-        <SpritesPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <SpritesPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
   }
   if (stepKey === 'levels' || stepKey === 'levels-gate') {
-    return (
-      <>
-        <LevelsPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} onResult={setPendingResult} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <LevelsPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} onResult={onPendingResult} />
   }
   if (stepKey === 'audio' || stepKey === 'audio-gate') {
-    return (
-      <>
-        <AudioPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <AudioPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
   }
   if (stepKey === 'code' || stepKey === 'code-gate') {
-    return (
-      <>
-        <CodePanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <CodePanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
   }
   if (stepKey === 'export') {
-    return (
-      <>
-        <ExportPanel project={project} onRefresh={onRefresh} onLog={onLog} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <ExportPanel project={project} onRefresh={onRefresh} onLog={onLog} />
   }
 
   // 3D pipeline nodes using JsonDocPanel
@@ -3138,21 +3233,17 @@ function NodeContent({
         {!isApproved && canGenerate && (
           <ActionBtn
             label="▶ Generate characters"
-            onClick={() => setModalOpen('generate')}
+            onClick={() => setGenerateOpen(true)}
             variant="run"
             disabled={charCount === 0}
           />
         )}
 
-        <ViewDetailBtn onClick={() => setModalOpen('detail')} />
-        {modalOpen === 'detail' && (
-          <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />
-        )}
-        {modalOpen === 'generate' && (
+        {generateOpen && (
           <CharatersModal
             project={project}
-            onClose={() => setModalOpen(false)}
-            onApproved={() => { setModalOpen(false); ar('charaters')() }}
+            onClose={() => setGenerateOpen(false)}
+            onApproved={() => { setGenerateOpen(false); ar('charaters')() }}
           />
         )}
       </>
@@ -3182,22 +3273,17 @@ function NodeContent({
 
         <ActionBtn
           label="▶ Generate 3D models"
-          onClick={() => setModalOpen('generate')}
+          onClick={() => setGenerateOpen(true)}
           variant="run"
           disabled={charCount === 0}
         />
 
-        <ViewDetailBtn onClick={() => setModalOpen('detail')} />
-
-        {modalOpen === 'generate' && (
+        {generateOpen && (
           <ModelingCharactersModal
             project={project}
-            onClose={() => setModalOpen(false)}
-            onApproved={() => { setModalOpen(false); ar('modeling_characters')() }}
+            onClose={() => setGenerateOpen(false)}
+            onApproved={() => { setGenerateOpen(false); ar('modeling_characters')() }}
           />
-        )}
-        {modalOpen === 'detail' && (
-          <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />
         )}
       </>
     )
@@ -3205,113 +3291,47 @@ function NodeContent({
 
   if (stepKey in doc3dNodes) {
     const cfg = doc3dNodes[stepKey]
-    return (
-      <>
-        <JsonDocPanel title={cfg.title} stepKey={stepKey} project={project} onRefresh={ar(stepKey)} onLog={onLog} generateFn={cfg.fn} summaryRows={cfg.rows} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <JsonDocPanel title={cfg.title} stepKey={stepKey} project={project} onRefresh={ar(stepKey)} onLog={onLog} generateFn={cfg.fn} summaryRows={cfg.rows} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'concept_art') {
-    return (
-      <>
-        <ConceptArtPanel project={project} onRefresh={ar('concept_art')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <ConceptArtPanel project={project} onRefresh={ar('concept_art')} onLog={onLog} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'art_direction_intake') {
-    return (
-      <>
-        <ArtDirectionIntakePanel project={project} onRefresh={ar('art_direction_intake')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <ArtDirectionIntakePanel project={project} onRefresh={ar('art_direction_intake')} onLog={onLog} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'splash_art') {
-    return (
-      <>
-        <SplashArtPanel project={project} onRefresh={ar('splash_art')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <SplashArtPanel project={project} onRefresh={ar('splash_art')} onLog={onLog} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'marketing') {
-    return (
-      <>
-        <MarketingPanel project={project} onRefresh={ar('marketing')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <MarketingPanel project={project} onRefresh={ar('marketing')} onLog={onLog} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'visual_guide') {
-    return (
-      <>
-        <VisualGuidePanel project={project} onRefresh={ar('visual_guide')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <VisualGuidePanel project={project} onRefresh={ar('visual_guide')} onLog={onLog} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'backgrounds') {
-    return (
-      <>
-        <BackgroundsPanel project={project} onRefresh={ar('backgrounds')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <BackgroundsPanel project={project} onRefresh={ar('backgrounds')} onLog={onLog} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'uiux') {
-    return (
-      <>
-        <UIUXPanel project={project} onRefresh={ar('uiux')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <UIUXPanel project={project} onRefresh={ar('uiux')} onLog={onLog} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'icons') {
-    return (
-      <>
-        <IconsPanel project={project} onRefresh={ar('icons')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <IconsPanel project={project} onRefresh={ar('icons')} onLog={onLog} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'hud') {
-    return (
-      <>
-        <HUDPanel project={project} onRefresh={ar('hud')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <HUDPanel project={project} onRefresh={ar('hud')} onLog={onLog} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'sfx') {
-    return (
-      <>
-        <SfxPanel project={project} onRefresh={ar('sfx')} onLog={onLog} onResult={setPendingResult} locked={locked} nodeContext={nodeContext} />
-        <ViewDetailBtn onClick={() => setModalOpen(true)} />
-        {modalOpen && <DetailModal stepKey={stepKey} project={project} pendingData={pendingResult} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />}
-      </>
-    )
+    return <SfxPanel project={project} onRefresh={ar('sfx')} onLog={onLog} onResult={onPendingResult} locked={locked} nodeContext={nodeContext} />
   }
 
   if (stepKey === 'image_reference') {
@@ -3335,26 +3355,16 @@ function NodeContent({
         {!isApproved && !locked && (
           <ActionBtn
             label="▶ Generate references"
-            onClick={() => setModalOpen('generate')}
+            onClick={() => setGenerateOpen(true)}
             variant="run"
             disabled={!hasGdd}
           />
         )}
-        <ViewDetailBtn onClick={() => setModalOpen('detail')} />
-        {modalOpen === 'detail' && (
-          <DetailModal
-            stepKey={stepKey}
-            project={project}
-            pendingData={pendingResult}
-            onClose={() => setModalOpen(false)}
-            nodeContext={nodeContext}
-          />
-        )}
-        {modalOpen === 'generate' && (
+        {generateOpen && (
           <ImageReferenceModal
             project={project}
-            onClose={() => setModalOpen(false)}
-            onApproved={() => { setModalOpen(false); ar('image_reference')() }}
+            onClose={() => setGenerateOpen(false)}
+            onApproved={() => { setGenerateOpen(false); ar('image_reference')() }}
           />
         )}
       </>

@@ -31,7 +31,7 @@ export default function HomePage() {
                     padding: '4px 20px 8px 0', fontSize: 22, fontWeight: 700,
                     letterSpacing: '-0.01em',
                     color: active ? 'var(--text-0)' : 'var(--text-3)',
-                    borderBottom: active ? '2px solid var(--cat-code)' : '2px solid transparent',
+                    borderBottom: active ? '2px solid var(--action)' : '2px solid transparent',
                     marginBottom: -1, transition: 'color 120ms',
                   }}
                 >
@@ -47,7 +47,7 @@ export default function HomePage() {
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
                 height: 32, padding: '0 14px',
-                background: 'var(--cat-code)', color: '#0a0a0c',
+                background: 'var(--action)', color: 'var(--action-fg)',
                 borderRadius: 5, fontSize: 12, fontWeight: 600,
                 textDecoration: 'none',
               }}

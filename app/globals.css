@@ -1,58 +1,86 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-background: #0a0a0c;
-  --color-foreground: #f0f0f2;
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: #0e0f12;
+  --color-foreground: #f4f5f8;
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
 }
 
-/* ─── FORGE Design System ─── */
+/* ─── FORGE Design System — tokens v0.1 ─── */
 :root {
-  --bg-0: #0a0a0c;
-  --bg-1: #111115;
-  --bg-2: #16161b;
-  --bg-3: #1c1c22;
-  --bg-4: #252530;
+  /* Superficies — dark (default) */
+  --bg-0: #0e0f12;   /* viewport / canvas */
+  --bg-1: #15171c;   /* chrome: toolbar, side panels */
+  --bg-2: #1c1f25;   /* paneles elevados: nodos, cards */
+  --bg-3: #242831;   /* hover, popovers */
+  --bg-4: #2e333d;   /* headers de nodo, inputs */
 
-  --text-0: #f0f0f2;
-  --text-1: #b8b8c8;
-  --text-2: #80808f;
-  --text-3: #50505e;
+  /* Texto */
+  --text-0: #f4f5f8;   /* primario */
+  --text-1: #d4d8e1;   /* cuerpo */
+  --text-2: #a8aebb;   /* secundario */
+  --text-3: #7d8493;   /* terciario, labels mono */
 
-  --line:   #1e1e28;
-  --line-2: #2a2a36;
+  /* Líneas */
+  --line:   rgba(255,255,255,0.06);
+  --line-2: rgba(255,255,255,0.10);
 
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Fuentes */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* Category colors — oklch */
-  --cat-design: oklch(0.72 0.18 290);
-  --cat-asset:  oklch(0.72 0.16 232);
-  --cat-level:  oklch(0.72 0.14 180);
-  --cat-code:   oklch(0.78 0.18 145);
-  --cat-audio:  oklch(0.78 0.16 75);
-  --cat-output: oklch(0.72 0.20 22);
-  --cat-gate:   oklch(0.78 0.18 52);
-  --cat-test:   oklch(0.58 0.04 260);
-  --cat-input:  oklch(0.82 0.08 212);
+  /* Ember — color brand primario, usado sparingly */
+  --ember: #ff8a3d;
+
+  /* Acción — token semántico para CTAs primarios; apunta a ember */
+  --action:       var(--ember);
+  --action-hover: #f06a18;
+  --action-fg:    #1a0d04;
+
+  /* Colores de categoría de nodo — alineados con el brand */
+  --cat-design: #a78bfa;   /* violet  — diseño, concepto */
+  --cat-asset:  #5aa3ff;   /* blue    — assets, referencias */
+  --cat-level:  #4fd2c2;   /* teal    — niveles, entornos */
+  --cat-code:   #9ee36b;   /* lime    — código, lógica */
+  --cat-audio:  #e8c25a;   /* yellow  — audio, voz */
+  --cat-output: #ff8a3d;   /* ember   — output final */
+  --cat-gate:   #f5c451;   /* amber   — gates, revisión */
+  --cat-test:   #7d8493;   /* gray    — testing */
+  --cat-input:  #8ab8d4;   /* blue-muted — inputs */
 }
 
 /* ─── Light theme ─── */
 [data-theme="light"] {
-  --bg-0: #f4f4f7;
-  --bg-1: #eeeef3;
-  --bg-2: #e6e6ec;
-  --bg-3: #dcdce4;
-  --bg-4: #d2d2dc;
+  /* Superficies — warm off-white, nunca blanco puro */
+  --bg-0: #f6f7f9;
+  --bg-1: #ffffff;
+  --bg-2: #f1f3f6;
+  --bg-3: #e6e9ee;
+  --bg-4: #d3d8e0;
 
-  --text-0: #0a0a0c;
-  --text-1: #1e1e28;
-  --text-2: #50505e;
-  --text-3: #909099;
+  /* Texto */
+  --text-0: #0f1115;
+  --text-1: #1f242d;
+  --text-2: #4a5260;
+  --text-3: #6b7383;
 
-  --line:   #d8d8e2;
-  --line-2: #c8c8d4;
+  /* Líneas */
+  --line:   rgba(15,17,21,0.06);
+  --line-2: rgba(15,17,21,0.12);
+
+  /* Ember igual en ambos modos — es el ancla de identidad */
+
+  /* Categorías — tonos más oscuros para legibilidad sobre fondos claros */
+  --cat-design: #6e4ad6;
+  --cat-asset:  #1f6fdb;
+  --cat-level:  #0f9889;
+  --cat-code:   #4a8f2e;
+  --cat-audio:  #b88800;
+  --cat-output: #ff8a3d;
+  --cat-gate:   #b07700;
+  --cat-test:   #6b7383;
+  --cat-input:  #3a7fa8;
 }
 
 [data-theme="light"] .forge-canvas {
@@ -145,27 +173,6 @@ html, body {
   border-right: 1px solid var(--line);
   height: 100%;
 }
-.forge-toolbar .brand-mark {
-  width: 18px; height: 18px;
-  background: conic-gradient(from 45deg,
-    var(--cat-asset), var(--cat-code),
-    var(--cat-audio), var(--cat-gate), var(--cat-asset));
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  flex-shrink: 0;
-}
-.forge-toolbar .brand-name {
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-0);
-}
-.forge-toolbar .brand-sub {
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  padding-left: 6px;
-  border-left: 1px solid var(--line);
-  margin-left: 2px;
-}
 .tb-btn {
   display: inline-flex; align-items: center; gap: 6px;
   height: 26px; padding: 0 10px;
@@ -176,8 +183,8 @@ html, body {
   white-space: nowrap;
 }
 .tb-btn:hover { background: var(--bg-3); color: var(--text-0); border-color: var(--line-2); }
-.tb-btn.primary { background: var(--cat-code); color: #0a0a0c; font-weight: 600; border-color: transparent; }
-.tb-btn.primary:hover { filter: brightness(1.1); }
+.tb-btn.primary { background: var(--action); color: var(--action-fg); font-weight: 600; border-color: transparent; }
+.tb-btn.primary:hover { background: var(--action-hover); }
 .tb-btn.danger { color: var(--cat-output); }
 .tb-btn.danger:hover { background: color-mix(in oklch, var(--cat-output) 12%, var(--bg-3)); }
 .tb-btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
@@ -466,12 +473,64 @@ html, body {
 }
 .forge-edge.active { opacity: 0.9; stroke-width: 2; }
 
+/* ─── Logo — brand v0.1 (Direction A · Ember) ─── */
+.forge-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+}
+.forge-logo-wordmark {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-0);
+  line-height: 1;
+}
+.forge-logo-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  border-left: 1px solid var(--line-2);
+  padding-left: 8px;
+  margin-left: 2px;
+}
+
+/* ─── Theme Toggle — brand v0.1 ─── */
+.theme-toggle {
+  display: inline-flex;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+.theme-toggle button {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; color: var(--text-3);
+  border: 0; padding: 5px 10px;
+  font: 500 11px var(--font-mono);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.theme-toggle button:hover { color: var(--text-1); }
+.theme-toggle button.is-active {
+  background: var(--bg-1);
+  color: var(--text-0);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.4);
+}
+.theme-toggle svg { flex: 0 0 auto; }
+
 /* ─── Inspector ─── */
 .forge-inspector {
   grid-area: inspector;
   background: var(--bg-1);
   border-left: 1px solid var(--line);
-  overflow-y: auto;
+  overflow: hidden;
   display: flex; flex-direction: column;
   z-index: 10;
   min-height: 0;
@@ -493,7 +552,8 @@ html, body {
 }
 .insp-title  { font-weight: 600; font-size: 13px; color: var(--text-0); }
 .insp-sub    { font-family: var(--font-mono); font-size: 10px; color: var(--text-3); }
-.insp-body   { padding: 14px; display: flex; flex-direction: column; gap: 16px; flex: 1; }
+.insp-body   { padding: 14px; display: flex; flex-direction: column; gap: 16px; flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 0; }
+.insp-footer { padding: 10px 14px; border-top: 1px solid var(--line); flex-shrink: 0; background: var(--bg-1); }
 .insp-section { display: flex; flex-direction: column; gap: 8px; }
 .insp-section h4 {
   font-family: var(--font-mono); font-size: 10px;
@@ -545,15 +605,15 @@ html, body {
   font-family: var(--font-sans);
 }
 .insp-action-btn.run {
-  background: var(--cat-code); color: #0a0a0c;
+  background: var(--action); color: var(--action-fg);
 }
-.insp-action-btn.run:hover { filter: brightness(1.1); }
+.insp-action-btn.run:hover { background: var(--action-hover); }
 .insp-action-btn.approve {
-  background: color-mix(in oklch, var(--cat-code) 14%, var(--bg-2));
-  border-color: color-mix(in oklch, var(--cat-code) 45%, transparent);
-  color: var(--cat-code);
+  background: color-mix(in oklch, var(--action) 14%, var(--bg-2));
+  border-color: color-mix(in oklch, var(--action) 45%, transparent);
+  color: var(--action);
 }
-.insp-action-btn.approve:hover { background: color-mix(in oklch, var(--cat-code) 22%, var(--bg-2)); }
+.insp-action-btn.approve:hover { background: color-mix(in oklch, var(--action) 22%, var(--bg-2)); }
 .insp-action-btn.reject {
   background: color-mix(in oklch, var(--cat-output) 12%, var(--bg-2));
   border-color: color-mix(in oklch, var(--cat-output) 40%, transparent);
@@ -860,16 +920,9 @@ html, body {
 .login-brand {
   display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
 }
-.login-brand-mark {
-  width: 36px; height: 36px;
-  background: conic-gradient(from 45deg,
-    var(--cat-asset), var(--cat-code), var(--cat-audio), var(--cat-gate), var(--cat-asset));
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  flex-shrink: 0;
-}
 .login-brand-text {}
 .login-brand-name {
-  font-size: 18px; font-weight: 700; letter-spacing: 0.15em;
+  font-size: 18px; font-weight: 700; letter-spacing: -0.02em;
   color: var(--text-0); line-height: 1;
 }
 .login-brand-tag {
@@ -897,8 +950,8 @@ html, body {
   transition: border-color 120ms, box-shadow 120ms; width: 100%;
 }
 .login-field input:focus {
-  border-color: var(--cat-code);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--cat-code) 15%, transparent);
+  border-color: var(--action);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--action) 15%, transparent);
 }
 .login-field .pw-wrap { position: relative; }
 .login-field .pw-wrap input { padding-right: 38px; }
@@ -923,9 +976,9 @@ html, body {
   transition: all 120ms; margin-top: 4px; width: 100%;
 }
 .login-btn.primary {
-  background: var(--cat-code); color: #0a0a0c;
+  background: var(--action); color: var(--action-fg);
 }
-.login-btn.primary:hover { filter: brightness(1.1); box-shadow: 0 0 24px color-mix(in oklch, var(--cat-code) 35%, transparent); }
+.login-btn.primary:hover { background: var(--action-hover); box-shadow: 0 0 24px color-mix(in oklch, var(--action) 35%, transparent); }
 .login-btn.primary:disabled { opacity: 0.6; cursor: wait; }
 .login-footer {
   font-family: var(--font-mono); font-size: 10px;
