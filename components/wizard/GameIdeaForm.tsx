@@ -100,10 +100,10 @@ export default function GameIdeaForm({ onSubmit, loading, initialData }: GameIde
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleSubmit(e) }}
             placeholder="Describe your game..."
             rows={5}
-            maxLength={1000}
+            maxLength={2000}
             className="w-full rounded-xl border border-slate-700 bg-[#0d0f16] text-white placeholder-slate-600 text-base px-5 py-4 resize-none focus:outline-none focus:border-violet-500 transition-colors leading-relaxed"
           />
-          <span className="absolute bottom-3 right-4 text-xs text-slate-600">{prompt.length}/1000</span>
+          <span className="absolute bottom-3 right-4 text-xs text-slate-600">{prompt.length}/2000</span>
         </div>
 
         {warnings.length > 0 && (

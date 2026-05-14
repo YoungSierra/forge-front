@@ -598,7 +598,7 @@ export async function testAdminImage(
 
 export async function testAdminWorkflow(
   id: string,
-  values: { prompt?: string; width?: number; height?: number; seed?: number; extras?: Record<string, string | number> }
+  values: { prompt?: string; width?: number; height?: number; seed?: number; extras?: Record<string, string | number>; storage_path?: string }
 ): Promise<{ image_url: string; glb_urls: string[]; job_id: string; prepared_workflow?: Record<string, unknown> }> {
   const data = await request<{ success: boolean; image_url: string; glb_urls?: string[]; job_id: string; prepared_workflow?: Record<string, unknown> }>(
     `/api/admin/comfyui-workflows/${id}/test`,
@@ -761,6 +761,13 @@ export async function approveImageReferenceSelection(project_id: string, selecte
   return data.selected
 }
 
+export async function saveRefinedImageReference(project_id: string, image_url: string, refined_from_id: string): Promise<ImageRef> {
+  const data = await request<{ success: boolean; image: ImageRef }>(`/api/projects/${project_id}/image-reference/save-refined`, {
+    method: 'POST', body: JSON.stringify({ image_url, refined_from_id }),
+  })
+  return data.image
+}
+
 import type { CharacterRenderStatus, AssetVersion, ModelingCharacterStatus } from './types'
 
 export async function getCharatersStatus(project_id: string): Promise<CharacterRenderStatus[]> {
@@ -785,6 +792,14 @@ export async function saveRefinedCharacterRender(project_id: string, char_key: s
 
 export async function approveCharacterRender(project_id: string, char_key: string): Promise<void> {
   await request(`/api/projects/${project_id}/charaters/${char_key}/approve`, { method: 'POST', body: JSON.stringify({}) })
+}
+
+export async function restoreCharacterVersion(project_id: string, char_key: string, version_id: string): Promise<AssetVersion> {
+  const data = await request<{ success: boolean; version: AssetVersion }>(
+    `/api/projects/${project_id}/charaters/${char_key}/restore-version/${version_id}`,
+    { method: 'POST', body: JSON.stringify({}) }
+  )
+  return data.version
 }
 
 export async function approveCharatersNode(project_id: string): Promise<void> {

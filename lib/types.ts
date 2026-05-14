@@ -457,6 +457,7 @@ export type CharacterRenderStatus = {
   review_status:   string | null
   current_version: AssetVersion | null
   total_versions:  number
+  all_versions?:   AssetVersion[]
 }
 
 export type ModelingCharacterStatus = {

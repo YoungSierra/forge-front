@@ -24,7 +24,10 @@ import ForgeToolbar from './ForgeToolbar'
 import ForgeStatusBar from './ForgeStatusBar'
 import ContextMenu, { type ContextMenuState } from './ContextMenu'
 import NewProjectModal from './NewProjectModal'
-import NodeAssetPreview from './NodeAssetPreview'
+import ImageCardDeck, { invalidateImageDeckCache } from './ImageCardDeck'
+import GDDCardDeck from './GDDCardDeck'
+import GDDSectionModal from './GDDSectionModal'
+import type { GDDSectionId } from './GDDCardDeck'
 import type { Project } from '@/lib/types'
 import { getTemplate, CATALOG_ALL, TEMPLATES, type TemplateCatalogNode } from '@/lib/templates'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
@@ -50,16 +53,12 @@ function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []
   // active_nodes del pipeline config guardado (si existe)
   const activeNodes = project?.concept?.pipeline_config?.active_nodes
 
-  // Build approved + pending_review sets
-  // step_1_concept is the DB key for the GDD wizard job — it must resolve to node id 'gdd'
-  const STEP_ALIASES: Record<string, string> = { 'step_1_concept': 'gdd' }
-
+  // Build approved + pending_review sets — generation_jobs es la única fuente de verdad
   const approved = new Set<string>()
   const pendingReview = new Set<string>()
   if (project) {
-    if ((project.current_wizard_step ?? 0) > 1) approved.add('gdd')
     for (const job of project.generation_jobs ?? []) {
-      const nodeId = stepKeyToNodeId.get(job.current_step) ?? STEP_ALIASES[job.current_step] ?? job.current_step
+      const nodeId = stepKeyToNodeId.get(job.current_step) ?? job.current_step
       if (job.status === 'approved') approved.add(nodeId)
       else if (job.status === 'review' && job.review_status === 'pending') pendingReview.add(nodeId)
     }
@@ -302,6 +301,14 @@ function PipelineApp({
   const [framePrompt, setFramePrompt] = useState<XYPosition | null>(null)
   const [phase, setPhase] = useState<'idle' | 'running' | 'error'>('idle')
   const [runProgress, setRunProgress] = useState<{ done: number; total: number } | undefined>()
+  const [gddSection, setGddSection] = useState<GDDSectionId | null>(null)
+
+  // Estado del abanico GDD — posición del nodo en screen coords
+  type GDDDeckState = { anchorX: number; anchorY: number } | null
+  const [gddDeck, setGddDeck] = useState<GDDDeckState>(null)
+  const gddHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const gddCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const isDraft = (p: Project | null) => !p?.concept?.pipeline?.gdd
   const [modalOpen, setModalOpen]           = useState(isDraft(initialProject))
   const [regenProjectId, setRegenProjectId] = useState<string | null>(
@@ -311,7 +318,6 @@ function PipelineApp({
 
   const initialState = (() => {
     if (initialProject?.id) {
-      // If DB has a canvas_layout, seed localStorage with it (cross-device sync)
       if (initialProject.canvas_layout) {
         seedLayoutFromDB(initialProject.id, initialProject.canvas_layout as CanvasLayout)
       }
@@ -443,9 +449,9 @@ function PipelineApp({
     setCtxMenu({ x: e.clientX, y: e.clientY, flowX: flow.x, flowY: flow.y, edgeId: edge.id })
   }, [screenToFlowPosition])
 
-  /* ── Node asset preview on hover ── */
+  /* ── Image card deck on hover (image_reference, charaters) ── */
   const PREVIEW_KEYS = useMemo(() => new Set(['image_reference', 'charaters']), [])
-  type HoverState = { stepKey: string; anchor: { left: number; top: number; width: number; height: number } } | null
+  type HoverState = { stepKey: string; anchorX: number; anchorY: number } | null
   const [hoverPreview, setHoverPreview] = useState<HoverState>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -462,21 +468,44 @@ function PipelineApp({
   const onNodeMouseEnter: NodeMouseHandler = useCallback((_e, node) => {
     if (!liveProject?.id) return
     const stepKey = (node.data as unknown as ForgeNodeData).stepKey ?? ''
-    if (!PREVIEW_KEYS.has(stepKey)) return
-    cancelClose()
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
-    hoverTimerRef.current = setTimeout(() => {
-      const el = document.querySelector(`[data-id="${node.id}"]`) as HTMLElement | null
-      if (!el) return
-      const r = el.getBoundingClientRect()
-      setHoverPreview({ stepKey, anchor: { left: r.left, top: r.top, width: r.width, height: r.height } })
-    }, 320)
-  }, [liveProject?.id, PREVIEW_KEYS, cancelClose])
 
-  const onNodeMouseLeave: NodeMouseHandler = useCallback(() => {
+    // Preview de assets (image_reference, characters)
+    if (PREVIEW_KEYS.has(stepKey)) {
+      cancelClose()
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = setTimeout(() => {
+        const el = document.querySelector(`[data-id="${node.id}"]`) as HTMLElement | null
+        if (!el) return
+        const r = el.getBoundingClientRect()
+        setHoverPreview({ stepKey, anchorX: r.left + r.width / 2, anchorY: r.top })
+      }, 320)
+    }
+
+    // Abanico GDD — se despliega al hacer hover sobre el nodo GDD con GDD disponible
+    if (stepKey === 'gdd' && liveProject?.concept?.pipeline?.gdd) {
+      if (gddCloseTimerRef.current) clearTimeout(gddCloseTimerRef.current)
+      if (gddHoverTimerRef.current) clearTimeout(gddHoverTimerRef.current)
+      gddHoverTimerRef.current = setTimeout(() => {
+        const el = document.querySelector('[data-id="gdd"]') as HTMLElement | null
+        if (!el) return
+        const r = el.getBoundingClientRect()
+        setGddDeck({ anchorX: r.left + r.width / 2, anchorY: r.top })
+      }, 200)
+    }
+  }, [liveProject?.id, liveProject?.concept?.pipeline?.gdd, PREVIEW_KEYS, cancelClose]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onNodeMouseLeave: NodeMouseHandler = useCallback((_e, node) => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
     scheduleClose()
-  }, [scheduleClose])
+
+    // Programa cierre del abanico GDD con un breve delay para permitir mover el mouse a las tarjetas
+    const stepKey = (node.data as unknown as ForgeNodeData).stepKey ?? ''
+    if (stepKey === 'gdd') {
+      if (gddHoverTimerRef.current) clearTimeout(gddHoverTimerRef.current)
+      if (gddCloseTimerRef.current) clearTimeout(gddCloseTimerRef.current)
+      gddCloseTimerRef.current = setTimeout(() => setGddDeck(null), 180)
+    }
+  }, [scheduleClose]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Actions ── */
   function handleApplyTemplate(templateId: string) {
@@ -610,6 +639,8 @@ function PipelineApp({
   }
 
   function handleNodeApproved(stepKey: string) {
+    // Invalida caché de imágenes para que el próximo hover traiga datos frescos
+    if (liveProject?.id) invalidateImageDeckCache(liveProject.id)
     setFlowNodes(ns => ns.map(n => {
       const d = n.data as unknown as ForgeNodeData
       if (d.stepKey === stepKey) return { ...n, data: { ...d, status: 'complete' as const, approved: true, stale: false } }
@@ -881,12 +912,30 @@ function PipelineApp({
       </div>
 
       {hoverPreview && liveProject?.id && (
-        <NodeAssetPreview
+        <ImageCardDeck
           stepKey={hoverPreview.stepKey}
           projectId={liveProject.id}
-          anchor={hoverPreview.anchor}
-          onOverlayEnter={cancelClose}
-          onOverlayLeave={scheduleClose}
+          anchorX={hoverPreview.anchorX}
+          anchorY={hoverPreview.anchorY}
+          onKeepOpen={cancelClose}
+          onScheduleClose={scheduleClose}
+        />
+      )}
+
+      {/* Abanico GDD — portal en document.body, escapa el overflow:hidden del canvas */}
+      {gddDeck && liveProject?.concept?.pipeline?.gdd && (
+        <GDDCardDeck
+          gdd={liveProject.concept.pipeline.gdd}
+          anchorX={gddDeck.anchorX}
+          anchorY={gddDeck.anchorY}
+          onKeepOpen={() => {
+            if (gddCloseTimerRef.current) clearTimeout(gddCloseTimerRef.current)
+          }}
+          onScheduleClose={() => {
+            if (gddCloseTimerRef.current) clearTimeout(gddCloseTimerRef.current)
+            gddCloseTimerRef.current = setTimeout(() => setGddDeck(null), 180)
+          }}
+          onSectionClick={id => { setGddDeck(null); setGddSection(id) }}
         />
       )}
 
@@ -909,6 +958,15 @@ function PipelineApp({
           setModalOpen(true)
         }}
       />
+
+      {gddSection && liveProject?.concept?.pipeline?.gdd && (
+        <GDDSectionModal
+          gdd={liveProject.concept.pipeline.gdd}
+          section={gddSection}
+          onClose={() => setGddSection(null)}
+          onViewFull={() => { setGddSection(null); setSelectedId('gdd') }}
+        />
+      )}
 
       <NewProjectModal
         open={modalOpen}
