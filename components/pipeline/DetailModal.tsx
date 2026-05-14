@@ -1,14 +1,17 @@
 'use client'
 
 import React, { useEffect, useState, useCallback } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { Project } from '@/lib/types'
 import type { GlobalRefStatus, ImageRef } from '@/lib/types'
 import { exportGDDToPDF, } from '@/lib/gdd-pdf'
-import { assetUrl, getImageReferenceStatus, getImageReferencePool, generateImageReferenceRound, approveImageReferenceSelection, approveNode, getCharatersStatus, generateCharacterRender, approveCharacterRender, approveCharatersNode, getIdeaCandidate } from '@/lib/api'
+import { assetUrl, getImageReferenceStatus, getImageReferencePool, generateImageReferenceRound, approveImageReferenceSelection, approveNode, getCharatersStatus, generateCharacterRender, approveCharacterRender, approveCharatersNode, saveRefinedCharacterRender, getIdeaCandidate, getGDDRaw, getADIRaw, getModelingCharactersStatus } from '@/lib/api'
 import type { IdeaCard } from '@/lib/api'
-import type { CharacterRenderStatus, AssetVersion } from '@/lib/types'
+import type { CharacterRenderStatus, AssetVersion, ModelingCharacterStatus } from '@/lib/types'
 import { InputContext, getInputSources } from './InputContext'
 import RefinementModal from '@/components/shared/RefinementModal'
+import ModelViewer from '@/components/shared/ModelViewer'
 
 interface Props {
   stepKey: string
@@ -31,8 +34,9 @@ function stepHasOutput(stepKey: string, project: Project, pendingData?: unknown)
     case 'audio':   return !!g?.audio_direction?.music_mood
     case 'code':    return (g?.development?.core_features?.length ?? 0) > 0
     case 'export':          return true
-    case 'image_reference': return true
-    case 'charaters':       return true
+    case 'image_reference':      return true
+    case 'charaters':            return true
+    case 'modeling_characters':  return true
     default: {
       const d = pipeline?.[key] as Record<string, unknown> | undefined
       return !!d && Object.keys(d).filter(k => k !== 'approved' && k !== 'approved_at').length > 0
@@ -1278,8 +1282,8 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
                     style={{ position: 'absolute', bottom: 6, left: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
                     onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
                     onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-                    title="Refinar imagen"
-                  >⚙</button>
+                    title="Refine image"
+                  >🖌</button>
                 )}
                 <button
                   onClick={e => { e.stopPropagation(); setZoomedUrl(img.image_url) }}
@@ -1528,16 +1532,197 @@ function CharatersOutput({ project }: { project: Project }) {
   )
 }
 
+/* ─── ModelingCharactersOutput ─── */
+
+function ModelingCharactersOutput({ project }: { project: Project }) {
+  const [chars,        setChars]        = useState<ModelingCharacterStatus[]>([])
+  const [loading,      setLoading]      = useState(true)
+  const [selected,     setSelected]     = useState<string | null>(null)
+  const [zoomedUrl,    setZoomedUrl]    = useState<string | null>(null)
+  const [cardsCollapsed, setCardsCollapsed] = useState(false)
+
+  useEffect(() => {
+    getModelingCharactersStatus(project.id)
+      .then(res => { setChars(res); if (res.length > 0) setSelected(res[0].character_key) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [project.id])
+
+  const nodeApproved = !!((project.concept?.pipeline?.modeling_characters as Record<string, unknown> | undefined)?.approved)
+  const withModels   = chars.filter(c => c.status_3d !== 'empty')
+  const approved     = chars.filter(c => c.status_3d === 'approved')
+  const cur          = selected ? chars.find(c => c.character_key === selected) ?? null : null
+  const glbUrl       = cur?.current_version_3d?.storage_url ?? null
+  const isGlb        = glbUrl ? /\.glb(b)?$/i.test(glbUrl) : false
+
+  if (loading) return <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', padding: 12 }}>Loading…</div>
+
+  if (!withModels.length) return (
+    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', padding: 12 }}>
+      No 3D models generated yet. Use ▶ Generate 3D models to start.
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {nodeApproved && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'color-mix(in oklch, var(--cat-code) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--cat-code) 25%, transparent)', borderRadius: 6 }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)' }}>✓ Node approved — {approved.length}/{chars.length} models</span>
+        </div>
+      )}
+
+      {/* Character cards */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: -4 }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          Characters ({withModels.length})
+        </span>
+        <button
+          onClick={() => setCardsCollapsed(v => !v)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 12, padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)', fontSize: 10 }}
+          title={cardsCollapsed ? 'Show characters' : 'Collapse'}
+        >
+          {cardsCollapsed ? '▼ show' : '▲ collapse'}
+        </button>
+      </div>
+      {!cardsCollapsed && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
+        {withModels.map(c => {
+          const isSelected  = selected === c.character_key
+          const statusColor = c.status_3d === 'approved' ? 'var(--cat-code)' : 'var(--cat-asset)'
+          return (
+            <div
+              key={c.character_key}
+              onClick={() => setSelected(c.character_key)}
+              style={{
+                background: isSelected ? 'color-mix(in oklch, var(--cat-asset) 10%, var(--bg-2))' : 'var(--bg-2)',
+                border: `1px solid ${isSelected ? 'var(--cat-asset)' : c.status_3d === 'approved' ? 'color-mix(in oklch, var(--cat-code) 35%, transparent)' : 'var(--line-2)'}`,
+                borderRadius: 8, overflow: 'hidden', cursor: 'pointer', transition: 'all 120ms',
+              }}
+            >
+              <div style={{ position: 'relative', height: 130 }}>
+                {c.render_2d_url ? (
+                  <img src={c.render_2d_url} alt={c.character_name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', display: 'block' }} />
+                ) : (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-3)', fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)' }}>No 2D render</div>
+                )}
+                <div style={{ position: 'absolute', top: 5, right: 5, padding: '2px 6px', borderRadius: 99, background: `color-mix(in oklch, ${statusColor} 15%, rgba(0,0,0,0.65))`, border: `1px solid color-mix(in oklch, ${statusColor} 40%, transparent)`, fontFamily: 'var(--font-mono)', fontSize: 8, color: statusColor, fontWeight: 700 }}>
+                  {c.status_3d === 'approved' ? '✓ 3D' : '3D'}
+                </div>
+                {c.render_2d_url && (
+                  <button
+                    onClick={e => { e.stopPropagation(); setZoomedUrl(c.render_2d_url!) }}
+                    style={{ position: 'absolute', bottom: 5, right: 5, width: 22, height: 22, borderRadius: 4, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 12, opacity: 0.7, transition: 'opacity 150ms' }}
+                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+                    title="Zoom"
+                  >⊕</button>
+                )}
+                {isSelected && (
+                  <div style={{ position: 'absolute', inset: 0, border: '2px solid var(--cat-asset)', borderRadius: 'inherit', pointerEvents: 'none' }} />
+                )}
+              </div>
+              <div style={{ padding: '6px 8px' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.character_name}</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>}
+
+      {/* Inline 3D viewer */}
+      {cur && (
+        <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>3D Model —</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-0)' }}>{cur.character_name}</span>
+            {cur.total_versions_3d > 0 && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)' }}>v{cur.total_versions_3d}</span>}
+          </div>
+          <ModelViewer url={isGlb ? glbUrl! : undefined} style={{ height: cardsCollapsed ? 560 : 420 }} />
+        </div>
+      )}
+
+      {/* Lightbox zoom para 2D renders */}
+      {zoomedUrl && (
+        <div onClick={() => setZoomedUrl(null)} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+          <button onClick={() => setZoomedUrl(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, width: 36, height: 36, display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 18 }}>✕</button>
+          <img src={zoomedUrl} alt="" onClick={e => e.stopPropagation()} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 10, boxShadow: '0 24px 80px rgba(0,0,0,0.8)' }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+const MD_PRINT_STYLES = `
+  body { font-family: Georgia, serif; font-size: 13px; line-height: 1.7; color: #111; max-width: 860px; margin: 40px auto; padding: 0 40px; }
+  h1 { font-size: 24px; font-weight: 700; border-bottom: 2px solid #ddd; padding-bottom: 8px; margin: 0 0 16px; }
+  h2 { font-size: 18px; font-weight: 700; margin: 28px 0 8px; }
+  h3 { font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #555; margin: 20px 0 6px; }
+  p  { margin: 0 0 10px; }
+  ul, ol { margin: 0 0 10px; padding-left: 22px; }
+  li { margin-bottom: 3px; }
+  strong { font-weight: 700; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
+  code { font-family: monospace; font-size: 11px; background: #f4f4f4; border: 1px solid #ddd; border-radius: 3px; padding: 1px 4px; }
+  pre { background: #f4f4f4; border: 1px solid #ddd; border-radius: 6px; padding: 12px 16px; overflow-x: auto; margin: 0 0 12px; }
+  pre code { background: none; border: none; padding: 0; }
+  blockquote { border-left: 3px solid #aaa; margin: 0 0 10px; padding: 4px 0 4px 14px; color: #555; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 16px; font-size: 12px; }
+  th { background: #f4f4f4; font-weight: 700; text-align: left; padding: 7px 10px; border: 1px solid #ccc; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  td { padding: 7px 10px; border: 1px solid #ccc; vertical-align: top; }
+  tr:nth-child(even) td { background: #fafafa; }
+`
+
+function printRawMd(content: string, title: string) {
+  const win = window.open('', '_blank')
+  if (!win) return
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title><style>${MD_PRINT_STYLES}</style></head><body></body></html>`)
+  win.document.close()
+
+  // Renderizar markdown a HTML usando un div temporal en la página actual
+  const tmp = document.createElement('div')
+  tmp.innerHTML = document.getElementById('__raw-md-print-target__')?.innerHTML ?? ''
+  win.document.body.appendChild(tmp)
+  win.focus()
+  win.print()
+}
+
+function RawMdRenderer({ content, printId }: { content: string; printId?: string }) {
+  return (
+    <div id={printId} style={{ color: 'var(--text-1)', lineHeight: 1.7, fontSize: 14 }}>
+      <style>{`
+        .raw-md h1 { font-size: 22px; font-weight: 700; color: var(--text-0); margin: 0 0 12px; border-bottom: 1px solid var(--line-2); padding-bottom: 8px; }
+        .raw-md h2 { font-size: 17px; font-weight: 700; color: var(--text-0); margin: 24px 0 8px; }
+        .raw-md h3 { font-size: 14px; font-weight: 600; color: var(--cat-design); margin: 18px 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+        .raw-md p  { margin: 0 0 10px; color: var(--text-1); }
+        .raw-md ul, .raw-md ol { margin: 0 0 10px; padding-left: 20px; }
+        .raw-md li { margin-bottom: 3px; color: var(--text-1); }
+        .raw-md strong { color: var(--text-0); font-weight: 600; }
+        .raw-md em { color: var(--text-2); font-style: italic; }
+        .raw-md hr { border: none; border-top: 1px solid var(--line-2); margin: 20px 0; }
+        .raw-md code { font-family: var(--font-mono); font-size: 12px; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 5px; color: var(--cat-code); }
+        .raw-md pre { background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 7px; padding: 14px 16px; overflow-x: auto; margin: 0 0 12px; }
+        .raw-md pre code { background: none; border: none; padding: 0; }
+        .raw-md blockquote { border-left: 3px solid var(--cat-design); margin: 0 0 10px; padding: 4px 0 4px 14px; color: var(--text-2); }
+        .raw-md table { width: 100%; border-collapse: collapse; margin: 0 0 16px; font-size: 13px; }
+        .raw-md th { background: var(--bg-3); color: var(--text-0); font-weight: 600; text-align: left; padding: 8px 12px; border: 1px solid var(--line-2); font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+        .raw-md td { padding: 8px 12px; border: 1px solid var(--line-2); color: var(--text-1); vertical-align: top; }
+        .raw-md tr:nth-child(even) td { background: color-mix(in oklch, var(--bg-2) 60%, transparent); }
+      `}</style>
+      <div className="raw-md">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      </div>
+    </div>
+  )
+}
+
 export function ImageReferenceModal({ project, onClose, onApproved }: { project: Project; onClose: () => void; onApproved: () => void }) {
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(_e: KeyboardEvent) { /* Escape no cierra */ }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
   return (
     <div
-      onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 1000,
         background: 'rgba(0,0,0,0.72)',
@@ -1613,6 +1798,7 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
   const [error,        setError]        = useState<string | null>(null)
   const [zoomedUrl,    setZoomedUrl]    = useState<string | null>(null)
   const [freshUrl,     setFreshUrl]     = useState<string | null>(null)
+  const [refiningChar, setRefiningChar] = useState<{ url: string; key: string } | null>(null)
 
   const loadStatus = useCallback(async () => {
     try {
@@ -1676,6 +1862,17 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error approving node')
     } finally { setApprovingNode(false) }
+  }
+
+  async function handleRefined({ image_url }: { image_url: string; refined_from_id: string }) {
+    if (!selectedChar) return
+    try {
+      await saveRefinedCharacterRender(project.id, selectedChar, image_url)
+      setFreshUrl(image_url)
+      await loadStatus()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error saving refined render')
+    }
   }
 
   const nodeApproved = !!((project.concept?.pipeline?.charaters as Record<string, unknown> | undefined)?.approved)
@@ -1778,6 +1975,15 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
                     onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
                     title="Zoom"
                   >⊕</button>
+                  {!nodeApproved && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setRefiningChar({ url: displayUrl, key: selectedChar! }) }}
+                      style={{ position: 'absolute', bottom: 6, left: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
+                      onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                      onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+                      title="Refine image"
+                    >🖌</button>
+                  )}
                   {selected.status === 'approved' && (
                     <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
                   )}
@@ -1880,20 +2086,30 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
           />
         </div>
       )}
+
+      {/* Refinement modal */}
+      {refiningChar && (
+        <RefinementModal
+          imageUrl={refiningChar.url}
+          imageId={refiningChar.key}
+          project={project}
+          onRefined={handleRefined}
+          onClose={() => setRefiningChar(null)}
+        />
+      )}
     </div>
   )
 }
 
 export function CharatersModal({ project, onClose, onApproved }: { project: Project; onClose: () => void; onApproved: () => void }) {
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(_e: KeyboardEvent) { /* Escape no cierra */ }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
   return (
     <div
-      onClick={onClose}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
     >
       <div
@@ -1948,7 +2164,8 @@ const STEP_TITLES: Record<string, string> = {
   'image_reference': 'Image Reference',
   // Pipeline nodes (3D)
   'modeling':      '3D Modeling',
-  'charaters':     '3D Characters',
+  'charaters':            '3D Characters',
+  'modeling_characters':  'Modeling (Characters)',
   'vfx':           'Visual FX',
   'texturing':     'Texturing',
   'rigging':       'Rigging',
@@ -2172,12 +2389,11 @@ function PipelineNodeDetail({ stepKey, project, pendingData }: { stepKey: string
 }
 
 export default function DetailModal({ stepKey, project, pendingData, onClose, nodeContext, onNodeApproved }: Props & { onNodeApproved?: () => void }) {
-  // Close on Escape
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(_e: KeyboardEvent) { /* Escape no cierra */ }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [])
 
   const contentKey   = stepKey.replace('-gate', '')
   const hasOutput    = stepHasOutput(stepKey, project, pendingData)
@@ -2185,6 +2401,21 @@ export default function DetailModal({ stepKey, project, pendingData, onClose, no
     ? Object.keys(nodeContext).length > 0
     : getInputSources(stepKey, project).length > 0
   const [tab, setTab] = useState<'output' | 'context'>(hasOutput ? 'output' : 'context')
+  const [rawMd, setRawMd]           = useState<string | null>(null)
+  const [rawLoading, setRawLoading] = useState(false)
+  const [rawLabel, setRawLabel]     = useState('')
+
+  async function handleViewRaw(fetcher: () => Promise<string>, label: string) {
+    setRawLoading(true)
+    setRawLabel(label)
+    try {
+      setRawMd(await fetcher())
+    } catch {
+      setRawMd(`// ${label} raw file not found.`)
+    } finally {
+      setRawLoading(false)
+    }
+  }
 
   function renderContent() {
     switch (contentKey) {
@@ -2195,9 +2426,10 @@ export default function DetailModal({ stepKey, project, pendingData, onClose, no
       case 'code':    return <CodeDetail project={project} />
       case 'export':       return <ExportDetail project={project} />
       case 'concept_art':      return <ConceptArtDetail project={project} pendingData={pendingData} />
-      case 'image_reference':  return <ImageReferenceOutput project={project} />
-      case 'charaters':        return <CharatersOutput project={project} />
-      default:                 return <PipelineNodeDetail stepKey={contentKey} project={project} pendingData={pendingData} />
+      case 'image_reference':     return <ImageReferenceOutput project={project} />
+      case 'charaters':           return <CharatersOutput project={project} />
+      case 'modeling_characters': return <ModelingCharactersOutput project={project} />
+      default:                    return <PipelineNodeDetail stepKey={contentKey} project={project} pendingData={pendingData} />
     }
   }
 
@@ -2219,7 +2451,6 @@ export default function DetailModal({ stepKey, project, pendingData, onClose, no
 
   return (
     <div
-      onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 1000,
         background: 'rgba(0,0,0,0.72)',
@@ -2259,21 +2490,55 @@ export default function DetailModal({ stepKey, project, pendingData, onClose, no
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>
             {project.name}
           </div>
-          {(contentKey === 'gdd') && project.concept?.pipeline?.gdd && (
+          {(contentKey === 'art_direction_intake') && project.concept?.pipeline?.art_direction_intake && (
             <button
-              onClick={() => exportGDDToPDF(project.concept.pipeline!.gdd!)}
+              onClick={() => handleViewRaw(() => getADIRaw(project.id), 'art_direction_intake/raw.md')}
+              disabled={rawLoading}
               style={{
                 display: 'flex', alignItems: 'center', gap: 5,
                 background: 'var(--bg-3)', border: '1px solid var(--line-2)',
                 borderRadius: 6, padding: '5px 12px',
                 color: 'var(--text-2)', fontFamily: 'var(--font-sans)', fontSize: 11,
-                cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 100ms',
+                cursor: rawLoading ? 'wait' : 'pointer', whiteSpace: 'nowrap', transition: 'all 100ms',
               }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-0)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--line)' }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-2)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--line-2)' }}
             >
-              ⬇ Export PDF
+              {rawLoading ? '⟳' : '{ }'} Raw MD
             </button>
+          )}
+          {(contentKey === 'gdd') && project.concept?.pipeline?.gdd && (
+            <>
+              <button
+                onClick={() => handleViewRaw(() => getGDDRaw(project.id), 'gdd/raw.md')}
+                disabled={rawLoading}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+                  borderRadius: 6, padding: '5px 12px',
+                  color: 'var(--text-2)', fontFamily: 'var(--font-sans)', fontSize: 11,
+                  cursor: rawLoading ? 'wait' : 'pointer', whiteSpace: 'nowrap', transition: 'all 100ms',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-0)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--line)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-2)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--line-2)' }}
+              >
+                {rawLoading ? '⟳' : '{ }'} Raw MD
+              </button>
+              <button
+                onClick={() => exportGDDToPDF(project.concept.pipeline!.gdd!)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+                  borderRadius: 6, padding: '5px 12px',
+                  color: 'var(--text-2)', fontFamily: 'var(--font-sans)', fontSize: 11,
+                  cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 100ms',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-0)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--line)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-2)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--line-2)' }}
+              >
+                ⬇ Export PDF
+              </button>
+            </>
           )}
           <button
             onClick={onClose}
@@ -2313,6 +2578,49 @@ export default function DetailModal({ stepKey, project, pendingData, onClose, no
           }
         </div>
       </div>
+
+      {/* Visor Raw MD */}
+      {rawMd !== null && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1100,
+            background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '100%', maxWidth: 860, maxHeight: '88vh',
+              background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12,
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+              boxShadow: '0 32px 80px rgba(0,0,0,0.7)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-2)' }}>
+                {rawLabel} — {project.name}
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={() => printRawMd(rawMd, `${rawLabel} — ${project.name}`)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', cursor: 'pointer' }}
+                  title="Descargar PDF"
+                >
+                  ↓ PDF
+                </button>
+                <button
+                  onClick={() => setRawMd(null)}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 0 }}
+                >×</button>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
+              <RawMdRenderer content={rawMd} printId="__raw-md-print-target__" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

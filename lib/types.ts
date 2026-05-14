@@ -246,6 +246,7 @@ export type Project = {
   owner_member_id: string
   concept: ProjectConcept
   created_at: string
+  updated_at?: string
   current_step?: number
   current_wizard_step?: number
   approved_wizard_count?: number
@@ -456,6 +457,18 @@ export type CharacterRenderStatus = {
   review_status:   string | null
   current_version: AssetVersion | null
   total_versions:  number
+}
+
+export type ModelingCharacterStatus = {
+  character_key:      string
+  character_name:     string
+  character_index:    number
+  render_2d_url:      string | null
+  status_3d:          'empty' | 'generated' | 'approved'
+  review_status_3d:   string | null
+  asset_id_3d:        string | null
+  current_version_3d: AssetVersion | null
+  total_versions_3d:  number
 }
 
 export type AssetWithVersions = {

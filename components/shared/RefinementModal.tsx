@@ -73,7 +73,7 @@ export default function RefinementModal({ imageUrl, imageId, project, onRefined,
   }, [imageUrl])
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(_e: KeyboardEvent) { /* Escape no cierra */ }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
@@ -122,7 +122,6 @@ export default function RefinementModal({ imageUrl, imageId, project, onRefined,
 
   return (
     <div
-      onClick={onClose}
       style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
     >
       <div
@@ -131,7 +130,7 @@ export default function RefinementModal({ imageUrl, imageId, project, onRefined,
       >
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
-          <span style={{ fontSize: 15, opacity: 0.7 }}>⚙</span>
+          <span style={{ fontSize: 15, opacity: 0.7 }}>🖌</span>
           <div style={{ flex: 1 }}>
             <div style={{ ...mono, fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>
               Refinement tool

@@ -12,13 +12,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const upstream = await fetch(decoded)
+    const upstream = await fetch(decoded, { redirect: 'follow' })
     if (!upstream.ok) {
       return NextResponse.json({ error: `Upstream ${upstream.status}` }, { status: 502 })
     }
-    const buffer      = await upstream.arrayBuffer()
-    const contentType = upstream.headers.get('content-type') || 'image/png'
-    return new NextResponse(buffer, {
+    const contentType = upstream.headers.get('content-type') || 'application/octet-stream'
+    return new NextResponse(upstream.body, {
       headers: {
         'Content-Type':  contentType,
         'Cache-Control': 'public, max-age=3600',

@@ -57,7 +57,7 @@ export async function generateGDD(prompt: string, projectId?: string): Promise<G
   return { async: false, gdd: data.gdd!, meta: data.meta }
 }
 
-export async function pollForGDD(projectId: string, timeoutMs = 300_000): Promise<GDD> {
+export async function pollForGDD(projectId: string, timeoutMs = 600_000): Promise<GDD> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 10_000))
@@ -68,7 +68,7 @@ export async function pollForGDD(projectId: string, timeoutMs = 300_000): Promis
       if (gdd) return gdd
     } catch { /* continuar */ }
   }
-  throw new Error('GDD generation timed out after 5 minutes — check n8n and try again')
+  throw new Error('GDD generation timed out after 10 minutes — check n8n and try again')
 }
 
 export async function approveStep1(payload: { project_id: string; gdd: GDD; prompt: string; meta: unknown; member_id?: string }) {
@@ -201,6 +201,18 @@ export async function getProjects(auth_user_id?: string): Promise<Project[]> {
 export async function getProject(id: string): Promise<Project> {
   const data = await request<{ success: boolean; project: Project }>(`/api/projects/${id}`)
   return data.project
+}
+
+export async function getGDDRaw(projectId: string): Promise<string> {
+  const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/gdd/raw`)
+  if (!res.ok) throw new Error('GDD raw not found')
+  return res.text()
+}
+
+export async function getADIRaw(projectId: string): Promise<string> {
+  const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/art-direction-intake/raw`)
+  if (!res.ok) throw new Error('Art Direction Intake raw not found')
+  return res.text()
 }
 
 // Members
@@ -430,7 +442,11 @@ async function generateDoc(stepKey: string, project_id: string, input_context?: 
   return data[stepKey]
 }
 
-export const generateModeling   = (id: string, ctx?: InputContext) => generateDoc('modeling',   id, ctx)
+export const generateModelingCharacters   = (id: string, ctx?: InputContext) => generateDoc('modeling_characters',   id, ctx)
+export const generateModelingEnvironments = (id: string, ctx?: InputContext) => generateDoc('modeling_environments', id, ctx)
+export const generateModelingProps        = (id: string, ctx?: InputContext) => generateDoc('modeling_props',        id, ctx)
+export const generateEnvironments         = (id: string, ctx?: InputContext) => generateDoc('environments',          id, ctx)
+export const generateProps                = (id: string, ctx?: InputContext) => generateDoc('props',                 id, ctx)
 export const generateCharaters  = (id: string, ctx?: InputContext) => generateDoc('charaters',  id, ctx)
 export const generateVfx        = (id: string, ctx?: InputContext) => generateDoc('vfx',        id, ctx)
 export const generateTexturing  = (id: string, ctx?: InputContext) => generateDoc('texturing',  id, ctx)
@@ -745,7 +761,7 @@ export async function approveImageReferenceSelection(project_id: string, selecte
   return data.selected
 }
 
-import type { CharacterRenderStatus, AssetVersion } from './types'
+import type { CharacterRenderStatus, AssetVersion, ModelingCharacterStatus } from './types'
 
 export async function getCharatersStatus(project_id: string): Promise<CharacterRenderStatus[]> {
   const data = await request<{ success: boolean; characters: CharacterRenderStatus[] }>(`/api/projects/${project_id}/charaters/status`)
@@ -759,12 +775,41 @@ export async function generateCharacterRender(project_id: string, char_key: stri
   return { version: data.version, image_url: data.image_url }
 }
 
+export async function saveRefinedCharacterRender(project_id: string, char_key: string, storage_url: string): Promise<{ version: AssetVersion | null; image_url: string }> {
+  const data = await request<{ success: boolean; version: AssetVersion | null; image_url: string }>(
+    `/api/projects/${project_id}/charaters/${char_key}/save-refined`,
+    { method: 'POST', body: JSON.stringify({ storage_url }) }
+  )
+  return { version: data.version, image_url: data.image_url }
+}
+
 export async function approveCharacterRender(project_id: string, char_key: string): Promise<void> {
   await request(`/api/projects/${project_id}/charaters/${char_key}/approve`, { method: 'POST', body: JSON.stringify({}) })
 }
 
 export async function approveCharatersNode(project_id: string): Promise<void> {
   await request(`/api/projects/${project_id}/charaters/approve-node`, { method: 'POST', body: JSON.stringify({}) })
+}
+
+export async function getModelingCharactersStatus(project_id: string): Promise<ModelingCharacterStatus[]> {
+  const data = await request<{ success: boolean; characters: ModelingCharacterStatus[] }>(`/api/projects/${project_id}/modeling-characters/status`)
+  return data.characters
+}
+
+export async function generateModelingCharacter(project_id: string, char_key: string): Promise<{ version: AssetVersion | null; glb_url: string | null; texture_url: string; glb_urls: string[] }> {
+  const data = await request<{ success: boolean; version: AssetVersion | null; glb_url: string | null; texture_url: string; glb_urls: string[] }>(
+    `/api/projects/${project_id}/modeling-characters/${char_key}/generate`,
+    { method: 'POST', body: JSON.stringify({}) }
+  )
+  return { version: data.version, glb_url: data.glb_url, texture_url: data.texture_url, glb_urls: data.glb_urls ?? [] }
+}
+
+export async function approveModelingCharacter(project_id: string, char_key: string): Promise<void> {
+  await request(`/api/projects/${project_id}/modeling-characters/${char_key}/approve`, { method: 'POST', body: JSON.stringify({}) })
+}
+
+export async function approveModelingCharactersNode(project_id: string): Promise<void> {
+  await request(`/api/projects/${project_id}/modeling-characters/approve-node`, { method: 'POST', body: JSON.stringify({}) })
 }
 
 // Request peer review for a pipeline node

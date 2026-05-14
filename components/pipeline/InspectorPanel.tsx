@@ -5,6 +5,7 @@ import type { Node } from '@xyflow/react'
 import type { ForgeNodeData } from './ForgeNode'
 import { CAT_VAR } from './ForgeNode'
 import DetailModal, { ImageReferenceModal, CharatersModal } from './DetailModal'
+import ModelingCharactersModal from './ModelingCharactersModal'
 import PipelineSuggestionModal from './PipelineSuggestionModal'
 import type {
   Project, GameFormData, GDD, ValidationResult,
@@ -20,7 +21,9 @@ import {
   generateVisualGuide, generateBackgrounds, generateSfx, generateConceptArt,
   generateUIUX, generateIcons, generateHUD, generateArtDirectionIntake, approveNode,
   generateSplashArt, generateMarketing,
-  generateModeling, generateCharaters, generateVfx, generateTexturing,
+  generateModelingEnvironments, generateModelingProps,
+  generateEnvironments, generateProps,
+  generateCharaters, generateVfx, generateTexturing,
   generateRigging, generateLighting, generateAnimation, generateCinematics, generateVoice,
   assetUrl, getProjectMembers, requestNodeReview, submitReview, getMemberByAuth,
   type VisualGuide, type BackgroundPreview, type SfxEntry, type ConceptArtResult,
@@ -562,7 +565,6 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
 
   return (
     <div
-      onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 1000,
         background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
@@ -2909,7 +2911,7 @@ function ViewDetailBtn({ onClick }: { onClick: () => void }) {
         b.style.color = 'var(--text-2)'
       }}
     >
-      ⊞ Ver detalle completo
+      ⊞ View full detail
     </button>
   )
 }
@@ -3077,7 +3079,10 @@ function NodeContent({
 
   // 3D pipeline nodes using JsonDocPanel
   const doc3dNodes: Record<string, { title: string; fn: (id: string, ctx?: InputContext) => Promise<unknown>; rows: { k: string; v: string; accent?: boolean }[] }> = {
-    modeling:   { title: 'Modeling',    fn: generateModeling,   rows: [{ k: 'engine', v: project.target_engine ?? '–', accent: true }, { k: 'characters', v: String(project.concept?.pipeline?.gdd?.characters?.length ?? 0) }] },
+    modeling_environments: { title: 'Modeling (Environments)', fn: generateModelingEnvironments, rows: [{ k: 'engine', v: project.target_engine ?? '–', accent: true }] },
+    modeling_props:        { title: 'Modeling (Props)',         fn: generateModelingProps,        rows: [{ k: 'engine', v: project.target_engine ?? '–', accent: true }] },
+    environments:          { title: 'Environments',             fn: generateEnvironments,         rows: [{ k: 'genre', v: project.concept?.pipeline?.gdd?.project?.genre ?? '–', accent: true }, { k: 'levels', v: String(project.concept?.pipeline?.gdd?.levels?.length ?? 0) }] },
+    props:                 { title: 'Props',                    fn: generateProps,                rows: [{ k: 'genre', v: project.concept?.pipeline?.gdd?.project?.genre ?? '–', accent: true }] },
     // charaters handled separately below (requires image_reference connection)
 
     vfx:        { title: 'VFX',         fn: generateVfx,        rows: [{ k: 'genre', v: project.concept?.pipeline?.gdd?.project?.genre ?? '–', accent: true }, { k: 'engine', v: project.target_engine ?? '–' }] },
@@ -3149,6 +3154,50 @@ function NodeContent({
             onClose={() => setModalOpen(false)}
             onApproved={() => { setModalOpen(false); ar('charaters')() }}
           />
+        )}
+      </>
+    )
+  }
+
+  if (stepKey === 'modeling_characters') {
+    const charCount    = project.concept?.pipeline?.gdd?.characters?.length ?? 0
+    const hasCharaters = !!((project.concept?.pipeline?.charaters as Record<string, unknown> | undefined)?.approved)
+
+    return (
+      <>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SectionTitle>Modeling (Characters)</SectionTitle>
+          <MonoRow k="engine" v={project.target_engine ?? '–'} accent />
+          <MonoRow k="characters" v={String(charCount)} />
+        </div>
+
+        {!hasCharaters && (
+          <div style={{
+            background: 'color-mix(in oklch, var(--cat-gate) 10%, var(--bg-2))',
+            border: '1px solid color-mix(in oklch, var(--cat-gate) 30%, transparent)',
+            borderRadius: 5, padding: '8px 12px',
+            fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-gate)', lineHeight: 1.5,
+          }}>⚠ Approve the Characters node before generating 3D models.</div>
+        )}
+
+        <ActionBtn
+          label="▶ Generate 3D models"
+          onClick={() => setModalOpen('generate')}
+          variant="run"
+          disabled={charCount === 0}
+        />
+
+        <ViewDetailBtn onClick={() => setModalOpen('detail')} />
+
+        {modalOpen === 'generate' && (
+          <ModelingCharactersModal
+            project={project}
+            onClose={() => setModalOpen(false)}
+            onApproved={() => { setModalOpen(false); ar('modeling_characters')() }}
+          />
+        )}
+        {modalOpen === 'detail' && (
+          <DetailModal stepKey={stepKey} project={project} onClose={() => setModalOpen(false)} nodeContext={nodeContext} />
         )}
       </>
     )

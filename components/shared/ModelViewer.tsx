@@ -7,55 +7,86 @@ function resolveUrl(url: string) {
   return url.startsWith('http') ? url : `${BACKEND_URL}${url}`
 }
 
+// Blob URLs cacheadas por sesión (proxyUrl → blobUrl).
+// Son "propiedad del cache" — nunca se revocan, viven hasta que se recarga la página.
+const glbCache = new Map<string, string>()
+
 interface Props {
   url?: string
   style?: React.CSSProperties
 }
 
 export default function ModelViewer({ url, style }: Props) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null)
-  const [error, setError]     = useState<string | null>(null)
+  const [blobUrl,  setBlobUrl]  = useState<string | null>(null)
+  const [error,    setError]    = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
-  const currentBlob = useRef<string | null>(null)
+  // Solo para drag & drop — blobs locales que SÍ revocamos al reemplazar
+  const localBlob = useRef<string | null>(null)
 
   useEffect(() => {
     import('@google/model-viewer').catch(() => {})
   }, [])
 
-  function loadBlob(blob: Blob) {
-    if (currentBlob.current) URL.revokeObjectURL(currentBlob.current)
+  // Drag & drop: crea blob local (no se cachea, se revoca al reemplazar)
+  function loadLocalBlob(blob: Blob) {
+    if (localBlob.current) { URL.revokeObjectURL(localBlob.current); localBlob.current = null }
     const objUrl = URL.createObjectURL(blob)
-    currentBlob.current = objUrl
+    localBlob.current = objUrl
     setBlobUrl(objUrl)
     setError(null)
   }
 
   useEffect(() => {
-    if (!url) return
-    setBlobUrl(null)
+    if (!url) {
+      setBlobUrl(null)
+      setError(null)
+      return
+    }
     setError(null)
 
     const resolved = resolveUrl(url)
-    // Proxy server-side para evitar CORS con R2 u otros orígenes externos
     const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(resolved)}`
 
-    fetch(proxyUrl)
+    // Cache hit: mostrar de inmediato sin red
+    if (glbCache.has(proxyUrl)) {
+      setBlobUrl(glbCache.get(proxyUrl)!)
+      return
+    }
+
+    // Cache miss: descargar, guardar en cache y mostrar
+    setBlobUrl(null)
+    const controller = new AbortController()
+
+    fetch(proxyUrl, { signal: controller.signal })
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
-      .then(blob => loadBlob(blob))
+      .then(blob => {
+        if (controller.signal.aborted) return
+        const objUrl = URL.createObjectURL(blob)
+        glbCache.set(proxyUrl, objUrl) // propiedad del cache, no se revoca
+        setBlobUrl(objUrl)
+        setError(null)
+      })
       .catch(e => {
+        if (e.name === 'AbortError') return
         console.error('[ModelViewer] fetch error:', e, 'url:', resolved)
         setError(`${e.message ?? 'Error'} — ${resolved}`)
       })
 
-    return () => {
-      if (currentBlob.current) { URL.revokeObjectURL(currentBlob.current); currentBlob.current = null }
-    }
+    // Solo abortar la request; el blob URL queda en cache si llegó a crearse
+    return () => { controller.abort() }
   }, [url])
+
+  // Revocar blob local al desmontar (solo drag & drop)
+  useEffect(() => {
+    return () => {
+      if (localBlob.current) { URL.revokeObjectURL(localBlob.current); localBlob.current = null }
+    }
+  }, [])
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault(); setDragging(false)
     const file = e.dataTransfer.files[0]
-    if (file) loadBlob(file)
+    if (file) loadLocalBlob(file)
   }
 
   const base: React.CSSProperties = {
