@@ -20,7 +20,7 @@ const STEP_COLORS = [
 
 const STATUS_COLOR: Record<string, string> = {
   draft:     'var(--text-3)',
-  active:    'var(--cat-design)',
+  active:    'var(--cat-level)',   /* teal — live/running state según brand */
   completed: 'var(--cat-code)',
 }
 
@@ -149,9 +149,9 @@ export default function ProjectCard({ project }: { project: Project }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           {project.genre && (
             <span style={{
-              fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-design)',
-              background: 'color-mix(in srgb, var(--cat-design) 10%, var(--bg-1))',
-              border: '1px solid color-mix(in srgb, var(--cat-design) 25%, transparent)',
+              fontSize: 10, fontFamily: 'monospace', color: 'var(--action)',
+              background: 'color-mix(in oklch, var(--action) 10%, var(--bg-1))',
+              border: '1px solid color-mix(in oklch, var(--action) 25%, transparent)',
               padding: '2px 8px', borderRadius: 99,
             }}>
               {project.genre}

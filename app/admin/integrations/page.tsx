@@ -191,8 +191,8 @@ function InjectConfigPicker({ nodes, value, onChange, undetected }: {
       {undetected.map(point => {
         const selectedNode = nodes.find(n => n.id === value[point]?.node)
         return (
-          <div key={point} style={{ background: 'color-mix(in srgb, var(--cat-output) 8%, var(--bg-1))', borderRadius: 6, padding: '10px 12px' }}>
-            <label style={{ ...labelStyle, color: 'var(--cat-output)' }}>{point} — not detected, select manually</label>
+          <div key={point} style={{ background: 'color-mix(in oklch, var(--state-warning) 8%, var(--bg-1))', borderRadius: 6, padding: '10px 12px' }}>
+            <label style={{ ...labelStyle, color: 'var(--state-warning)' }}>{point} — not detected, select manually</label>
             <div style={{ display: 'flex', gap: 6 }}>
               <div style={{ flex: 3 }}>
                 <select style={{ ...selectStyle, fontSize: 11 }} value={value[point]?.node || ''} onChange={e => setPoint(point, 'node', e.target.value)}>
@@ -269,7 +269,7 @@ function ExtraInjectEditor({ nodes, inject, onChange }: {
         <label style={labelStyle}>Extra injection points</label>
         <button type="button" onClick={addPoint} style={{
           fontSize: 10, fontFamily: 'monospace', padding: '3px 10px', borderRadius: 5, cursor: 'pointer',
-          border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--cat-code)',
+          border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--action)',
         }}>+ Add point</button>
       </div>
 
@@ -301,7 +301,7 @@ function ExtraInjectEditor({ nodes, inject, onChange }: {
                   </select>
                   <button type="button" onClick={() => removePoint(key)} style={{
                     padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer', flexShrink: 0,
-                    border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--cat-output)',
+                    border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--state-error)',
                   }}>✕</button>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
@@ -544,7 +544,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
 
           {/* Error + JSON */}
           {error && (
-            <div style={{ flex: '1 1 100%', fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
+            <div style={{ flex: '1 1 100%', fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
           )}
           {showJson && preparedJson && (
             <div style={{ flex: '1 1 100%' }}>
@@ -594,7 +594,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#0d0d0d' }}>
             <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
               <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Result</span>
-              {result && glbUrls.length === 0 && <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>Open full size ↗</a>}
+              {result && glbUrls.length === 0 && <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--action)' }}>Open full size ↗</a>}
               {!result && glbUrls.length === 0 && !running && <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-4)' }}>drag a .glb to load locally</span>}
             </div>
 
@@ -605,10 +605,10 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
                     <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', animation: 'item-pulse 1.6s ease-in-out infinite' }}>
                       {fakeProgress < 30 ? 'Sending to ComfyUI…' : fakeProgress < 65 ? 'Generating…' : 'Almost ready…'}
                     </span>
-                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-audio)' }}>{Math.round(fakeProgress)}%</span>
+                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--action)' }}>{Math.round(fakeProgress)}%</span>
                   </div>
                   <div style={{ width: '100%', height: 3, background: 'var(--bg-3)', borderRadius: 99, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, var(--cat-audio), var(--cat-design))', width: `${fakeProgress}%`, transition: 'width 0.4s ease' }} />
+                    <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, var(--action), var(--action-hover))', width: `${fakeProgress}%`, transition: 'width 0.4s ease' }} />
                   </div>
                 </div>
               ) : result && glbUrls.length === 0 ? (
@@ -621,7 +621,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
             {glbUrls.length > 0 && !running && (
               <div style={{ padding: '10px 16px', borderTop: '1px solid var(--line-2)', display: 'flex', gap: 16, flexWrap: 'wrap', flexShrink: 0 }}>
                 {glbUrls.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-asset)' }}>
+                  <a key={i} href={url} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--action)' }}>
                     ↓ model_{i + 1}.glb
                   </a>
                 ))}
@@ -704,14 +704,14 @@ function ImageTester({ model, onClose }: { model: string; onClose: () => void })
         )}
 
         {error && (
-          <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
+          <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
         )}
 
         {result && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓ Generated</div>
+            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--state-success)' }}>✓ Generated</div>
             <img src={result} alt="result" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line-2)', display: 'block' }} />
-            <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>Open full size ↗</a>
+            <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--action)' }}>Open full size ↗</a>
           </div>
         )}
 
@@ -824,7 +824,7 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
             ))}
           </select>
           {workflows.length === 0 && (
-            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-output)', marginTop: 4 }}>
+            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--state-warning)', marginTop: 4 }}>
               No workflows yet. Create one in the Workflows tab.
             </div>
           )}
@@ -844,9 +844,9 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
           <label style={labelStyle}>Preview images</label>
           <button type="button" onClick={() => setImgEnabled(v => !v)} style={{
             padding: '3px 10px', borderRadius: 5, fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
-            border: `1px solid ${imgEnabled ? 'var(--cat-code)' : 'var(--line-2)'}`,
-            background: imgEnabled ? 'color-mix(in srgb, var(--cat-code) 15%, var(--bg-1))' : 'transparent',
-            color: imgEnabled ? 'var(--cat-code)' : 'var(--text-3)',
+            border: `1px solid ${imgEnabled ? 'var(--action)' : 'var(--line-2)'}`,
+            background: imgEnabled ? 'color-mix(in oklch, var(--action) 15%, var(--bg-1))' : 'transparent',
+            color: imgEnabled ? 'var(--action)' : 'var(--text-3)',
           }}>{imgEnabled ? 'enabled' : 'disabled'}</button>
         </div>
 
@@ -875,7 +875,7 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
                 {imgModel && (
                   <button type="button" onClick={() => setImageTesting(true)} style={{
                     alignSelf: 'flex-start', padding: '5px 12px', borderRadius: 5, fontSize: 11, fontFamily: 'monospace', cursor: 'pointer',
-                    border: '1px solid var(--cat-gate)', background: 'color-mix(in srgb, var(--cat-gate) 10%, var(--bg-1))', color: 'var(--cat-gate)',
+                    border: '1px solid var(--action)', background: 'color-mix(in oklch, var(--action) 10%, var(--bg-1))', color: 'var(--action)',
                   }}>
                     ▶ Test image
                   </button>
@@ -905,8 +905,8 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
         )}
       </div>
 
-      {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
-      {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-code)', padding: '4px 0' }}>{success}</div>}
+      {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
+      {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-success)', padding: '4px 0' }}>{success}</div>}
 
       <button type="submit" disabled={saving} style={btnStyle(!saving, true)}>
         {saving ? 'Saving...' : 'Save changes'}
@@ -1025,10 +1025,10 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
           { label: 'Refinement workflow', value: refinementCapable, set: setRefinementCapable, hint: 'Appears in the image refinement tool' },
           { label: 'Supports mask',       value: maskCapable,       set: setMaskCapable,       hint: 'Enables the mask brush when this workflow is selected' },
         ] as const).map(({ label, value, set, hint }) => (
-          <div key={label} style={{ flex: 1, background: value ? 'color-mix(in oklch, var(--cat-asset) 10%, var(--bg-2))' : 'var(--bg-2)', border: `1px solid ${value ? 'color-mix(in oklch, var(--cat-asset) 35%, transparent)' : 'var(--line-2)'}`, borderRadius: 7, padding: '8px 12px', cursor: 'pointer', transition: 'all 120ms' }}
+          <div key={label} style={{ flex: 1, background: value ? 'color-mix(in oklch, var(--action) 10%, var(--bg-2))' : 'var(--bg-2)', border: `1px solid ${value ? 'color-mix(in oklch, var(--action) 35%, transparent)' : 'var(--line-2)'}`, borderRadius: 7, padding: '8px 12px', cursor: 'pointer', transition: 'all 120ms' }}
             onClick={() => set(v => !v)}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
-              <div style={{ width: 14, height: 14, borderRadius: 3, background: value ? 'var(--cat-asset)' : 'var(--bg-3)', border: `1px solid ${value ? 'var(--cat-asset)' : 'var(--line-2)'}`, display: 'grid', placeItems: 'center', fontSize: 9, color: '#0a0a0c', fontWeight: 700, flexShrink: 0 }}>
+              <div style={{ width: 14, height: 14, borderRadius: 3, background: value ? 'var(--action)' : 'var(--bg-3)', border: `1px solid ${value ? 'var(--action)' : 'var(--line-2)'}`, display: 'grid', placeItems: 'center', fontSize: 9, color: 'var(--action-fg)', fontWeight: 700, flexShrink: 0 }}>
                 {value ? '✓' : ''}
               </div>
               <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, color: value ? 'var(--text-0)' : 'var(--text-3)' }}>{label}</span>
@@ -1052,7 +1052,7 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
           placeholder="Paste ComfyUI workflow JSON here..."
           spellCheck={false}
         />
-        {jsonError && <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-output)', marginTop: 3 }}>{jsonError}</div>}
+        {jsonError && <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--state-error)', marginTop: 3 }}>{jsonError}</div>}
       </div>
 
       {/* Injection config */}
@@ -1072,7 +1072,7 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
                       <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', width: 48, flexShrink: 0 }}>{point}</span>
                       {ok ? (
                         <>
-                          <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓</span>
+                          <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--state-success)' }}>✓</span>
                           <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-2)', flex: 1 }}>
                             {cfgNode?.title || cfg!.node} → <strong>{cfg!.field}</strong>
                           </span>
@@ -1104,7 +1104,7 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
                           </select>
                         </div>
                         {ok && (
-                          <button type="button" onClick={() => { setInject(prev => { const next = { ...prev }; delete next[point]; return next }); setExpandedPoint(null) }} style={{ fontSize: 10, fontFamily: 'monospace', padding: '0 8px', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--cat-output)' }}>clear</button>
+                          <button type="button" onClick={() => { setInject(prev => { const next = { ...prev }; delete next[point]; return next }); setExpandedPoint(null) }} style={{ fontSize: 10, fontFamily: 'monospace', padding: '0 8px', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--state-error)' }}>clear</button>
                         )}
                       </div>
                     )}
@@ -1119,8 +1119,8 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
         </div>
       )}
 
-      {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
-      {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-code)', padding: '4px 0' }}>{success}</div>}
+      {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
+      {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-success)', padding: '4px 0' }}>{success}</div>}
 
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="submit" disabled={saving || !!jsonError} style={btnStyle(!saving && !jsonError, true)}>
@@ -1132,7 +1132,7 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
           </button>
         )}
         {workflow && onDeleted && (
-          <button type="button" onClick={handleDelete} style={{ ...btnStyle(), color: 'var(--cat-output)' }}>Delete</button>
+          <button type="button" onClick={handleDelete} style={{ ...btnStyle(), color: 'var(--state-error)' }}>Delete</button>
         )}
       </div>
 
@@ -1196,7 +1196,7 @@ export default function IntegrationsPage() {
         {([['steps', 'Step Configs'], ['workflows', 'ComfyUI Workflows']] as [Tab, string][]).map(([t, l]) => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '10px 16px', background: 'none', border: 'none',
-            borderBottom: `2px solid ${tab === t ? 'var(--cat-code)' : 'transparent'}`,
+            borderBottom: `2px solid ${tab === t ? 'var(--action)' : 'transparent'}`,
             color: tab === t ? 'var(--text-0)' : 'var(--text-3)',
             fontSize: 11, fontFamily: 'monospace', fontWeight: tab === t ? 600 : 400,
             cursor: 'pointer', transition: 'color 120ms', marginBottom: -1,
@@ -1257,7 +1257,7 @@ export default function IntegrationsPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-0)', flex: 1 }}>{w.name}</span>
                       {w.refinement_capable && (
-                        <span style={{ fontSize: 8, fontFamily: 'monospace', padding: '1px 5px', borderRadius: 99, background: 'color-mix(in oklch, var(--cat-asset) 15%, var(--bg-1))', color: 'var(--cat-asset)', flexShrink: 0 }}>
+                        <span style={{ fontSize: 8, fontFamily: 'monospace', padding: '1px 5px', borderRadius: 99, background: 'color-mix(in oklch, var(--action) 15%, var(--bg-1))', color: 'var(--action)', flexShrink: 0 }}>
                           {w.mask_capable ? 'refine+mask' : 'refine'}
                         </span>
                       )}

@@ -210,7 +210,7 @@ export default function RefinementModal({ imageUrl, imageId, project, storagePat
 
             {/* Error */}
             {error && (
-              <div style={{ ...mono, fontSize: 10, color: 'var(--cat-output)', background: 'color-mix(in oklch, var(--cat-output) 10%, var(--bg-2))', padding: '8px 12px', borderRadius: 6 }}>
+              <div style={{ ...mono, fontSize: 10, color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-2))', padding: '8px 12px', borderRadius: 6 }}>
                 {error}
               </div>
             )}
@@ -341,7 +341,7 @@ export default function RefinementModal({ imageUrl, imageId, project, storagePat
               <div>
                 <div style={{ ...mono, fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Workflow</div>
                 {workflows.length === 0
-                  ? <div style={{ ...mono, fontSize: 10, color: 'var(--cat-output)' }}>No active refinement workflows</div>
+                  ? <div style={{ ...mono, fontSize: 10, color: 'var(--state-warning)' }}>No active refinement workflows</div>
                   : (
                     <select
                       value={selectedWf?.id ?? ''}
@@ -379,7 +379,7 @@ export default function RefinementModal({ imageUrl, imageId, project, storagePat
 
               {/* Error (carga de imagen o workflow) */}
               {error && (
-                <div style={{ ...mono, fontSize: 10, color: 'var(--cat-output)', background: 'color-mix(in oklch, var(--cat-output) 10%, var(--bg-2))', padding: '8px 12px', borderRadius: 6 }}>
+                <div style={{ ...mono, fontSize: 10, color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-2))', padding: '8px 12px', borderRadius: 6 }}>
                   {error}
                 </div>
               )}
@@ -394,7 +394,7 @@ export default function RefinementModal({ imageUrl, imageId, project, storagePat
                     <span style={{ ...mono, fontSize: 10, color: 'var(--cat-asset)' }}>{Math.round(fakeProgress)}%</span>
                   </div>
                   <div style={{ width: '100%', height: 3, background: 'var(--bg-3)', borderRadius: 99, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, var(--cat-asset), var(--cat-code))', width: `${fakeProgress}%`, transition: 'width 0.4s ease' }} />
+                    <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, var(--action), var(--action-hover))', width: `${fakeProgress}%`, transition: 'width 0.4s ease' }} />
                   </div>
                 </div>
               ) : (

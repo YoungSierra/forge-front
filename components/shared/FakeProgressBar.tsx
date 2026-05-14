@@ -6,7 +6,7 @@ interface Props {
   color?: string
 }
 
-export function FakeProgressBar({ active, color = 'var(--cat-asset)' }: Props) {
+export function FakeProgressBar({ active, color = 'var(--action)' }: Props) {
   const [show, setShow]   = useState(false)
   const [done, setDone]   = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)

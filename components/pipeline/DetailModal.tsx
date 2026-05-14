@@ -1212,8 +1212,8 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
             🔒 Node approved — regeneration locked
           </div>
         ) : isApproved && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, padding: '10px 14px', borderRadius: 8, background: 'color-mix(in oklch, var(--cat-code) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--cat-code) 25%, transparent)' }}>
-            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-code)', flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, padding: '10px 14px', borderRadius: 8, background: 'color-mix(in oklch, var(--action) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--action) 25%, transparent)' }}>
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--action)', flex: 1 }}>
               ✓ 2 reference images approved — ready to lock node
             </span>
             <button
@@ -1238,11 +1238,11 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
           /* Approved: locked selection with refine + zoom */
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             {approvedImages.map(img => (
-              <div key={img.id} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', border: '2px solid var(--cat-code)', flexShrink: 0 }}>
+              <div key={img.id} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', border: '2px solid var(--action)', flexShrink: 0 }}>
                 <img src={img.image_url} alt="reference" style={{ width: 200, height: 200, display: 'block', objectFit: 'cover' }} />
-                <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
+                <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--action)', display: 'grid', placeItems: 'center', fontSize: 11, color: 'var(--action-fg)', fontWeight: 700 }}>✓</div>
                 {img.refined_from_id && (
-                  <div style={{ position: 'absolute', top: 6, right: 6, fontSize: 8, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 3, background: 'rgba(0,0,0,0.6)', color: 'var(--cat-asset)' }}>refined</div>
+                  <div style={{ position: 'absolute', top: 6, right: 6, fontSize: 8, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 3, background: 'rgba(0,0,0,0.6)', color: 'var(--action)' }}>refined</div>
                 )}
                 <button
                   onClick={e => { e.stopPropagation(); setRefiningImage({ id: img.id, url: img.image_url }) }}
@@ -1269,9 +1269,9 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               {selectedImages.map(img => (
-                <div key={img.id} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', border: '2px solid var(--cat-code)', flexShrink: 0 }}>
+                <div key={img.id} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', border: '2px solid var(--action)', flexShrink: 0 }}>
                   <img src={img.image_url} alt="reference" style={{ width: 180, height: 180, display: 'block', objectFit: 'cover' }} />
-                  <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
+                  <div style={{ position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--action)', display: 'grid', placeItems: 'center', fontSize: 11, color: 'var(--action-fg)', fontWeight: 700 }}>✓</div>
                   <button
                     onClick={e => { e.stopPropagation(); toggleImage(img.id) }}
                     style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: 4, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 11 }}
@@ -1289,7 +1289,7 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
             </div>
             {!nodeApproved && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: selectedIds.size === 2 ? 'var(--cat-code)' : 'var(--text-3)' }}>
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: selectedIds.size === 2 ? 'var(--action)' : 'var(--text-3)' }}>
                   {selectedIds.size}/2 selected
                 </span>
                 <button
@@ -1378,13 +1378,13 @@ function ImageReferenceDetail({ project, onNodeApproved }: { project: Project; o
                       style={{
                         position: 'relative', cursor: nodeApproved ? 'default' : 'pointer',
                         borderRadius: 6, overflow: 'hidden',
-                        border: `2px solid ${sel ? 'var(--cat-code)' : 'var(--line-2)'}`,
+                        border: `2px solid ${sel ? 'var(--action)' : 'var(--line-2)'}`,
                         transition: 'border-color 100ms',
                       }}
                     >
                       <img src={img.image_url} alt="" style={{ width: '100%', display: 'block', aspectRatio: '1', objectFit: 'cover' }} />
                       {sel && (
-                        <div style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--cat-code)', display: 'grid', placeItems: 'center', fontSize: 11, color: '#0a0a0c', fontWeight: 700 }}>✓</div>
+                        <div style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: '50%', background: 'var(--action)', display: 'grid', placeItems: 'center', fontSize: 11, color: 'var(--action-fg)', fontWeight: 700 }}>✓</div>
                       )}
                       <button
                         onClick={e => { e.stopPropagation(); setZoomedUrl(img.image_url) }}
@@ -1482,7 +1482,7 @@ function ImageReferenceOutput({ project }: { project: Project }) {
         {pool.map(img => (
           <div key={img.id} style={{ position: 'relative', flexShrink: 0 }}>
             <img src={img.image_url} alt="reference"
-              style={{ width: 200, height: 200, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--cat-code)', display: 'block' }} />
+              style={{ width: 200, height: 200, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--action)', display: 'block' }} />
             <button
               onClick={() => setZoomedUrl(img.image_url)}
               style={{ position: 'absolute', bottom: 6, right: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
@@ -1538,13 +1538,13 @@ function CharatersOutput({ project }: { project: Project }) {
         <div key={c.character_key} style={{ borderBottom: '1px solid var(--line-2)', paddingBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>{c.character_name}</span>
-            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 7px', borderRadius: 99, background: 'color-mix(in oklch, var(--cat-code) 12%, var(--bg-1))', border: '1px solid color-mix(in oklch, var(--cat-code) 30%, transparent)', color: 'var(--cat-code)' }}>approved</span>
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 7px', borderRadius: 99, background: 'color-mix(in oklch, var(--action) 12%, var(--bg-1))', border: '1px solid color-mix(in oklch, var(--action) 30%, transparent)', color: 'var(--action)' }}>approved</span>
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
             {c.current_version?.storage_url ? (
               <div style={{ position: 'relative', flexShrink: 0 }}>
                 <img src={c.current_version.storage_url} alt={c.character_name}
-                  style={{ width: 140, height: 140, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--cat-code)', display: 'block' }} />
+                  style={{ width: 140, height: 140, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--action)', display: 'block' }} />
                 <button
                   onClick={() => setZoomedUrl(c.current_version!.storage_url)}
                   style={{ position: 'absolute', bottom: 6, right: 6, width: 24, height: 24, borderRadius: 5, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 13, opacity: 0.7, transition: 'opacity 150ms' }}
@@ -2107,8 +2107,8 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
                   onClick={handleApprove}
                   disabled={approving}
                   style={{
-                    padding: '8px 16px', borderRadius: 6, border: '1px solid var(--cat-code)', cursor: approving ? 'not-allowed' : 'pointer',
-                    background: 'transparent', color: 'var(--cat-code)',
+                    padding: '8px 16px', borderRadius: 6, border: '1px solid var(--action)', cursor: approving ? 'not-allowed' : 'pointer',
+                    background: 'transparent', color: 'var(--action)',
                     fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, opacity: approving ? 0.6 : 1,
                   }}
                 >

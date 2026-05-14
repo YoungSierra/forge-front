@@ -38,6 +38,13 @@
   --action-hover: #f06a18;
   --action-fg:    #1a0d04;
 
+  /* State accents — brand v0.1. Reserved for state, never decorative. */
+  --state-running:  #4fd2c2;   /* teal  — RUNNING / agent active        */
+  --state-success:  #9ee36b;   /* lime  — READY / done / approved        */
+  --state-error:    #f472a8;   /* rose  — ERROR / failed / destructive   */
+  --state-human:    #a78bfa;   /* violet — HUMAN INPUT / pending review  */
+  --state-warning:  #f5c451;   /* amber — WARNING / gate                 */
+
   /* Colores de categoría de nodo — alineados con el brand */
   --cat-design: #a78bfa;   /* violet  — diseño, concepto */
   --cat-asset:  #5aa3ff;   /* blue    — assets, referencias */
@@ -48,6 +55,25 @@
   --cat-gate:   #f5c451;   /* amber   — gates, revisión */
   --cat-test:   #7d8493;   /* gray    — testing */
   --cat-input:  #8ab8d4;   /* blue-muted — inputs */
+
+  /* Data-type palette — Node Kit: sockets & wires, colored by what the port produces */
+  --type-text:    #e8c25a;   /* yellow  — prompts, briefs, JSON config   */
+  --type-image:   #f08a5d;   /* orange  — references, concepts, frames   */
+  --type-3d:      #5fb8ea;   /* cyan    — mesh, geometry, blockout       */
+  --type-uv:      #8de07a;   /* green   — unwrap, baked maps             */
+  --type-texture: #ec7ab4;   /* pink    — PBR sets, materials            */
+  --type-rig:     #ea7676;   /* red     — skeleton, controls, skin       */
+  --type-anim:    #5fdcb8;   /* teal    — clips, blend trees             */
+  --type-audio:   #c089f9;   /* violet  — voice, SFX, music              */
+  --type-code:    #b5b9c4;   /* gray    — scripts, configs, env          */
+  --type-final:   #f5c451;   /* gold    — shipped output                 */
+
+  /* Accent tokens — Node Kit role rail & node-state borders */
+  --accent-blue:   #5aa3ff;  /* agent role rail; selected border  */
+  --accent-teal:   #4fd2c2;  /* running border/led                */
+  --accent-rose:   #f472a8;  /* error border/led                  */
+  --accent-violet: #a78bfa;  /* human-input role rail             */
+  --accent-amber:  #f5c451;  /* gate role rail                    */
 }
 
 /* ─── Light theme ─── */
@@ -70,6 +96,13 @@
   --line-2: rgba(15,17,21,0.12);
 
   /* Ember igual en ambos modos — es el ancla de identidad */
+
+  /* State accents — light mode (darker para AA sobre fondo claro) */
+  --state-running:  #0f9889;
+  --state-success:  #4a8f2e;
+  --state-error:    #c93375;
+  --state-human:    #6e4ad6;
+  --state-warning:  #b07700;
 
   /* Categorías — tonos más oscuros para legibilidad sobre fondos claros */
   --cat-design: #6e4ad6;
@@ -185,8 +218,8 @@ html, body {
 .tb-btn:hover { background: var(--bg-3); color: var(--text-0); border-color: var(--line-2); }
 .tb-btn.primary { background: var(--action); color: var(--action-fg); font-weight: 600; border-color: transparent; }
 .tb-btn.primary:hover { background: var(--action-hover); }
-.tb-btn.danger { color: var(--cat-output); }
-.tb-btn.danger:hover { background: color-mix(in oklch, var(--cat-output) 12%, var(--bg-3)); }
+.tb-btn.danger { color: var(--state-error); }
+.tb-btn.danger:hover { background: color-mix(in oklch, var(--state-error) 12%, var(--bg-3)); }
 .tb-btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
 .tb-divider { width: 1px; height: 18px; background: var(--line); margin: 0 4px; flex-shrink: 0; }
 .tb-spacer { flex: 1; }
@@ -205,7 +238,7 @@ html, body {
   background: var(--cat-gate); box-shadow: 0 0 8px var(--cat-gate);
   animation: ledPulse 0.8s infinite;
 }
-.tb-status-pill.error .dot { background: var(--cat-output); box-shadow: 0 0 6px var(--cat-output); }
+.tb-status-pill.error .dot { background: var(--state-error); box-shadow: 0 0 6px var(--state-error); }
 
 /* ─── Library ─── */
 .forge-library {
@@ -325,27 +358,27 @@ html, body {
   border-color: color-mix(in oklch, var(--node-color) 40%, var(--line-2));
 }
 .forge-node.selected {
-  border-color: var(--node-color);
+  border-color: var(--accent-blue);
   box-shadow:
-    0 0 0 1px var(--node-color),
+    0 0 0 1px var(--accent-blue),
     0 12px 32px rgba(0,0,0,0.5),
-    0 0 28px color-mix(in oklch, var(--node-color) 28%, transparent);
+    0 0 28px color-mix(in oklch, var(--accent-blue) 28%, transparent);
 }
 .forge-node.running {
-  border-color: var(--node-color);
+  border-color: var(--accent-teal);
   animation: nodeBreath 1.2s ease-in-out infinite;
 }
 .forge-node.complete {
   border-color: color-mix(in oklch, var(--node-color) 55%, var(--line-2));
 }
 .forge-node.error {
-  border-color: var(--cat-output);
-  box-shadow: 0 0 0 1px var(--cat-output), 0 0 24px color-mix(in oklch, var(--cat-output) 30%, transparent);
+  border-color: var(--state-error);
+  box-shadow: 0 0 0 1px var(--state-error), 0 0 24px color-mix(in oklch, var(--state-error) 30%, transparent);
 }
 .forge-node.locked { opacity: 0.45; }
 @keyframes nodeBreath {
-  0%, 100% { box-shadow: 0 0 0 1px var(--node-color), 0 0 28px color-mix(in oklch, var(--node-color) 40%, transparent); }
-  50%       { box-shadow: 0 0 0 1px var(--node-color), 0 0 48px color-mix(in oklch, var(--node-color) 65%, transparent); }
+  0%, 100% { box-shadow: 0 0 0 1px var(--accent-teal), 0 0 28px color-mix(in oklch, var(--accent-teal) 40%, transparent); }
+  50%       { box-shadow: 0 0 0 1px var(--accent-teal), 0 0 48px color-mix(in oklch, var(--accent-teal) 65%, transparent); }
 }
 
 .node-header {
@@ -385,9 +418,9 @@ html, body {
   background: var(--text-3); transition: background 200ms, box-shadow 200ms;
   flex-shrink: 0;
 }
-.forge-node.running  .node-led { background: var(--node-color); box-shadow: 0 0 8px var(--node-color); animation: ledPulse 0.8s infinite; }
-.forge-node.complete .node-led { background: var(--node-color); box-shadow: 0 0 6px var(--node-color); }
-.forge-node.error    .node-led { background: var(--cat-output); }
+.forge-node.running  .node-led { background: var(--accent-teal);  box-shadow: 0 0 8px var(--accent-teal);  animation: ledPulse 0.8s infinite; }
+.forge-node.complete .node-led { background: var(--state-success); box-shadow: 0 0 6px var(--state-success); }
+.forge-node.error    .node-led { background: var(--state-error); }
 @keyframes ledPulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
 
 .node-body {
@@ -615,11 +648,11 @@ html, body {
 }
 .insp-action-btn.approve:hover { background: color-mix(in oklch, var(--action) 22%, var(--bg-2)); }
 .insp-action-btn.reject {
-  background: color-mix(in oklch, var(--cat-output) 12%, var(--bg-2));
-  border-color: color-mix(in oklch, var(--cat-output) 40%, transparent);
-  color: var(--cat-output);
+  background: color-mix(in oklch, var(--state-error) 12%, var(--bg-2));
+  border-color: color-mix(in oklch, var(--state-error) 40%, transparent);
+  color: var(--state-error);
 }
-.insp-action-btn.reject:hover { background: color-mix(in oklch, var(--cat-output) 20%, var(--bg-2)); }
+.insp-action-btn.reject:hover { background: color-mix(in oklch, var(--state-error) 20%, var(--bg-2)); }
 .insp-action-btn.view {
   background: var(--bg-2); border-color: var(--line-2); color: var(--text-1);
 }
@@ -692,11 +725,11 @@ html, body {
 
 /* ─── Gate pulse animation ─── */
 @keyframes gatePulse {
-  0%, 100% { box-shadow: 0 0 0 1px var(--cat-gate), 0 0 20px color-mix(in oklch, var(--cat-gate) 35%, transparent); }
-  50%       { box-shadow: 0 0 0 1px var(--cat-gate), 0 0 42px color-mix(in oklch, var(--cat-gate) 60%, transparent); }
+  0%, 100% { box-shadow: 0 0 0 1px var(--state-warning), 0 0 20px color-mix(in oklch, var(--state-warning) 35%, transparent); }
+  50%       { box-shadow: 0 0 0 1px var(--state-warning), 0 0 42px color-mix(in oklch, var(--state-warning) 60%, transparent); }
 }
 .forge-node.gate-pending {
-  border-color: var(--cat-gate);
+  border-color: var(--state-warning);
   animation: gatePulse 2s ease-in-out infinite;
 }
 
@@ -714,17 +747,17 @@ html, body {
   border-color: color-mix(in oklch, var(--node-color) 60%, var(--line)) !important;
 }
 .forge-node.approved .node-led {
-  background: var(--node-color) !important;
-  box-shadow: 0 0 6px var(--node-color) !important;
+  background: var(--state-success) !important;
+  box-shadow: 0 0 6px var(--state-success) !important;
 }
 
 /* ─── Pending review node ─── */
 .forge-node.pending-review {
-  border-color: color-mix(in oklch, var(--cat-gate) 55%, var(--line)) !important;
+  border-color: color-mix(in oklch, var(--state-human) 55%, var(--line)) !important;
 }
 .forge-node.pending-review .node-led {
-  background: var(--cat-gate) !important;
-  box-shadow: 0 0 6px var(--cat-gate) !important;
+  background: var(--state-human) !important;
+  box-shadow: 0 0 6px var(--state-human) !important;
   animation: led-pulse 1.8s ease-in-out infinite;
 }
 @keyframes led-pulse {
@@ -964,9 +997,9 @@ html, body {
 .login-field .pw-toggle:hover { color: var(--text-1); }
 .login-error {
   font-family: var(--font-mono); font-size: 10px;
-  color: var(--cat-output); padding: 7px 10px;
-  background: color-mix(in oklch, var(--cat-output) 8%, var(--bg-1));
-  border: 1px solid color-mix(in oklch, var(--cat-output) 28%, transparent);
+  color: var(--state-error); padding: 7px 10px;
+  background: color-mix(in oklch, var(--state-error) 8%, var(--bg-1));
+  border: 1px solid color-mix(in oklch, var(--state-error) 28%, transparent);
   border-radius: 4px;
 }
 .login-btn {

@@ -291,7 +291,7 @@ export default function ExportModal({ project, nodes, onClose, onRepoSaved }: Pr
           )}
 
           {createError && (
-            <div style={{ ...mono, fontSize: 10, color: 'var(--cat-output)' }}>✕ {createError}</div>
+            <div style={{ ...mono, fontSize: 10, color: 'var(--state-error)' }}>✕ {createError}</div>
           )}
 
           {/* Actualizar token si ya hay repo — solo admin */}
@@ -347,8 +347,8 @@ export default function ExportModal({ project, nodes, onClose, onRepoSaved }: Pr
             >
               {validation === 'validating' ? '⟳ Checking…' : 'Validate access'}
             </button>
-            {validation === 'ok'    && <span style={{ ...mono, color: 'var(--cat-code)' }}>✓ {validMsg || 'Access confirmed'}</span>}
-            {validation === 'error' && <span style={{ ...mono, color: 'var(--cat-output)' }}>✕ {validMsg || 'Access denied'}</span>}
+            {validation === 'ok'    && <span style={{ ...mono, color: 'var(--state-success)' }}>✓ {validMsg || 'Access confirmed'}</span>}
+            {validation === 'error' && <span style={{ ...mono, color: 'var(--state-error)' }}>✕ {validMsg || 'Access denied'}</span>}
           </div>
         </div>
 
@@ -408,7 +408,7 @@ export default function ExportModal({ project, nodes, onClose, onRepoSaved }: Pr
           </div>
         )}
         {exportState === 'error' && (
-          <div style={{ ...mono, padding: '8px 12px', borderRadius: 6, color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-2))' }}>
+          <div style={{ ...mono, padding: '8px 12px', borderRadius: 6, color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-2))' }}>
             ✕ {exportMsg}
           </div>
         )}

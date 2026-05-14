@@ -35,8 +35,8 @@ const CATEGORY_COLOR: Record<string, string> = {
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  approved: 'var(--cat-code)', pending: 'var(--cat-gate)',
-  rejected: 'var(--cat-output)', invalidated: 'var(--text-3)',
+  approved: 'var(--state-success)', pending: 'var(--state-warning)',
+  rejected: 'var(--state-error)', invalidated: 'var(--text-3)',
 }
 
 function isImage(url: string) {

@@ -157,7 +157,7 @@ export default function FeedbackWidget() {
             {sent ? (
               <div style={{ padding: 32, textAlign: 'center' }}>
                 <div style={{ fontSize: 28, marginBottom: 8 }}>✓</div>
-                <div style={{ fontSize: 12, color: 'var(--cat-code)', fontFamily: 'monospace' }}>Feedback sent</div>
+                <div style={{ fontSize: 12, color: 'var(--state-success)', fontFamily: 'monospace' }}>Feedback sent</div>
               </div>
             ) : (
               <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>

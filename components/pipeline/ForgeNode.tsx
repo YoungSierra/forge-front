@@ -21,6 +21,29 @@ export const CAT_VAR: Record<ForgeNodeCategory, string> = {
   input:  'var(--cat-input)',
 }
 
+/* Data-type palette — what each category's output socket produces */
+export const TYPE_VAR: Record<ForgeNodeCategory, string> = {
+  design: 'var(--type-text)',
+  asset:  'var(--type-image)',
+  level:  'var(--type-3d)',
+  code:   'var(--type-code)',
+  audio:  'var(--type-audio)',
+  output: 'var(--type-final)',
+  gate:   'var(--type-text)',
+  test:   'var(--type-code)',
+  input:  'var(--type-text)',
+}
+
+/* Role rail color — 2px left-edge strip indicating the agent role */
+function roleRailColor(category: ForgeNodeCategory): string {
+  switch (category) {
+    case 'gate':   return 'var(--accent-amber)'
+    case 'output': return 'var(--action)'
+    case 'input':  return 'var(--accent-violet)'
+    default:       return 'var(--accent-blue)'
+  }
+}
+
 export interface ForgePort {
   id: string
   label: string
@@ -58,20 +81,20 @@ function NodeStatusBadge({ status, approved, compact }: {
 }) {
   const s = compact ? BADGE_SM : BADGE
   if (approved || status === 'complete') return (
-    <span style={{ ...s, fontWeight: 700, color: 'var(--node-color)', background: 'color-mix(in oklch, var(--node-color) 14%, transparent)', border: '1px solid color-mix(in oklch, var(--node-color) 38%, transparent)' }}>
+    <span style={{ ...s, fontWeight: 700, color: 'var(--state-success)', background: 'color-mix(in oklch, var(--state-success) 14%, transparent)', border: '1px solid color-mix(in oklch, var(--state-success) 38%, transparent)' }}>
       ✓{!compact && ' done'}
     </span>
   )
   if (status === 'pending_review') return (
-    <span style={{ ...s, color: 'var(--cat-gate)', background: 'color-mix(in oklch, var(--cat-gate) 12%, transparent)', border: '1px solid color-mix(in oklch, var(--cat-gate) 35%, transparent)', animation: 'led-pulse 1.8s ease-in-out infinite', display: 'inline-block' }}>
+    <span style={{ ...s, color: 'var(--state-human)', background: 'color-mix(in oklch, var(--state-human) 12%, transparent)', border: '1px solid color-mix(in oklch, var(--state-human) 35%, transparent)', animation: 'led-pulse 1.8s ease-in-out infinite', display: 'inline-block' }}>
       ◈{!compact && ' review'}
     </span>
   )
   if (status === 'running') return (
-    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--node-color)', animation: 'ledPulse 0.8s infinite', lineHeight: 1 }}>⟳</span>
+    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent-teal)', animation: 'ledPulse 0.8s infinite', lineHeight: 1 }}>⟳</span>
   )
   if (status === 'error') return (
-    <span style={{ ...s, fontWeight: 700, color: 'var(--cat-output)', background: 'color-mix(in oklch, var(--cat-output) 12%, transparent)', border: '1px solid color-mix(in oklch, var(--cat-output) 35%, transparent)' }}>
+    <span style={{ ...s, fontWeight: 700, color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 12%, transparent)', border: '1px solid color-mix(in oklch, var(--state-error) 35%, transparent)' }}>
       ✕{!compact && ' error'}
     </span>
   )
@@ -79,7 +102,7 @@ function NodeStatusBadge({ status, approved, compact }: {
     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', lineHeight: 1, userSelect: 'none' }}>⊘</span>
   )
   if (status === 'gate-pending') return (
-    <span style={{ ...s, color: 'var(--cat-gate)', background: 'color-mix(in oklch, var(--cat-gate) 10%, transparent)', border: '1px solid color-mix(in oklch, var(--cat-gate) 28%, transparent)' }}>
+    <span style={{ ...s, color: 'var(--state-warning)', background: 'color-mix(in oklch, var(--state-warning) 10%, transparent)', border: '1px solid color-mix(in oklch, var(--state-warning) 28%, transparent)' }}>
       ◇{!compact && ' gate'}
     </span>
   )
@@ -165,7 +188,8 @@ function Preview({ type, content, color }: { type: PreviewType; content?: string
 }
 
 function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean }) {
-  const color = CAT_VAR[data.category]
+  const color     = CAT_VAR[data.category]
+  const typeColor = TYPE_VAR[data.category]
 
   const stateClass = [
     'forge-node',
@@ -187,17 +211,24 @@ function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean 
   return (
     <div
       className={stateClass}
-      style={{ '--node-color': color, '--socket-color': color } as React.CSSProperties}
+      style={{ '--node-color': color, '--socket-color': typeColor } as React.CSSProperties}
     >
+      {/* Role rail — 2px left edge strip colored by agent role */}
+      <div style={{
+        position: 'absolute', left: 0, top: 0, bottom: 0, width: 2,
+        background: roleRailColor(data.category),
+        borderRadius: '7px 0 0 7px',
+        zIndex: 1, pointerEvents: 'none',
+      }} />
       {/* Stale warning overlay */}
       {data.stale && (
         <div style={{
           position: 'absolute', top: 4, right: 4, zIndex: 10,
-          background: 'color-mix(in oklch, var(--cat-gate) 15%, var(--bg-2))',
-          border: '1px solid color-mix(in oklch, var(--cat-gate) 45%, transparent)',
+          background: 'color-mix(in oklch, var(--state-warning) 15%, var(--bg-2))',
+          border: '1px solid color-mix(in oklch, var(--state-warning) 45%, transparent)',
           borderRadius: 4, padding: '1px 5px',
           fontFamily: 'var(--font-mono)', fontSize: 8,
-          color: 'var(--cat-gate)', pointerEvents: 'none',
+          color: 'var(--state-warning)', pointerEvents: 'none',
         }}>⚠ stale</div>
       )}
 
@@ -254,7 +285,7 @@ function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean 
               <Handle
                 type="target"
                 position={Position.Left}
-                style={{ '--socket-color': color } as React.CSSProperties}
+                style={{ '--socket-color': typeColor } as React.CSSProperties}
               />
             )}
             <span className="port-label">{data.inputs?.[0]?.label}</span>
@@ -265,7 +296,7 @@ function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean 
               <Handle
                 type="source"
                 position={Position.Right}
-                style={{ '--socket-color': color } as React.CSSProperties}
+                style={{ '--socket-color': typeColor } as React.CSSProperties}
               />
             )}
           </div>
@@ -277,14 +308,14 @@ function ForgeNode({ data, selected }: { data: ForgeNodeData; selected: boolean 
         <Handle
           type="target"
           position={Position.Left}
-          style={{ '--socket-color': color } as React.CSSProperties}
+          style={{ '--socket-color': typeColor } as React.CSSProperties}
         />
       )}
       {data.compact && (data.outputs ?? []).length > 0 && (
         <Handle
           type="source"
           position={Position.Right}
-          style={{ '--socket-color': color } as React.CSSProperties}
+          style={{ '--socket-color': typeColor } as React.CSSProperties}
         />
       )}
     </div>

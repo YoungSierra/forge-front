@@ -161,7 +161,7 @@ export default function UserMenu() {
             <button
               onClick={handleSignOut}
               style={{ ...menuItemStyle, borderBottom: 'none' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in oklch, var(--cat-output) 10%, var(--bg-3))'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--cat-output)' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in oklch, var(--state-error) 10%, var(--bg-3))'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--state-error)' }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-2)' }}
             >
               <span style={{ fontSize: 13, lineHeight: 1 }}>→</span>
@@ -188,7 +188,7 @@ export default function UserMenu() {
 
             <form onSubmit={handleProfileSave} style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
               {pwSuccess ? (
-                <div style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--cat-code)', padding: '10px', textAlign: 'center' }}>
+                <div style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--state-success)', padding: '10px', textAlign: 'center' }}>
                   ✓ Profile updated
                 </div>
               ) : (
@@ -208,7 +208,7 @@ export default function UserMenu() {
                     </div>
                   )}
                   {pwError && (
-                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>
+                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>
                       {pwError}
                     </div>
                   )}

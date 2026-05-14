@@ -197,11 +197,11 @@ export default function FeedbackAdminPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 9, fontFamily: 'monospace', color: CAT_COLOR[item.category], background: `color-mix(in srgb, ${CAT_COLOR[item.category]} 12%, transparent)`, padding: '1px 6px', borderRadius: 99 }}>{item.category}</span>
                 <span style={{ fontSize: 9, fontFamily: 'monospace', color: SEV_COLOR[item.severity], background: 'var(--bg-3)', padding: '1px 6px', borderRadius: 99 }}>{item.severity}</span>
-                <span style={{ fontSize: 9, fontFamily: 'monospace', color: item.status === 'resolved' ? 'var(--cat-code)' : item.status === 'reviewed' ? 'var(--cat-audio)' : 'var(--text-3)', background: 'var(--bg-3)', padding: '1px 6px', borderRadius: 99 }}>{STATUS_LABEL[item.status]}</span>
+                <span style={{ fontSize: 9, fontFamily: 'monospace', color: item.status === 'resolved' ? 'var(--state-success)' : item.status === 'reviewed' ? 'var(--state-running)' : 'var(--text-3)', background: 'var(--bg-3)', padding: '1px 6px', borderRadius: 99 }}>{STATUS_LABEL[item.status]}</span>
                 <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                   <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--text-3)' }}>{formatDateTime(item.created_at)}</span>
                   {item.status === 'resolved' && item.resolved_at && (
-                    <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--cat-code)' }}>✓ {formatDateTime(item.resolved_at)}</span>
+                    <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--state-success)' }}>✓ {formatDateTime(item.resolved_at)}</span>
                   )}
                 </div>
               </div>
@@ -249,10 +249,10 @@ export default function FeedbackAdminPage() {
                 {selected.url_context && <span>URL: {selected.url_context}</span>}
                 <span>Created: {formatDateTime(selected.created_at)}</span>
                 {selected.status === 'resolved' && selected.resolved_at && (
-                  <span style={{ color: 'var(--cat-code)' }}>Resolved: {formatDateTime(selected.resolved_at)}</span>
+                  <span style={{ color: 'var(--state-success)' }}>Resolved: {formatDateTime(selected.resolved_at)}</span>
                 )}
                 {selected.status === 'resolved' && selected.resolver && (
-                  <span style={{ color: 'var(--cat-code)' }}>Resolved by: {selected.resolver.display_name}</span>
+                  <span style={{ color: 'var(--state-success)' }}>Resolved by: {selected.resolver.display_name}</span>
                 )}
               </div>
 
@@ -291,7 +291,7 @@ export default function FeedbackAdminPage() {
 
               {selected.resolution_note && selected.status === 'resolved' && (
                 <div style={{ marginTop: 16, padding: '10px 12px', background: 'color-mix(in srgb, var(--cat-code) 8%, var(--bg-1))', border: '1px solid color-mix(in srgb, var(--cat-code) 20%, transparent)', borderRadius: 6 }}>
-                  <div style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--cat-code)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Resolution</div>
+                  <div style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--state-success)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Resolution</div>
                   <p style={{ fontSize: 11, color: 'var(--text-1)', margin: 0, lineHeight: 1.5 }}>{selected.resolution_note}</p>
                 </div>
               )}

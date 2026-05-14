@@ -85,7 +85,7 @@ export default function ProjectsList() {
   if (error) {
     return (
       <div style={{ textAlign: 'center', padding: '60px 0' }}>
-        <p style={{ fontSize: 12, color: 'var(--cat-output)', fontFamily: 'monospace', marginBottom: 4 }}>Error loading projects</p>
+        <p style={{ fontSize: 12, color: 'var(--state-error)', fontFamily: 'monospace', marginBottom: 4 }}>Error loading projects</p>
         <p style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'monospace' }}>{error}</p>
       </div>
     )

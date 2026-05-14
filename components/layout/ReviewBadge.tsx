@@ -40,14 +40,14 @@ export default function ReviewBadge() {
       <button
         onClick={() => setOpen(p => !p)}
         style={{
-          position: 'relative', background: 'color-mix(in oklch, var(--cat-output) 12%, var(--bg-2))',
-          border: '1px solid color-mix(in oklch, var(--cat-output) 40%, transparent)',
+          position: 'relative', background: 'color-mix(in oklch, var(--state-human) 12%, var(--bg-2))',
+          border: '1px solid color-mix(in oklch, var(--state-human) 40%, transparent)',
           borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
-          fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-output)',
+          fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--state-human)',
           display: 'flex', alignItems: 'center', gap: 6,
         }}
       >
-        <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--cat-output)', display: 'inline-block', animation: 'led-pulse 1.8s ease-in-out infinite' }} />
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--state-human)', display: 'inline-block', animation: 'led-pulse 1.8s ease-in-out infinite' }} />
         {jobs.length} review{jobs.length > 1 ? 's' : ''} pending
       </button>
       {open && (

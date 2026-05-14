@@ -44,14 +44,6 @@ function ForgeEdge({
         strokeLinecap="round"
         style={{ filter: `drop-shadow(0 0 3px ${color})` }}
       />
-      {/* Animated particle on active cables */}
-      {active && (
-        <circle r="3" fill={color} style={{ filter: `drop-shadow(0 0 5px ${color})` }}>
-          <animateMotion dur="1.8s" repeatCount="indefinite">
-            <mpath href={`#${id}`} />
-          </animateMotion>
-        </circle>
-      )}
     </g>
   )
 }

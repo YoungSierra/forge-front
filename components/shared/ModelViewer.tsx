@@ -121,7 +121,7 @@ export default function ModelViewer({ url, style }: Props) {
   if (error) return (
     <div style={base} {...dropProps}>
       <div style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: 11 }}>
-        <div style={{ color: 'var(--cat-output)', marginBottom: 6 }}>⚠ {error}</div>
+        <div style={{ color: 'var(--state-error)', marginBottom: 6 }}>⚠ {error}</div>
         <div style={{ color: 'var(--text-3)' }}>Drop a .glb to preview locally</div>
       </div>
       {overlay}

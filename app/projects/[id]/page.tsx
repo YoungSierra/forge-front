@@ -59,7 +59,7 @@ export default function ProjectPage({ params }: PageProps) {
         position: 'fixed', inset: 0, background: 'var(--bg-0)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10,
       }}>
-        <span style={{ color: 'var(--cat-output)', fontSize: 13 }}>{error ?? 'Project not found'}</span>
+        <span style={{ color: 'var(--state-error)', fontSize: 13 }}>{error ?? 'Project not found'}</span>
         <button
           onClick={() => router.push('/')}
           style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer' }}

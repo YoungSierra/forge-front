@@ -158,8 +158,8 @@ export default function UsersAdminPage() {
                 <input type="text" value={editName} onChange={e => setEditName(e.target.value)} required style={inputStyle} />
               </div>
               <RoleSelector value={editRole} onChange={setEditRole} />
-              {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
-              {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-code)', padding: '6px 8px' }}>{success}</div>}
+              {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
+              {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-success)', padding: '6px 8px' }}>{success}</div>}
               <button type="submit" disabled={saving} style={{ padding: '8px 0', borderRadius: 6, border: 'none', background: 'var(--bg-3)', color: 'var(--text-0)', fontSize: 12, fontFamily: 'monospace', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
                 {saving ? 'Saving...' : 'Save changes'}
               </button>
@@ -178,8 +178,8 @@ export default function UsersAdminPage() {
                 </div>
               ))}
               <RoleSelector value={createRole} onChange={setCreateRole} />
-              {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
-              {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-code)', padding: '6px 8px' }}>{success}</div>}
+              {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
+              {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-success)', padding: '6px 8px' }}>{success}</div>}
               <button type="submit" disabled={saving} style={{ padding: '8px 0', borderRadius: 6, border: 'none', background: 'var(--action)', color: 'var(--action-fg)', fontSize: 12, fontFamily: 'monospace', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
                 {saving ? 'Creating...' : 'Create user'}
               </button>
@@ -195,8 +195,8 @@ export default function UsersAdminPage() {
                 <input type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} required style={inputStyle} />
               </div>
               <RoleSelector value={inviteRole} onChange={setInviteRole} />
-              {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-output)', background: 'color-mix(in srgb, var(--cat-output) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
-              {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--cat-code)', padding: '6px 8px' }}>{success}</div>}
+              {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
+              {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-success)', padding: '6px 8px' }}>{success}</div>}
               <button type="submit" disabled={saving} style={{ padding: '8px 0', borderRadius: 6, border: 'none', background: 'var(--bg-3)', color: 'var(--text-0)', fontSize: 12, fontFamily: 'monospace', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
                 {saving ? 'Sending...' : 'Send invite'}
               </button>

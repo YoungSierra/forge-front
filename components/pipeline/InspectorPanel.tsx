@@ -129,7 +129,7 @@ function ReviewActions({
   if (pendingJob) {
     const rs = sentForReview ? 'pending' : pendingJob.review_status
     const statusText  = rs === 'reviewed' ? '✓ Reviewed — ready to approve' : rs === 'changes_requested' ? '↺ Changes requested by reviewer' : '⏳ Awaiting review…'
-    const statusColor = rs === 'reviewed' ? 'var(--cat-code)' : rs === 'changes_requested' ? 'var(--cat-output)' : 'var(--cat-gate)'
+    const statusColor = rs === 'reviewed' ? 'var(--state-success)' : rs === 'changes_requested' ? 'var(--state-error)' : 'var(--state-warning)'
     const canSendReview = rs === 'pending' || rs === 'changes_requested'
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -413,9 +413,9 @@ function ParamField({ param, value, onChange, conflicted }: {
   onChange: (id: string, v: string | string[]) => void
   conflicted?: boolean
 }) {
-  const conflictBorder = conflicted ? 'color-mix(in oklch, var(--cat-output) 55%, transparent)' : undefined
+  const conflictBorder = conflicted ? 'color-mix(in oklch, var(--state-warning) 55%, transparent)' : undefined
   const labelEl = conflicted
-    ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{param.label} <span style={{ color: 'var(--cat-output)', fontSize: 9 }}>⚠</span></span>
+    ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{param.label} <span style={{ color: 'var(--state-warning)', fontSize: 9 }}>⚠</span></span>
     : param.label
 
   if (param.type === 'multiselect') {
@@ -459,7 +459,7 @@ function ParamConflictBanner({ values }: { values: Record<string, string | strin
   const [open, setOpen] = useState(false)
   if (warnings.length === 0) return null
   const hasHigh = warnings.some(w => w.severity === 'high')
-  const topColor = hasHigh ? 'var(--cat-output)' : 'var(--cat-gate)'
+  const topColor = hasHigh ? 'var(--state-error)' : 'var(--state-warning)'
   return (
     <div style={{ borderRadius: 5, overflow: 'hidden', border: `1px solid color-mix(in oklch, ${topColor} 35%, transparent)` }}>
       <button
@@ -504,7 +504,7 @@ function ParamConflictBanner({ values }: { values: Record<string, string | strin
 
 function ValidationFeedback({ result }: { result: ValidationResult }) {
   const score = result.coherence_score
-  const scoreColor = score >= 60 ? 'var(--cat-code)' : score >= 40 ? 'var(--cat-gate)' : 'var(--cat-output)'
+  const scoreColor = score >= 60 ? 'var(--state-success)' : score >= 40 ? 'var(--state-warning)' : 'var(--state-error)'
   return (
     <div style={{ borderRadius: 6, overflow: 'hidden', border: `1px solid color-mix(in oklch, ${scoreColor} 35%, transparent)` }}>
       <div style={{ background: `color-mix(in oklch, ${scoreColor} 10%, var(--bg-2))`, padding: '7px 10px', display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -815,7 +815,7 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
               )}
               {gdd.development?.out_of_scope && gdd.development.out_of_scope.length > 0 && (
                 <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 14px' }}>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--cat-output)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Out of Scope</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--state-warning)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Out of Scope</div>
                   {gdd.development.out_of_scope.map((f, i) => (
                     <div key={i} style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.7 }}>✕ {f}</div>
                   ))}
@@ -1031,7 +1031,7 @@ function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) 
             <MonoRow k="characters" v={String(gdd.characters?.length ?? 0)} />
           </div>
           <ActionBtn label="◈ Ver GDD completo" onClick={() => setShowGDDPreview(true)} variant="ghost" disabled={approving} />
-          {error && <div style={{ fontSize: 10, color: 'var(--cat-output)', fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>{error}</div>}
+          {error && <div style={{ fontSize: 10, color: 'var(--state-error)', fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>{error}</div>}
           <ActionBtn label={approving ? 'Creating project…' : '✓ Approve & create project'} onClick={handleApprove} variant="approve" disabled={approving} />
           <ActionBtn label="↺ Regenerate" onClick={() => doGenerate(buildFullPrompt())} variant="ghost" disabled={approving} />
           <ActionBtn label="← Edit idea" onClick={() => setPhase('form')} variant="ghost" disabled={approving} />
@@ -1853,7 +1853,7 @@ function ArtDirectionIntakePanel({ project, onRefresh, onLog, onResult, locked, 
               {display.risks?.length > 0 && (
                 <>
                   <Divider />
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--cat-output)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Risks</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--state-warning)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Risks</div>
                   {display.risks.map((r, i) => (
                     <div key={i} style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5 }}>
                       <span style={{ color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 9 }}>[{r.type}] </span>{r.risk}
@@ -2037,7 +2037,7 @@ function VisualGuidePanel({ project, onRefresh, onLog, onResult, locked, nodeCon
               )}
               {display.dont_list?.length > 0 && (
                 <>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--cat-output)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Don't</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--state-warning)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Don't</div>
                   <RuleList rules={display.dont_list} />
                 </>
               )}
@@ -3030,7 +3030,7 @@ function ViewDetailBtn({ onClick }: { onClick: () => void }) {
       }}
       onMouseEnter={e => {
         const b = e.currentTarget as HTMLButtonElement
-        b.style.borderColor = 'var(--node-color, var(--text-3))'
+        b.style.borderColor = 'var(--action)'
         b.style.color = 'var(--text-0)'
       }}
       onMouseLeave={e => {

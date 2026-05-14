@@ -176,7 +176,7 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
           className="tb-btn"
           onClick={onRunPipeline}
           title={`Auto-generate and approve ${idleCount} idle node${idleCount !== 1 ? 's' : ''}`}
-          style={{ color: 'var(--cat-code)', borderColor: 'color-mix(in oklch, var(--cat-code) 35%, transparent)' }}
+          style={{ color: 'var(--action)', borderColor: 'color-mix(in oklch, var(--action) 35%, transparent)' }}
         >
           ▶ Run {idleCount} idle
         </button>
@@ -186,7 +186,7 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
 
       {/* Progreso durante ejecución */}
       {phase === 'running' && runProgress && (
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--action)' }}>
           {runProgress.done}/{runProgress.total} nodes
         </span>
       )}

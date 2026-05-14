@@ -80,10 +80,10 @@ function statusDot(status: ForgeNodeData['status'], approved?: boolean): { char:
   if (approved) return { char: '✓', color: 'var(--cat-code)' }
   switch (status) {
     case 'complete':        return { char: '✓', color: 'var(--cat-code)' }
-    case 'pending_review':  return { char: '◈', color: 'var(--cat-gate)', pulse: true }
-    case 'running':         return { char: '⟳', color: 'var(--cat-audio)', pulse: true }
-    case 'error':           return { char: '✕', color: 'var(--cat-output)' }
-    case 'gate-pending':    return { char: '◇', color: 'var(--cat-gate)' }
+    case 'pending_review':  return { char: '◈', color: 'var(--state-human)', pulse: true }
+    case 'running':         return { char: '⟳', color: 'var(--state-running)', pulse: true }
+    case 'error':           return { char: '✕', color: 'var(--state-error)' }
+    case 'gate-pending':    return { char: '◇', color: 'var(--state-warning)' }
     case 'idle':            return { char: '●', color: 'var(--cat-design)' }
     case 'locked':
     default:                return { char: '○', color: 'var(--text-3)' }
@@ -237,9 +237,9 @@ export default function LibraryPanel({ nodes, selectedNodeId, onSelect, onFocus,
                   width: '100%', padding: '7px 0', borderRadius: 6,
                   fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600,
                   cursor: hasApprovedNodes ? 'pointer' : 'not-allowed',
-                  border: `1px solid ${hasApprovedNodes ? 'var(--cat-code)' : 'var(--line-2)'}`,
-                  background: hasApprovedNodes ? 'color-mix(in oklch, var(--cat-code) 10%, var(--bg-2))' : 'transparent',
-                  color: hasApprovedNodes ? 'var(--cat-code)' : 'var(--text-3)',
+                  border: `1px solid ${hasApprovedNodes ? 'var(--action)' : 'var(--line-2)'}`,
+                  background: hasApprovedNodes ? 'color-mix(in oklch, var(--action) 10%, var(--bg-2))' : 'transparent',
+                  color: hasApprovedNodes ? 'var(--action)' : 'var(--text-3)',
                   transition: 'all 0.15s',
                   letterSpacing: '0.06em', textTransform: 'uppercase',
                 }}

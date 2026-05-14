@@ -123,9 +123,9 @@ export default function NewProjectPage() {
     <div style={{
       margin: '0 auto 20px', maxWidth: 680,
       padding: '8px 12px', borderRadius: 5,
-      background: 'color-mix(in srgb, var(--cat-output) 8%, var(--bg-1))',
-      border: '1px solid color-mix(in srgb, var(--cat-output) 25%, transparent)',
-      fontSize: 12, color: 'var(--cat-output)', fontFamily: 'monospace',
+      background: 'color-mix(in oklch, var(--state-error) 8%, var(--bg-1))',
+      border: '1px solid color-mix(in oklch, var(--state-error) 25%, transparent)',
+      fontSize: 12, color: 'var(--state-error)', fontFamily: 'monospace',
     }}>{error}</div>
   ) : null
 

@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import ForgeNode, { CAT_VAR, type ForgeNodeData, type ForgeNodeCategory } from './ForgeNode'
+import ForgeNode, { CAT_VAR, TYPE_VAR, type ForgeNodeData, type ForgeNodeCategory } from './ForgeNode'
 import ForgeGroupNode, { type ForgeGroupNodeData } from './ForgeGroupNode'
 import ForgeEdge from './ForgeEdge'
 import LibraryPanel from './LibraryPanel'
@@ -114,11 +114,12 @@ function hydrateNodes(nodes: Node[], project: Project | null, edges: Edge[] = []
 }
 
 function fe(id: string, src: string, tgt: string, cat: ForgeNodeCategory): Edge {
+  const color = TYPE_VAR[cat]
   return {
     id, source: src, target: tgt,
     type: 'forgeEdge',
-    data: { color: CAT_VAR[cat], active: false },
-    style: { stroke: CAT_VAR[cat] },
+    data: { color, active: false },
+    style: { stroke: color },
   }
 }
 

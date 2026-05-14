@@ -18,8 +18,8 @@ interface Props {
 
 const STATUS_COLOR: Record<string, string> = {
   empty:     'var(--text-3)',
-  generated: 'var(--cat-asset)',
-  approved:  'var(--cat-code)',
+  generated: 'var(--action)',
+  approved:  'var(--action)',
 }
 
 export default function ModelingCharactersModal({ project, onClose, onApproved }: Props) {
@@ -116,7 +116,7 @@ export default function ModelingCharactersModal({ project, onClose, onApproved }
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Modeling</div>
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)' }}>
               Character 3D Models
-              {nodeApproved && <span style={{ marginLeft: 10, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-code)' }}>✓ Node approved</span>}
+              {nodeApproved && <span style={{ marginLeft: 10, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-success)' }}>✓ Node approved</span>}
             </div>
           </div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>
@@ -152,8 +152,8 @@ export default function ModelingCharactersModal({ project, onClose, onApproved }
                     onClick={() => { setSelected(c.character_key); setFreshGlb(null); setError(null) }}
                     style={{
                       flexShrink: 0, width: 96, cursor: 'pointer', borderRadius: 8,
-                      border: `1px solid ${isSelected ? 'var(--cat-asset)' : 'var(--line-2)'}`,
-                      background: isSelected ? 'color-mix(in oklch, var(--cat-asset) 10%, var(--bg-2))' : 'var(--bg-2)',
+                      border: `1px solid ${isSelected ? 'var(--action)' : 'var(--line-2)'}`,
+                      background: isSelected ? 'color-mix(in oklch, var(--action) 10%, var(--bg-2))' : 'var(--bg-2)',
                       overflow: 'hidden', transition: 'all 120ms',
                     }}
                   >
@@ -227,7 +227,7 @@ export default function ModelingCharactersModal({ project, onClose, onApproved }
                         <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
                           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>Generating 3D model…</div>
                           <div style={{ width: '60%', height: 4, background: 'var(--bg-3)', borderRadius: 99, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${fakeProgress}%`, background: 'var(--cat-asset)', borderRadius: 99, transition: 'width 280ms ease' }} />
+                            <div style={{ height: '100%', width: `${fakeProgress}%`, background: 'var(--action)', borderRadius: 99, transition: 'width 280ms ease' }} />
                           </div>
                           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)' }}>{Math.round(fakeProgress)}%</div>
                         </div>
@@ -255,8 +255,8 @@ export default function ModelingCharactersModal({ project, onClose, onApproved }
                             style={{
                               width: '100%', padding: '9px 0', borderRadius: 6, border: 'none',
                               cursor: (generating || approving) ? 'not-allowed' : 'pointer',
-                              background: generating ? 'var(--bg-3)' : 'var(--cat-asset)',
-                              color: generating ? 'var(--text-3)' : '#0a0a0c',
+                              background: generating ? 'var(--bg-3)' : 'var(--action)',
+                              color: generating ? 'var(--text-3)' : 'var(--action-fg)',
                               fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
                               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                               opacity: (generating || approving) ? 0.7 : 1, transition: 'all 120ms',
@@ -275,9 +275,9 @@ export default function ModelingCharactersModal({ project, onClose, onApproved }
                               disabled={approving || generating}
                               style={{
                                 width: '100%', padding: '8px 0', borderRadius: 6,
-                                border: '1px solid var(--cat-code)',
+                                border: '1px solid var(--action)',
                                 cursor: (approving || generating) ? 'not-allowed' : 'pointer',
-                                background: 'transparent', color: 'var(--cat-code)',
+                                background: 'transparent', color: 'var(--action)',
                                 fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
                                 opacity: (approving || generating) ? 0.6 : 1, transition: 'all 120ms',
                               }}
@@ -287,7 +287,7 @@ export default function ModelingCharactersModal({ project, onClose, onApproved }
                           )}
 
                           {cur?.status_3d === 'approved' && (
-                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center', padding: '6px 0' }}>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--state-success)', textAlign: 'center', padding: '6px 0' }}>
                               ✓ Model approved
                             </div>
                           )}
@@ -301,7 +301,7 @@ export default function ModelingCharactersModal({ project, onClose, onApproved }
               {/* Approve node bar */}
               {allApproved && !nodeApproved && (
                 <div style={{ flexShrink: 0, borderTop: '1px solid var(--line)', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--cat-code)' }}>
+                  <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--state-success)' }}>
                     All character models approved
                   </span>
                   <button

@@ -127,9 +127,9 @@ function ParamField({ param, value, onChange, conflicted }: {
   param: GDDParam; value: string | string[]
   onChange: (id: string, v: string | string[]) => void; conflicted?: boolean
 }) {
-  const borderStyle = conflicted ? { borderColor: 'color-mix(in oklch, var(--cat-output) 55%, transparent)' } : {}
+  const borderStyle = conflicted ? { borderColor: 'color-mix(in oklch, var(--state-warning) 55%, transparent)' } : {}
   const labelEl = conflicted
-    ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{param.label} <span style={{ color: 'var(--cat-output)', fontSize: 9 }}>⚠</span></span>
+    ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{param.label} <span style={{ color: 'var(--state-warning)', fontSize: 9 }}>⚠</span></span>
     : param.label
   if (param.type === 'multiselect') {
     return <Field label={labelEl}><ChipGroup param={param} value={value as string[]} onChange={v => onChange(param.id, v)} /></Field>
@@ -151,7 +151,7 @@ function ConflictBanner({ values }: { values: Record<string, string | string[]> 
   const [open, setOpen] = useState(false)
   if (warnings.length === 0) return null
   const hasHigh = warnings.some(w => w.severity === 'high')
-  const color = hasHigh ? 'var(--cat-output)' : 'var(--cat-gate)'
+  const color = hasHigh ? 'var(--state-error)' : 'var(--state-warning)'
   return (
     <div style={{ borderRadius: 5, overflow: 'hidden', border: `1px solid color-mix(in oklch, ${color} 35%, transparent)` }}>
       <button type="button" onClick={() => setOpen(p => !p)} style={{ width: '100%', background: `color-mix(in oklch, ${color} 10%, var(--bg-2))`, border: 'none', cursor: 'pointer', padding: '7px 10px', display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -163,7 +163,7 @@ function ConflictBanner({ values }: { values: Record<string, string | string[]> 
         <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6, background: 'var(--bg-2)' }}>
           {warnings.map(w => (
             <div key={w.id} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', lineHeight: 1.5 }}>
-              <span style={{ color: w.severity === 'high' ? 'var(--cat-output)' : 'var(--cat-gate)', marginRight: 6 }}>
+              <span style={{ color: w.severity === 'high' ? 'var(--state-error)' : 'var(--state-warning)', marginRight: 6 }}>
                 {w.severity === 'high' ? '⚠' : '⚡'}
               </span>
               {w.message}
@@ -177,9 +177,9 @@ function ConflictBanner({ values }: { values: Record<string, string | string[]> 
 
 function ValidationFeedback({ result }: { result: ValidationResult }) {
   return (
-    <div style={{ background: 'color-mix(in oklch, var(--cat-output) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--cat-output) 30%, transparent)', borderRadius: 6, padding: '10px 12px' }}>
+    <div style={{ background: 'color-mix(in oklch, var(--state-warning) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--state-warning) 30%, transparent)', borderRadius: 6, padding: '10px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)', fontWeight: 600 }}>Score {result.coherence_score}/100</span>
+        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-warning)', fontWeight: 600 }}>Score {result.coherence_score}/100</span>
         <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>below threshold (60)</span>
       </div>
       {result.issues?.length > 0 && (
@@ -225,7 +225,7 @@ function GenCheckItem({ label, status, detail }: { label: string; status: 'runni
               background: 'var(--cat-design)',
               animation: 'dot-ping 1.6s ease-in-out infinite',
             }} />
-          : <span style={{ color: 'var(--cat-code)', fontSize: 13, fontWeight: 700 }}>✓</span>
+          : <span style={{ color: 'var(--state-success)', fontSize: 13, fontWeight: 700 }}>✓</span>
         }
       </div>
       <style>{`@keyframes dot-ping { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.5);opacity:0.5} }`}</style>
@@ -234,7 +234,7 @@ function GenCheckItem({ label, status, detail }: { label: string; status: 'runni
           {label}
         </span>
         {detail && (
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)' }}>{detail}</span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--state-success)' }}>{detail}</span>
         )}
       </div>
     </div>
@@ -668,10 +668,10 @@ export default function NewProjectModal({
                   const active = phase === s || (s === 'form' && ['validating', 'generating', 'review'].includes(phase))
                   return (
                     <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <div style={{ width: 16, height: 16, borderRadius: '50%', fontSize: 9, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, background: done ? 'var(--cat-code)' : active ? 'var(--cat-design)' : 'var(--bg-3)', color: done || active ? '#0a0a0c' : 'var(--text-3)' }}>
+                      <div style={{ width: 16, height: 16, borderRadius: '50%', fontSize: 9, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, background: done ? 'var(--state-success)' : active ? 'var(--action)' : 'var(--bg-3)', color: done || active ? 'var(--action-fg)' : 'var(--text-3)', opacity: done || active ? 1 : 0.45 }}>
                         {done ? '✓' : i + 1}
                       </div>
-                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: active ? 'var(--text-1)' : done ? 'var(--cat-code)' : 'var(--text-3)' }}>
+                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: active ? 'var(--text-1)' : done ? 'var(--state-success)' : 'var(--text-3)', opacity: done || active ? 1 : 0.45 }}>
                         {s === 'name' ? 'Project' : 'Blueprint'}
                       </span>
                     </div>
@@ -774,7 +774,7 @@ export default function NewProjectModal({
                 </div>
               </div>
 
-              {nameError && <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)' }}>{nameError}</div>}
+              {nameError && <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)' }}>{nameError}</div>}
               <Btn
                 label={nameLoading ? 'Creating…' : 'Create project →'}
                 onClick={handleCreateProject}
@@ -829,7 +829,7 @@ export default function NewProjectModal({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {validationFailure && <ValidationFeedback result={validationFailure} />}
               {error && (
-                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)', background: 'color-mix(in oklch, var(--cat-output) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--cat-output) 25%, transparent)', borderRadius: 4, padding: '8px 10px', lineHeight: 1.5 }}>
+                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--state-error) 25%, transparent)', borderRadius: 4, padding: '8px 10px', lineHeight: 1.5 }}>
                   {error}
                 </div>
               )}
@@ -874,7 +874,7 @@ export default function NewProjectModal({
                 </div>
               )}
               {ideaError && (
-                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)' }}>{ideaError}</div>
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--state-error)' }}>{ideaError}</div>
               )}
               <Btn
                 label={ideaPrompt.trim().length < 10 ? 'Min. 10 characters' : '▶ Validate & generate GDD'}
@@ -938,7 +938,7 @@ export default function NewProjectModal({
                   )
                 })()}
               </div>
-              {error && <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)' }}>{error}</div>}
+              {error && <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)' }}>{error}</div>}
               <Btn label={approving ? 'Saving…' : 'Save & open canvas →'} onClick={handleApprove} accent disabled={approving} />
               <div style={{ display: 'flex', gap: 8 }}>
                 <Btn label="↺ Regenerate" onClick={() => doGenerate(buildFullPrompt())} disabled={approving} small />
