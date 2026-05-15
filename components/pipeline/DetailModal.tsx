@@ -1992,24 +1992,48 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
             {selected.sprite_prompt || '—'}
           </div>
 
-          {/* Reference images */}
-          {refImages.length > 0 && (
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 8 }}>Reference images</div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {refImages.map(img => (
-                  <div key={img.id} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', border: '1px solid var(--line-2)', flexShrink: 0 }}>
-                    <img src={img.image_url} alt="" style={{ width: 90, height: 90, display: 'block', objectFit: 'cover' }} />
-                    <button
-                      onClick={() => setZoomedUrl(img.image_url)}
-                      style={{ position: 'absolute', bottom: 4, right: 4, width: 20, height: 20, borderRadius: 4, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 11, opacity: 0.7, transition: 'opacity 150ms' }}
-                      onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                      onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
-                      title="Zoom"
-                    >⊕</button>
+          {/* Reference images + Approve node (side by side) */}
+          {(refImages.length > 0 || allApproved) && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, marginBottom: 16 }}>
+              {refImages.length > 0 && (
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginBottom: 8 }}>Reference images</div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {refImages.map(img => (
+                      <div key={img.id} style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', border: '1px solid var(--line-2)', flexShrink: 0 }}>
+                        <img src={img.image_url} alt="" style={{ width: 90, height: 90, display: 'block', objectFit: 'cover' }} />
+                        <button
+                          onClick={() => setZoomedUrl(img.image_url)}
+                          style={{ position: 'absolute', bottom: 4, right: 4, width: 20, height: 20, borderRadius: 4, background: 'rgba(0,0,0,0.6)', border: 'none', display: 'grid', placeItems: 'center', cursor: 'pointer', color: '#fff', fontSize: 11, opacity: 0.7, transition: 'opacity 150ms' }}
+                          onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                          onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+                          title="Zoom"
+                        >⊕</button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
+              {allApproved && (
+                <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, paddingTop: refImages.length > 0 ? 18 : 0 }}>
+                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-success)', whiteSpace: 'nowrap' }}>
+                    ✓ All characters approved
+                  </span>
+                  <button
+                    onClick={handleApproveNode}
+                    disabled={approvingNode}
+                    style={{
+                      padding: '8px 16px', borderRadius: 6, border: 'none',
+                      cursor: approvingNode ? 'not-allowed' : 'pointer',
+                      background: 'var(--action)', color: 'var(--action-fg)',
+                      fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      opacity: approvingNode ? 0.6 : 1, whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {approvingNode ? 'Approving…' : '✓ Approve Characters node'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -2135,27 +2159,6 @@ function CharatersDetail({ project, onNodeApproved }: { project: Project; onNode
         </Section>
       )}
 
-      {/* Approve full node */}
-      {allApproved && (
-        <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-success)' }}>
-            All characters approved
-          </span>
-          <button
-            onClick={handleApproveNode}
-            disabled={approvingNode}
-            style={{
-              padding: '8px 20px', borderRadius: 6, border: 'none',
-              cursor: approvingNode ? 'not-allowed' : 'pointer',
-              background: 'var(--action)', color: 'var(--action-fg)',
-              fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              opacity: approvingNode ? 0.6 : 1,
-            }}
-          >
-            {approvingNode ? 'Approving…' : '✓ Approve Characters node'}
-          </button>
-        </div>
-      )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
 
