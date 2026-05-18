@@ -1,7 +1,7 @@
 'use client'
 
-import PipelineCanvas from '@/components/pipeline/PipelineCanvas'
+import ForgePipeline from '@/components/pipeline/ForgePipeline'
 
 export default function NewProjectPage() {
-  return <PipelineCanvas project={null} onRefresh={() => {}} />
+  return <ForgePipeline project={null} onRefresh={() => {}} />
 }

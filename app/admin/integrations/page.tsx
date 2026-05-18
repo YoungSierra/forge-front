@@ -51,20 +51,20 @@ const TYPE_COLOR: Record<string, string> = {
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
 const labelStyle: React.CSSProperties = {
-  fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)',
+  fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)',
   textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 5,
 }
 const inputStyle: React.CSSProperties = {
   width: '100%', background: 'var(--bg-1)', border: '1px solid var(--line-2)',
   borderRadius: 6, padding: '7px 10px', fontSize: 12, color: 'var(--text-0)',
-  outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
+  outline: 'none', boxSizing: 'border-box', fontFamily: 'var(--font-sans)',
 }
-const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer' }
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer', fontFamily: 'var(--font-mono)' }
 const btnStyle = (active = true, accent = false): React.CSSProperties => ({
   padding: '7px 14px', borderRadius: 6, border: 'none', cursor: active ? 'pointer' : 'not-allowed',
   background: accent ? 'var(--action)' : 'var(--bg-3)',
   color: accent ? 'var(--action-fg)' : 'var(--text-0)',
-  fontSize: 11, fontFamily: 'monospace', fontWeight: 600, opacity: active ? 1 : 0.5,
+  fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, opacity: active ? 1 : 0.5,
 })
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -268,13 +268,13 @@ function ExtraInjectEditor({ nodes, inject, onChange }: {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
         <label style={labelStyle}>Extra injection points</label>
         <button type="button" onClick={addPoint} style={{
-          fontSize: 10, fontFamily: 'monospace', padding: '3px 10px', borderRadius: 5, cursor: 'pointer',
+          fontSize: 10, fontFamily: 'var(--font-mono)', padding: '3px 10px', borderRadius: 5, cursor: 'pointer',
           border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--action)',
         }}>+ Add point</button>
       </div>
 
       {keys.length === 0 ? (
-        <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', padding: '8px 0' }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', padding: '8px 0' }}>
           No extra points — use for workflows with String, PrimitiveInt, LoadImage or other custom nodes.
         </div>
       ) : (
@@ -286,7 +286,7 @@ function ExtraInjectEditor({ nodes, inject, onChange }: {
               <div key={key} style={{ background: 'var(--bg-2)', borderRadius: 6, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input
-                    style={{ ...inputStyle, flex: 1, fontSize: 11, fontFamily: 'monospace' }}
+                    style={{ ...inputStyle, flex: 1, fontSize: 11, fontFamily: 'var(--font-mono)' }}
                     value={key}
                     onChange={e => updateKey(key, e.target.value)}
                     onBlur={e => updateKey(key, e.target.value)}
@@ -455,7 +455,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
         <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-0)' }}>Test workflow</div>
-            <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', marginTop: 2 }}>{workflow.name}</div>
+            <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 2 }}>{workflow.name}</div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--text-3)' }}>✕</button>
         </div>
@@ -465,7 +465,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
           {inject.prompt?.node && (
             <div style={{ flex: '2 1 180px' }}>
               <label style={labelStyle}>prompt</label>
-              <textarea style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 58, resize: 'none' }}
+              <textarea style={{ ...inputStyle, fontFamily: 'var(--font-mono)', fontSize: 11, height: 58, resize: 'none' }}
                 value={values['prompt'] ?? ''} onChange={e => set('prompt', e.target.value)} />
             </div>
           )}
@@ -493,7 +493,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
             <div key={key} style={{ flex: pt.type === 'string' ? '1 1 160px' : '0 0 100px' }}>
               <label style={labelStyle}>{key} <span style={{ color: 'var(--cat-code)', textTransform: 'none', letterSpacing: 0 }}>{pt.type}</span></label>
               {pt.type === 'string'
-                ? <textarea style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 58, resize: 'none' }} value={values[key] ?? ''} onChange={e => set(key, e.target.value)} />
+                ? <textarea style={{ ...inputStyle, fontFamily: 'var(--font-mono)', fontSize: 11, height: 58, resize: 'none' }} value={values[key] ?? ''} onChange={e => set(key, e.target.value)} />
                 : <input type={TYPE_INPUT[pt.type] ?? 'text'} style={inputStyle} value={values[key] ?? ''} onChange={e => set(key, e.target.value)} />
               }
             </div>
@@ -504,7 +504,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
             <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={labelStyle}>image <span style={{ color: 'var(--cat-asset)', textTransform: 'none', letterSpacing: 0 }}>— paint the area below</span></label>
               <label style={{ cursor: 'pointer' }}>
-                <span style={{ fontSize: 11, fontFamily: 'monospace', padding: '6px 14px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-1)', whiteSpace: 'nowrap', display: 'inline-block' }}>
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', padding: '6px 14px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-1)', whiteSpace: 'nowrap', display: 'inline-block' }}>
                   {imageFile ? `✓ ${imageFile.name}` : '📁 Choose image…'}
                 </span>
                 <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => setImageFile(e.target.files?.[0] || null)} />
@@ -517,7 +517,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
             <div key={key} style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={labelStyle}>{key} <span style={{ color: 'var(--cat-code)', textTransform: 'none', letterSpacing: 0 }}>image</span></label>
               <label style={{ cursor: 'pointer' }}>
-                <span style={{ fontSize: 11, fontFamily: 'monospace', padding: '6px 14px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-1)', whiteSpace: 'nowrap', display: 'inline-block' }}>
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', padding: '6px 14px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-1)', whiteSpace: 'nowrap', display: 'inline-block' }}>
                   {nonMaskFiles[key] ? `✓ ${nonMaskFiles[key].name}` : '📁 Choose image…'}
                 </span>
                 <input type="file" accept="image/*" style={{ display: 'none' }}
@@ -529,7 +529,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
           {/* Run button — siempre al final */}
           <div style={{ flex: '0 0 auto', marginLeft: 'auto', alignSelf: 'flex-end', display: 'flex', flexDirection: 'column', gap: 6 }}>
             {preparedJson && (
-              <button type="button" onClick={() => setShowJson(v => !v)} style={{ fontSize: 9, fontFamily: 'monospace', padding: '4px 10px', borderRadius: 5, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)', alignSelf: 'flex-start' }}>
+              <button type="button" onClick={() => setShowJson(v => !v)} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '4px 10px', borderRadius: 5, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)', alignSelf: 'flex-start' }}>
                 {showJson ? 'Hide JSON' : 'Show JSON'}
               </button>
             )}
@@ -544,12 +544,12 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
 
           {/* Error + JSON */}
           {error && (
-            <div style={{ flex: '1 1 100%', fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
+            <div style={{ flex: '1 1 100%', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
           )}
           {showJson && preparedJson && (
             <div style={{ flex: '1 1 100%' }}>
               <textarea readOnly value={preparedJson}
-                style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 9, height: 110, resize: 'vertical', color: 'var(--text-2)' }} />
+                style={{ ...inputStyle, fontFamily: 'var(--font-mono)', fontSize: 9, height: 110, resize: 'vertical', color: 'var(--text-2)' }} />
             </div>
           )}
         </div>
@@ -560,13 +560,13 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
           {/* Panel izquierdo: solo si hay image inputs */}
           {imageExtras.length > 0 && <div style={{ width: '50%', flexShrink: 0, borderRight: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-              <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Original</span>
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Original</span>
               {isMaskMode && imageFile && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <label style={{ ...labelStyle, marginBottom: 0, whiteSpace: 'nowrap' }}>Brush</label>
                   <input type="range" min={5} max={120} value={brushSize} onChange={e => setBrushSize(Number(e.target.value))} style={{ width: 80 }} />
-                  <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', width: 28, textAlign: 'right' }}>{brushSize}px</span>
-                  <button type="button" onClick={() => maskRef.current?.clear()} style={{ fontSize: 10, fontFamily: 'monospace', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)' }}>Clear</button>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', width: 28, textAlign: 'right' }}>{brushSize}px</span>
+                  <button type="button" onClick={() => maskRef.current?.clear()} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)' }}>Clear</button>
                 </div>
               )}
             </div>
@@ -582,7 +582,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
               ) : (
                 <div style={{ textAlign: 'center', opacity: 0.25 }}>
                   <div style={{ fontSize: 36, lineHeight: 1 }}>◧</div>
-                  <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', marginTop: 10 }}>
+                  <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 10 }}>
                     {isMaskMode ? 'Pick an image above to start painting' : 'No image input'}
                   </div>
                 </div>
@@ -593,19 +593,19 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
           {/* Panel derecho: resultado 2D o viewer 3D */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#0d0d0d' }}>
             <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-              <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Result</span>
-              {result && glbUrls.length === 0 && <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--action)' }}>Open full size ↗</a>}
-              {!result && glbUrls.length === 0 && !running && <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-4)' }}>drag a .glb to load locally</span>}
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Result</span>
+              {result && glbUrls.length === 0 && <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--action)' }}>Open full size ↗</a>}
+              {!result && glbUrls.length === 0 && !running && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>drag a .glb to load locally</span>}
             </div>
 
             <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: running || result ? 16 : 0, overflow: 'hidden' }}>
               {running ? (
                 <div style={{ width: '72%', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', animation: 'item-pulse 1.6s ease-in-out infinite' }}>
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', animation: 'item-pulse 1.6s ease-in-out infinite' }}>
                       {fakeProgress < 30 ? 'Sending to ComfyUI…' : fakeProgress < 65 ? 'Generating…' : 'Almost ready…'}
                     </span>
-                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--action)' }}>{Math.round(fakeProgress)}%</span>
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--action)' }}>{Math.round(fakeProgress)}%</span>
                   </div>
                   <div style={{ width: '100%', height: 3, background: 'var(--bg-3)', borderRadius: 99, overflow: 'hidden' }}>
                     <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, var(--action), var(--action-hover))', width: `${fakeProgress}%`, transition: 'width 0.4s ease' }} />
@@ -621,7 +621,7 @@ function WorkflowTester({ workflow, onClose }: { workflow: ComfyUIWorkflow; onCl
             {glbUrls.length > 0 && !running && (
               <div style={{ padding: '10px 16px', borderTop: '1px solid var(--line-2)', display: 'flex', gap: 16, flexWrap: 'wrap', flexShrink: 0 }}>
                 {glbUrls.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--action)' }}>
+                  <a key={i} href={url} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--action)' }}>
                     ↓ model_{i + 1}.glb
                   </a>
                 ))}
@@ -671,7 +671,7 @@ function ImageTester({ model, onClose }: { model: string; onClose: () => void })
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-0)' }}>Test image model</div>
-            <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', marginTop: 2 }}>{model}</div>
+            <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 2 }}>{model}</div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--text-3)' }}>✕</button>
         </div>
@@ -679,7 +679,7 @@ function ImageTester({ model, onClose }: { model: string; onClose: () => void })
         <div>
           <label style={labelStyle}>Prompt</label>
           <textarea
-            style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, height: 80, resize: 'vertical' }}
+            style={{ ...inputStyle, fontFamily: 'var(--font-mono)', fontSize: 11, height: 80, resize: 'vertical' }}
             value={prompt} onChange={e => setPrompt(e.target.value)}
           />
         </div>
@@ -698,20 +698,20 @@ function ImageTester({ model, onClose }: { model: string; onClose: () => void })
         </div>
 
         {provider === 'openai' && (
-          <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', padding: '6px 10px', background: 'var(--bg-2)', borderRadius: 6 }}>
+          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', padding: '6px 10px', background: 'var(--bg-2)', borderRadius: 6 }}>
             Note: DALL-E and gpt-image models ignore width/height — use square sizes (512, 1024).
           </div>
         )}
 
         {error && (
-          <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
+          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>
         )}
 
         {result && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--state-success)' }}>✓ Generated</div>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--state-success)' }}>✓ Generated</div>
             <img src={result} alt="result" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line-2)', display: 'block' }} />
-            <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--action)' }}>Open full size ↗</a>
+            <a href={result} target="_blank" rel="noreferrer" style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--action)' }}>Open full size ↗</a>
           </div>
         )}
 
@@ -731,12 +731,17 @@ function ImageTester({ model, onClose }: { model: string; onClose: () => void })
 
 // ─── StepConfigEditor ─────────────────────────────────────────────────────────
 
-function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
+function StepConfigEditor({ config, workflows, availableProviders, containers, onSaved }: {
   config: StepConfig
   workflows: ComfyUIWorkflow[]
   availableProviders: Record<string, boolean>
+  containers: StepConfig[]
   onSaved: (c: StepConfig) => void
 }) {
+  const [stepType, setStepType] = useState<'node' | 'container' | 'service'>(config.step_type ?? 'node')
+  const [label, setLabel]       = useState(config.label || '')
+  const [orderIndex, setOrderIndex] = useState(config.order_index ?? 0)
+  const [parentKey, setParentKey]   = useState(config.parent_key || '')
   const [type, setType]         = useState(config.integration_type)
   const [model, setModel]       = useState<string | null>(config.model_name)
   const [wfId, setWfId]         = useState<string | null>(config.comfyui_workflow_id)
@@ -753,6 +758,8 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
 
   useEffect(() => {
     setImageTesting(false)
+    setStepType(config.step_type ?? 'node')
+    setLabel(config.label || ''); setOrderIndex(config.order_index ?? 0); setParentKey(config.parent_key || '')
     setType(config.integration_type); setModel(config.model_name)
     setWfId(config.comfyui_workflow_id); setUrl(config.webhook_url || '')
     setImgEnabled(config.image_enabled)
@@ -766,7 +773,13 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
     e.preventDefault()
     setSaving(true); setError(''); setSuccess('')
     try {
-      const payload: Partial<StepConfig> = { integration_type: type }
+      const payload: Partial<StepConfig> = {
+        integration_type: type,
+        step_type: stepType,
+        label: label || null,
+        order_index: orderIndex,
+        parent_key: stepType === 'node' ? (parentKey || null) : null,
+      }
       if (type === 'llm')     { payload.model_name = model }
       if (type === 'comfyui') { payload.comfyui_workflow_id = wfId }
       if (type === 'n8n')     { payload.webhook_url = url || null }
@@ -788,15 +801,54 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
     <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div>
         <label style={labelStyle}>Step</label>
-        <div style={{ fontSize: 13, fontFamily: 'monospace', color: 'var(--text-0)', fontWeight: 600 }}>{config.step_key}</div>
+        <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', fontWeight: 600 }}>{config.step_key}</div>
       </div>
+
+      <div>
+        <label style={labelStyle}>Type</label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(['node', 'container', 'service'] as const).map(t => (
+            <button key={t} type="button" onClick={() => setStepType(t)} style={{
+              flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer',
+              border: `1px solid ${stepType === t ? 'var(--action)' : 'var(--line-2)'}`,
+              background: stepType === t ? 'color-mix(in srgb, var(--action) 15%, var(--bg-1))' : 'transparent',
+              color: stepType === t ? 'var(--action)' : 'var(--text-3)',
+            }}>{t}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <label style={labelStyle}>Label <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(display name)</span></label>
+          <input style={inputStyle} value={label} onChange={e => setLabel(e.target.value)} placeholder={config.step_key} />
+        </div>
+        <div style={{ width: 72 }}>
+          <label style={labelStyle}>Order</label>
+          <input style={inputStyle} type="number" min={0} value={orderIndex} onChange={e => setOrderIndex(Number(e.target.value))} />
+        </div>
+      </div>
+
+      {stepType === 'node' && (
+        <div>
+          <label style={labelStyle}>Parent <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(empty = top level)</span></label>
+          <select style={selectStyle} value={parentKey} onChange={e => setParentKey(e.target.value)}>
+            <option value="">— top level —</option>
+            {containers.sort((a, b) => a.order_index - b.order_index).map(c => (
+              <option key={c.step_key} value={c.step_key}>
+                {c.order_index}. {c.label || c.step_key}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div>
         <label style={labelStyle}>Integration type</label>
         <div style={{ display: 'flex', gap: 6 }}>
           {(['llm', 'comfyui', 'n8n'] as const).map(t => (
             <button key={t} type="button" onClick={() => setType(t)} style={{
-              flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11, fontFamily: 'monospace', cursor: 'pointer',
+              flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer',
               border: `1px solid ${type === t ? TYPE_COLOR[t] : 'var(--line-2)'}`,
               background: type === t ? `color-mix(in srgb, ${TYPE_COLOR[t]} 15%, var(--bg-1))` : 'transparent',
               color: type === t ? TYPE_COLOR[t] : 'var(--text-3)',
@@ -824,7 +876,7 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
             ))}
           </select>
           {workflows.length === 0 && (
-            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--state-warning)', marginTop: 4 }}>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--state-warning)', marginTop: 4 }}>
               No workflows yet. Create one in the Workflows tab.
             </div>
           )}
@@ -843,7 +895,7 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: imgEnabled ? 12 : 0 }}>
           <label style={labelStyle}>Preview images</label>
           <button type="button" onClick={() => setImgEnabled(v => !v)} style={{
-            padding: '3px 10px', borderRadius: 5, fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
+            padding: '3px 10px', borderRadius: 5, fontSize: 10, fontFamily: 'var(--font-mono)', cursor: 'pointer',
             border: `1px solid ${imgEnabled ? 'var(--action)' : 'var(--line-2)'}`,
             background: imgEnabled ? 'color-mix(in oklch, var(--action) 15%, var(--bg-1))' : 'transparent',
             color: imgEnabled ? 'var(--action)' : 'var(--text-3)',
@@ -857,7 +909,7 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
               <div style={{ display: 'flex', gap: 6 }}>
                 {(['llm', 'comfyui', 'n8n'] as const).map(t => (
                   <button key={t} type="button" onClick={() => setImgType(t)} style={{
-                    flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11, fontFamily: 'monospace', cursor: 'pointer',
+                    flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer',
                     border: `1px solid ${imgType === t ? TYPE_COLOR[t] : 'var(--line-2)'}`,
                     background: imgType === t ? `color-mix(in srgb, ${TYPE_COLOR[t]} 15%, var(--bg-1))` : 'transparent',
                     color: imgType === t ? TYPE_COLOR[t] : 'var(--text-3)',
@@ -874,7 +926,7 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
                 </div>
                 {imgModel && (
                   <button type="button" onClick={() => setImageTesting(true)} style={{
-                    alignSelf: 'flex-start', padding: '5px 12px', borderRadius: 5, fontSize: 11, fontFamily: 'monospace', cursor: 'pointer',
+                    alignSelf: 'flex-start', padding: '5px 12px', borderRadius: 5, fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer',
                     border: '1px solid var(--action)', background: 'color-mix(in oklch, var(--action) 10%, var(--bg-1))', color: 'var(--action)',
                   }}>
                     ▶ Test image
@@ -905,8 +957,8 @@ function StepConfigEditor({ config, workflows, availableProviders, onSaved }: {
         )}
       </div>
 
-      {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
-      {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-success)', padding: '4px 0' }}>{success}</div>}
+      {error   && <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
+      {success && <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-success)', padding: '4px 0' }}>{success}</div>}
 
       <button type="submit" disabled={saving} style={btnStyle(!saving, true)}>
         {saving ? 'Saving...' : 'Save changes'}
@@ -1031,9 +1083,9 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
               <div style={{ width: 14, height: 14, borderRadius: 3, background: value ? 'var(--action)' : 'var(--bg-3)', border: `1px solid ${value ? 'var(--action)' : 'var(--line-2)'}`, display: 'grid', placeItems: 'center', fontSize: 9, color: 'var(--action-fg)', fontWeight: 700, flexShrink: 0 }}>
                 {value ? '✓' : ''}
               </div>
-              <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, color: value ? 'var(--text-0)' : 'var(--text-3)' }}>{label}</span>
+              <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: value ? 'var(--text-0)' : 'var(--text-3)' }}>{label}</span>
             </div>
-            <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', paddingLeft: 21 }}>{hint}</div>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', paddingLeft: 21 }}>{hint}</div>
           </div>
         ))}
       </div>
@@ -1046,13 +1098,13 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
           </span>
         </label>
         <textarea
-          style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 10, height: 160, resize: 'vertical' }}
+          style={{ ...inputStyle, fontFamily: 'var(--font-mono)', fontSize: 10, height: 160, resize: 'vertical' }}
           value={jsonText}
           onChange={e => handleJsonChange(e.target.value)}
           placeholder="Paste ComfyUI workflow JSON here..."
           spellCheck={false}
         />
-        {jsonError && <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--state-error)', marginTop: 3 }}>{jsonError}</div>}
+        {jsonError && <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--state-error)', marginTop: 3 }}>{jsonError}</div>}
       </div>
 
       {/* Injection config */}
@@ -1069,19 +1121,19 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
                 return (
                   <div key={point}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', width: 48, flexShrink: 0 }}>{point}</span>
+                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', width: 48, flexShrink: 0 }}>{point}</span>
                       {ok ? (
                         <>
-                          <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--state-success)' }}>✓</span>
-                          <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-2)', flex: 1 }}>
+                          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--state-success)' }}>✓</span>
+                          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', flex: 1 }}>
                             {cfgNode?.title || cfg!.node} → <strong>{cfg!.field}</strong>
                           </span>
-                          <button type="button" onClick={() => setExpandedPoint(expanded ? null : point)} style={{ fontSize: 9, fontFamily: 'monospace', padding: '2px 7px', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)' }}>
+                          <button type="button" onClick={() => setExpandedPoint(expanded ? null : point)} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 7px', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-3)' }}>
                             {expanded ? 'close' : 'edit'}
                           </button>
                         </>
                       ) : (
-                        <button type="button" onClick={() => setExpandedPoint(expanded ? null : point)} style={{ fontSize: 10, fontFamily: 'monospace', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: '1px dashed var(--line-2)', background: 'transparent', color: 'var(--text-3)' }}>
+                        <button type="button" onClick={() => setExpandedPoint(expanded ? null : point)} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: '1px dashed var(--line-2)', background: 'transparent', color: 'var(--text-3)' }}>
                           — not used · configure
                         </button>
                       )}
@@ -1104,7 +1156,7 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
                           </select>
                         </div>
                         {ok && (
-                          <button type="button" onClick={() => { setInject(prev => { const next = { ...prev }; delete next[point]; return next }); setExpandedPoint(null) }} style={{ fontSize: 10, fontFamily: 'monospace', padding: '0 8px', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--state-error)' }}>clear</button>
+                          <button type="button" onClick={() => { setInject(prev => { const next = { ...prev }; delete next[point]; return next }); setExpandedPoint(null) }} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '0 8px', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--state-error)' }}>clear</button>
                         )}
                       </div>
                     )}
@@ -1119,8 +1171,8 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
         </div>
       )}
 
-      {error   && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
-      {success && <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--state-success)', padding: '4px 0' }}>{success}</div>}
+      {error   && <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 10%, var(--bg-1))', padding: '8px 10px', borderRadius: 6 }}>{error}</div>}
+      {success && <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-success)', padding: '4px 0' }}>{success}</div>}
 
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="submit" disabled={saving || !!jsonError} style={btnStyle(!saving && !jsonError, true)}>
@@ -1151,6 +1203,7 @@ export default function IntegrationsPage() {
   const [workflows, setWorkflows] = useState<ComfyUIWorkflow[]>([])
   const [modelsConfig, setModelsConfig] = useState<ModelsConfig | null>(null)
   const [selectedStep, setSelectedStep] = useState<StepConfig | null>(null)
+  const [expandedContainers, setExpandedContainers] = useState<Set<string>>(new Set())
   const [selectedWf, setSelectedWf]     = useState<ComfyUIWorkflow | null>(null)
   const [newWorkflow, setNewWorkflow]   = useState(false)
   const [loading, setLoading]     = useState(true)
@@ -1186,7 +1239,7 @@ export default function IntegrationsPage() {
     setSelectedWf(null)
   }
 
-  if (loading) return <div style={{ padding: 24, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)' }}>Loading...</div>
+  if (loading) return <div style={{ padding: 24, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>Loading...</div>
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -1198,7 +1251,7 @@ export default function IntegrationsPage() {
             padding: '10px 16px', background: 'none', border: 'none',
             borderBottom: `2px solid ${tab === t ? 'var(--action)' : 'transparent'}`,
             color: tab === t ? 'var(--text-0)' : 'var(--text-3)',
-            fontSize: 11, fontFamily: 'monospace', fontWeight: tab === t ? 600 : 400,
+            fontSize: 13, fontFamily: 'var(--font-sans)', fontWeight: tab === t ? 600 : 500,
             cursor: 'pointer', transition: 'color 120ms', marginBottom: -1,
           }}>{l}</button>
         ))}
@@ -1210,29 +1263,104 @@ export default function IntegrationsPage() {
         {tab === 'steps' && (
           <>
             <div style={{ width: 400, borderRight: '1px solid var(--line-2)', overflowY: 'auto', flexShrink: 0 }}>
-              {stepConfigs.map(s => (
-                <div key={s.step_key} onClick={() => setSelectedStep(s)} style={{
-                  padding: '9px 16px', cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
-                  background: selectedStep?.step_key === s.step_key ? 'var(--bg-2)' : 'transparent',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-0)', fontWeight: 600 }}>{s.step_key}</span>
-                    <span style={{
-                      fontSize: 9, fontFamily: 'monospace', padding: '2px 6px', borderRadius: 99, flexShrink: 0,
-                      background: `color-mix(in srgb, ${TYPE_COLOR[s.integration_type]} 15%, var(--bg-1))`,
-                      color: TYPE_COLOR[s.integration_type],
-                    }}>{s.integration_type}</span>
+              {(() => {
+                const containers = stepConfigs
+                  .filter(s => s.step_type === 'container')
+                  .sort((a, b) => a.order_index - b.order_index)
+                const topNodes = stepConfigs
+                  .filter(s => s.step_type === 'node' && !s.parent_key)
+                  .sort((a, b) => a.order_index - b.order_index)
+                const services = stepConfigs
+                  .filter(s => s.step_type === 'service')
+                  .sort((a, b) => a.order_index - b.order_index)
+
+                const renderRow = (s: StepConfig, indent = false) => (
+                  <div key={s.step_key} onClick={() => setSelectedStep(s)} style={{
+                    padding: indent ? '7px 16px 7px 32px' : '9px 16px',
+                    cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
+                    background: selectedStep?.step_key === s.step_key ? 'var(--bg-2)' : indent ? 'color-mix(in srgb, var(--bg-1) 60%, transparent)' : 'transparent',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      {indent && <span style={{ color: 'var(--line-2)', fontSize: 10 }}>└</span>}
+                      <span style={{ fontSize: indent ? 10 : 11, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', fontWeight: 600, flex: 1 }}>
+                        {s.order_index > 0 && s.parent_key ? `${stepConfigs.find(p => p.step_key === s.parent_key)?.order_index ?? ''}.${s.order_index}  ` : ''}{s.label || s.step_key}
+                      </span>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>{s.step_key}</span>
+                    </div>
+                    {!indent && (
+                      <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
+                        {stepConfigHint(s, workflows)}
+                      </div>
+                    )}
+                    {indent && (
+                      <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', paddingLeft: 14 }}>
+                        {stepConfigHint(s, workflows)}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {stepConfigHint(s, workflows)}
-                  </div>
-                </div>
-              ))}
+                )
+
+                return (
+                  <>
+                    {/* Section header */}
+                    <div style={{ padding: '6px 16px', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--action-fg)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'var(--action)', borderBottom: '1px solid var(--line-2)', position: 'sticky', top: 0, zIndex: 1 }}>
+                      Nodes
+                    </div>
+
+                    {/* Containers with their children */}
+                    {containers.map(container => {
+                      const children = stepConfigs
+                        .filter(s => s.parent_key === container.step_key)
+                        .sort((a, b) => a.order_index - b.order_index)
+                      const expanded = expandedContainers.has(container.step_key)
+                      const toggle = (e: React.MouseEvent) => {
+                        e.stopPropagation()
+                        setExpandedContainers(prev => {
+                          const next = new Set(prev)
+                          next.has(container.step_key) ? next.delete(container.step_key) : next.add(container.step_key)
+                          return next
+                        })
+                      }
+                      return (
+                        <div key={container.step_key}>
+                          <div style={{
+                            padding: '9px 16px', cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
+                            background: selectedStep?.step_key === container.step_key ? 'var(--bg-2)' : 'var(--bg-1)',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span onClick={toggle} style={{ fontSize: 13, color: expanded ? 'var(--action)' : 'var(--text-1)', cursor: 'pointer', transition: 'transform 150ms, color 150ms', display: 'inline-block', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', userSelect: 'none', padding: '0 4px', fontWeight: 700 }}>▶</span>
+                              <span onClick={() => setSelectedStep(container)} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', fontWeight: 700, flex: 1 }}>
+                                {container.order_index}.  {container.label || container.step_key}
+                              </span>
+                              <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 99, background: 'color-mix(in srgb, var(--action) 15%, var(--bg-1))', color: 'var(--action)' }}>container</span>
+                              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>{children.length} steps</span>
+                            </div>
+                          </div>
+                          {expanded && children.map(child => renderRow(child, true))}
+                        </div>
+                      )
+                    })}
+
+                    {/* Top-level nodes (no parent) */}
+                    {topNodes.map(s => renderRow(s, false))}
+
+                    {/* Services */}
+                    {services.length > 0 && (
+                      <>
+                        <div style={{ padding: '6px 16px', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--action-fg)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'var(--action)', borderBottom: '1px solid var(--line-2)', position: 'sticky', top: 0, zIndex: 1 }}>
+                          Services
+                        </div>
+                        {services.map(s => renderRow(s, false))}
+                      </>
+                    )}
+                  </>
+                )
+              })()}
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
               {selectedStep
-                ? <StepConfigEditor key={selectedStep.step_key} config={selectedStep} workflows={workflows} availableProviders={availableProviders} onSaved={handleStepSaved} />
-                : <div style={{ color: 'var(--text-3)', fontSize: 12, fontFamily: 'monospace' }}>Select a step</div>
+                ? <StepConfigEditor key={selectedStep.step_key} config={selectedStep} workflows={workflows} availableProviders={availableProviders} containers={stepConfigs.filter(s => s.step_type === 'container')} onSaved={handleStepSaved} />
+                : <div style={{ color: 'var(--text-3)', fontSize: 12, fontFamily: 'var(--font-mono)' }}>Select a step</div>
               }
             </div>
           </>
@@ -1247,7 +1375,7 @@ export default function IntegrationsPage() {
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
                 {workflows.length === 0 && (
-                  <div style={{ padding: 16, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)' }}>No workflows yet.</div>
+                  <div style={{ padding: 16, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>No workflows yet.</div>
                 )}
                 {workflows.map(w => (
                   <div key={w.id} onClick={() => { setSelectedWf(w); setNewWorkflow(false) }} style={{
@@ -1255,9 +1383,9 @@ export default function IntegrationsPage() {
                     background: selectedWf?.id === w.id ? 'var(--bg-2)' : 'transparent',
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-0)', flex: 1 }}>{w.name}</span>
+                      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', flex: 1 }}>{w.name}</span>
                       {w.refinement_capable && (
-                        <span style={{ fontSize: 8, fontFamily: 'monospace', padding: '1px 5px', borderRadius: 99, background: 'color-mix(in oklch, var(--action) 15%, var(--bg-1))', color: 'var(--action)', flexShrink: 0 }}>
+                        <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 99, background: 'color-mix(in oklch, var(--action) 15%, var(--bg-1))', color: 'var(--action)', flexShrink: 0 }}>
                           {w.mask_capable ? 'refine+mask' : 'refine'}
                         </span>
                       )}
@@ -1270,7 +1398,7 @@ export default function IntegrationsPage() {
             <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
               {(newWorkflow || selectedWf)
                 ? <WorkflowEditor key={selectedWf?.id || 'new'} workflow={newWorkflow ? null : selectedWf} onSaved={handleWfSaved} onDeleted={handleWfDeleted} />
-                : <div style={{ color: 'var(--text-3)', fontSize: 12, fontFamily: 'monospace' }}>Select a workflow or create a new one.</div>
+                : <div style={{ color: 'var(--text-3)', fontSize: 12, fontFamily: 'var(--font-mono)' }}>Select a workflow or create a new one.</div>
               }
             </div>
           </>

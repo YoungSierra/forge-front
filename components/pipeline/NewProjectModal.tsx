@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { createProject, validateIdea, generateGDD, pollForGDD, approveStep1, searchMembers, addProjectMember, generateIdeas, saveIdeaCandidate, updateProjectName } from '@/lib/api'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { createProject, validateIdea, ideaExpansion, directionLock, getProject, getIdeaCandidate, searchMembers, addProjectMember, generateIdeas, saveIdeaCandidate, updateProjectName } from '@/lib/api'
 import type { IdeaCard } from '@/lib/api'
-import type { GDD, Project, ValidationResult, Member, Discipline } from '@/lib/types'
-import PipelineSuggestionModal from './PipelineSuggestionModal'
+import type { Project, ValidationResult, Member, Discipline } from '@/lib/types'
 import GDD_PARAMS_RAW from '@/lib/gdd-params.json'
 import GDD_RULES_RAW from '@/lib/gdd-param-rules.json'
 
@@ -19,7 +20,7 @@ type ParamRule = {
   id: string; severity: 'high' | 'medium' | 'low'; message: string
   conditions: { param: string; values: string[] }[]
 }
-type Phase = 'name' | 'form' | 'validating' | 'generating' | 'review'
+type Phase = 'name' | 'form' | 'validating' | 'expanding' | 'directions' | 'locking' | 'locked'
 type StagedMember = { member: Member; discipline: Discipline; role: string }
 
 const DISCIPLINES: Discipline[] = ['design', 'art', 'vfx', 'code', 'audio', 'infra']
@@ -32,7 +33,23 @@ const DISC_COLOR: Record<Discipline, string> = {
 const GDD_PARAMS = GDD_PARAMS_RAW as GDDParam[]
 const GDD_RULES  = GDD_RULES_RAW  as ParamRule[]
 
+// Grupos de fases para el indicador de pasos
+const STEP_PHASES: { label: string; phases: Phase[] }[] = [
+  { label: 'Project',   phases: ['name'] },
+  { label: 'Idea',      phases: ['form', 'validating', 'expanding'] },
+  { label: 'Direction', phases: ['directions', 'locking', 'locked'] },
+]
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Limpia artefactos del LLM: bloques <think> de razonamiento e instrucciones meta del prompt
+function stripThink(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/stop here\.[\s\S]*$/i, '')
+    .replace(/the next pipeline step[\s\S]*$/i, '')
+    .trim()
+}
 
 function initParams(): Record<string, string | string[]> {
   return Object.fromEntries(GDD_PARAMS.map(p => [p.id, p.default]))
@@ -64,8 +81,34 @@ function conflictedParamIds(values: Record<string, string | string[]>): Set<stri
   return ids
 }
 
-function saveGDDInput(projectId: string, data: { ideaPrompt: string; params: Record<string, string | string[]> }) {
-  try { localStorage.setItem(`forge:gdd-input:${projectId}`, JSON.stringify(data)) } catch {}
+// Extrae solo la parte del brief (antes de que aparezcan las direcciones)
+function extractBrief(output: string): string {
+  const match = output.search(/(?:##?\s*)?(?:DESIGN\s+)?DIRECTION\s+1/i)
+  return match > 0 ? output.slice(0, match).trim() : ''
+}
+
+type ParsedDirection = { title: string; fantasy: string; differentiator: string }
+
+// Extrae título, core fantasy y diferenciador de cada dirección del output de 00a
+function parseDirections(output: string): ParsedDirection[] {
+  const headerRegex = /(?:##?\s*)?(?:DESIGN\s+)?DIRECTION\s+(\d)[:\s–\-–—]+([^\n]+)/gi
+  const matches: { index: number; num: number; title: string }[] = []
+  let m
+  while ((m = headerRegex.exec(output)) !== null) {
+    const num = parseInt(m[1]) - 1
+    if (num >= 0 && num <= 2)
+      matches.push({ index: m.index, num, title: m[2].trim().replace(/\*+/g, '').replace(/`+/g, '').slice(0, 70) })
+  }
+
+  const dirs: ParsedDirection[] = []
+  for (let i = 0; i < matches.length; i++) {
+    const block = output.slice(matches[i].index, matches[i + 1]?.index ?? output.length)
+    // El LLM puede formatear como "Core fantasy:" o "**Core fantasy:**" — acepta ambos
+    const fantasy = block.match(/\*{0,2}core fantasy\*{0,2}:?\*{0,2}\s*([\s\S]+?)(?=\n\s*\n|\n\s*\*{0,2}(?:differentiator|main risk)\*{0,2}:|$)/i)?.[1]?.replace(/\*/g, '').trim() ?? ''
+    const diff    = block.match(/\*{0,2}differentiator\*{0,2}:?\*{0,2}\s*([\s\S]+?)(?=\n\s*\n|\n\s*\*{0,2}main risk\*{0,2}:|$)/i)?.[1]?.replace(/\*/g, '').trim() ?? ''
+    dirs[matches[i].num] = { title: matches[i].title, fantasy, differentiator: diff }
+  }
+  return dirs
 }
 
 // ─── Small UI components ──────────────────────────────────────────────────────
@@ -200,19 +243,6 @@ function ValidationFeedback({ result }: { result: ValidationResult }) {
   )
 }
 
-function Spinner({ label }: { label: string }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '48px 0' }}>
-      <svg width="32" height="32" viewBox="0 0 32 32" style={{ animation: 'modal-spin 2s linear infinite', flexShrink: 0 }}>
-        <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
-        <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
-      </svg>
-      <style>{`@keyframes modal-spin { to { transform: rotate(360deg); } }`}</style>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)', textAlign: 'center', lineHeight: 1.7 }}>{label}</div>
-    </div>
-  )
-}
-
 function GenCheckItem({ label, status, detail }: { label: string; status: 'running' | 'done'; detail?: string }) {
   const running = status === 'running'
   return (
@@ -220,22 +250,14 @@ function GenCheckItem({ label, status, detail }: { label: string; status: 'runni
       <style>{`@keyframes item-pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }`}</style>
       <div style={{ width: 18, height: 18, flexShrink: 0, display: 'grid', placeItems: 'center' }}>
         {running
-          ? <div style={{
-              width: 10, height: 10, borderRadius: '50%',
-              background: 'var(--cat-design)',
-              animation: 'dot-ping 1.6s ease-in-out infinite',
-            }} />
+          ? <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--cat-design)', animation: 'dot-ping 1.6s ease-in-out infinite' }} />
           : <span style={{ color: 'var(--state-success)', fontSize: 13, fontWeight: 700 }}>✓</span>
         }
       </div>
       <style>{`@keyframes dot-ping { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.5);opacity:0.5} }`}</style>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: running ? 'var(--cat-design)' : 'var(--text-3)' }}>
-          {label}
-        </span>
-        {detail && (
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--state-success)' }}>{detail}</span>
-        )}
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: running ? 'var(--cat-design)' : 'var(--text-3)' }}>{label}</span>
+        {detail && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--state-success)' }}>{detail}</span>}
       </div>
     </div>
   )
@@ -249,23 +271,16 @@ function IdeaCardComponent({ idea, onZoom, onUse, isSelected }: { idea: IdeaCard
       borderRadius: 8,
       border: isSelected ? '2px solid var(--cat-design)' : '1px solid var(--line-2)',
       boxShadow: isSelected ? '0 0 0 3px color-mix(in oklch, var(--cat-design) 25%, transparent)' : 'none',
-      overflow: 'hidden',
-      background: 'var(--bg-2)',
-      transition: 'border-color 150ms, box-shadow 150ms',
+      overflow: 'hidden', background: 'var(--bg-2)', transition: 'border-color 150ms, box-shadow 150ms',
     }}>
-      <div
-        onClick={onZoom}
-        style={{ width: '100%', aspectRatio: '16/9', overflow: 'hidden', position: 'relative', cursor: 'zoom-in', background: 'var(--bg-3)' }}
-      >
+      <div onClick={onZoom} style={{ width: '100%', aspectRatio: '16/9', overflow: 'hidden', position: 'relative', cursor: 'zoom-in', background: 'var(--bg-3)' }}>
         {idea.image_url
           ? <img src={idea.image_url} alt={idea.title} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
           : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>No image</span>
             </div>
         }
-        <div style={{ position: 'absolute', top: 6, right: 6, fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: 99, background: 'rgba(0,0,0,0.55)', color: 'var(--text-2)' }}>
-          {idea.genre}
-        </div>
+        <div style={{ position: 'absolute', top: 6, right: 6, fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: 99, background: 'rgba(0,0,0,0.55)', color: 'var(--text-2)' }}>{idea.genre}</div>
       </div>
       <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-0)', lineHeight: 1.3 }}>{idea.title}</div>
@@ -276,12 +291,8 @@ function IdeaCardComponent({ idea, onZoom, onUse, isSelected }: { idea: IdeaCard
           ))}
         </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-          <button onClick={onZoom} style={{ flex: 1, padding: '5px', borderRadius: 5, fontSize: 10, fontFamily: 'var(--font-mono)', border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-2)', cursor: 'pointer' }}>
-            Details ↗
-          </button>
-          <button onClick={onUse} style={{ flex: 2, padding: '5px', borderRadius: 5, fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, border: 'none', background: 'var(--cat-design)', color: '#000', cursor: 'pointer' }}>
-            Use this idea →
-          </button>
+          <button onClick={onZoom} style={{ flex: 1, padding: '5px', borderRadius: 5, fontSize: 10, fontFamily: 'var(--font-mono)', border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-2)', cursor: 'pointer' }}>Details ↗</button>
+          <button onClick={onUse} style={{ flex: 2, padding: '5px', borderRadius: 5, fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, border: 'none', background: 'var(--cat-design)', color: '#000', cursor: 'pointer' }}>Use this idea →</button>
         </div>
       </div>
     </div>
@@ -290,16 +301,9 @@ function IdeaCardComponent({ idea, onZoom, onUse, isSelected }: { idea: IdeaCard
 
 function IdeaZoomOverlay({ idea, onClose, onUse }: { idea: IdeaCard; onClose: () => void; onUse: () => void }) {
   return (
-    <div
-      style={{ position: 'fixed', inset: 0, zIndex: 3500, background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{ maxWidth: 820, width: '100%', maxHeight: '88vh', overflowY: 'auto', background: 'var(--bg-1)', borderRadius: 12, border: '1px solid var(--line-2)', boxShadow: '0 32px 100px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}
-      >
-        {idea.image_url && (
-          <img src={idea.image_url} alt={idea.title} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block', borderRadius: '12px 12px 0 0' }} />
-        )}
+    <div style={{ position: 'fixed', inset: 0, zIndex: 3500, background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+      <div onClick={e => e.stopPropagation()} style={{ maxWidth: 820, width: '100%', maxHeight: '88vh', overflowY: 'auto', background: 'var(--bg-1)', borderRadius: 12, border: '1px solid var(--line-2)', boxShadow: '0 32px 100px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}>
+        {idea.image_url && <img src={idea.image_url} alt={idea.title} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block', borderRadius: '12px 12px 0 0' }} />}
         <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-0)', lineHeight: 1.2 }}>{idea.title}</div>
@@ -320,10 +324,7 @@ function IdeaZoomOverlay({ idea, onClose, onUse }: { idea: IdeaCard; onClose: ()
               <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>{value}</div>
             </div>
           ))}
-          <button
-            onClick={onUse}
-            style={{ marginTop: 6, padding: '10px', borderRadius: 7, fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600, border: 'none', background: 'var(--cat-design)', color: '#000', cursor: 'pointer' }}
-          >
+          <button onClick={onUse} style={{ marginTop: 6, padding: '10px', borderRadius: 7, fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600, border: 'none', background: 'var(--cat-design)', color: '#000', cursor: 'pointer' }}>
             ← Use this idea
           </button>
         </div>
@@ -336,7 +337,6 @@ function IdeaZoomOverlay({ idea, onClose, onUse }: { idea: IdeaCard; onClose: ()
 
 export interface NewProjectModalProps {
   open: boolean
-  /** If provided, skips Step 1 (regeneration mode — project already exists) */
   projectId?: string | null
   projectName?: string
   initialIdea?: string
@@ -352,67 +352,128 @@ export default function NewProjectModal({
 }: NewProjectModalProps) {
   const isRegenMode = !!projectId
 
-  const [phase, setPhase]                 = useState<Phase>(isRegenMode ? 'form' : 'name')
+  const [phase, setPhase]                   = useState<Phase>(isRegenMode ? 'form' : 'name')
   const [draftProjectId, setDraftProjectId] = useState<string | null>(projectId ?? null)
 
-  // Step 1
-  const [nameInput, setNameInput]   = useState('')
+  // Step 1 — nombre + miembros
+  const [nameInput, setNameInput]     = useState('')
   const [nameLoading, setNameLoading] = useState(false)
-  const [nameError, setNameError]   = useState('')
-  const [stagedMembers, setStagedMembers] = useState<StagedMember[]>([])
-  const [memberSearch, setMemberSearch]   = useState('')
-  const [memberResults, setMemberResults] = useState<Member[]>([])
+  const [nameError, setNameError]     = useState('')
+  const [stagedMembers, setStagedMembers]     = useState<StagedMember[]>([])
+  const [memberSearch, setMemberSearch]       = useState('')
+  const [memberResults, setMemberResults]     = useState<Member[]>([])
   const [memberSearching, setMemberSearching] = useState(false)
   const [selectedMember, setSelectedMember]   = useState<Member | null>(null)
-  const [memberDisc, setMemberDisc]   = useState<Discipline>('design')
-  const [memberRole, setMemberRole]   = useState('reviewer')
+  const [memberDisc, setMemberDisc] = useState<Discipline>('design')
+  const [memberRole, setMemberRole] = useState('reviewer')
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Ideas panel
-  const [ideas, setIdeas]                   = useState<IdeaCard[]>([])
-  const [ideaLoading, setIdeaLoading]       = useState(false)
-  const [ideaError, setIdeaError]           = useState<string | null>(null)
-  const [zoomIdea, setZoomIdea]             = useState<IdeaCard | null>(null)
+  const [ideas, setIdeas]               = useState<IdeaCard[]>([])
+  const [ideaLoading, setIdeaLoading]   = useState(false)
+  const [ideaError, setIdeaError]       = useState<string | null>(null)
+  const [zoomIdea, setZoomIdea]         = useState<IdeaCard | null>(null)
   const [selectedIdeaTitle, setSelectedIdeaTitle] = useState<string | null>(null)
   const [ideaProgress, setIdeaProgress] = useState(0)
   const ideaProgressTimer               = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Step 2
-  const [ideaPrompt, setIdeaPrompt]             = useState(initialIdea ?? '')
-  const [params, setParams]                     = useState<Record<string, string | string[]>>(initialParams ?? initParams())
-  const [showParams, setShowParams]             = useState(true)
-  const [validation, setValidation]             = useState<ValidationResult | null>(null)
+  // Step 2 — idea form
+  const [ideaPrompt, setIdeaPrompt]       = useState(initialIdea ?? '')
+  const [params, setParams]               = useState<Record<string, string | string[]>>(initialParams ?? initParams())
+  const [showParams, setShowParams]       = useState(true)
+  const [validation, setValidation]       = useState<ValidationResult | null>(null)
   const [validationFailure, setValidationFailure] = useState<ValidationResult | null>(null)
-  const [gdd, setGdd]                           = useState<GDD | null>(null)
-  const [meta, setMeta]                         = useState<unknown>(null)
-  const [error, setError]                       = useState<string | null>(null)
-  const [approving, setApproving]               = useState(false)
-  const [pendingProject,         setPendingProject]         = useState<Project | null>(null)
-  const [showPipelineSuggestion, setShowPipelineSuggestion] = useState(false)
-  const [genStep, setGenStep]                   = useState<'gdd' | 'images' | 'done' | null>(null)
-  const genStepTimer                            = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [error, setError]                 = useState<string | null>(null)
 
-  // Reset on open
+  // Stage 0 — output de 00a y 00b
+  const [stage0aOutput, setStage0aOutput] = useState<string | null>(null)
+  const [gameIdea, setGameIdea]           = useState<string | null>(null)
+  const [openingCanvas, setOpeningCanvas] = useState(false)
+  const [expandedDir, setExpandedDir]     = useState<1|2|3|null>(null)
+
+  // Restaurar estado al abrir — si hay projectId carga desde DB para retomar en la fase correcta
   useEffect(() => {
     if (!open) return
-    setPhase(isRegenMode ? 'form' : 'name')
-    setDraftProjectId(projectId ?? null)
-    setNameInput(''); setNameError('')
-    setStagedMembers([]); setMemberSearch(''); setMemberResults([]); setSelectedMember(null)
-    setIdeaPrompt(initialIdea ?? '')
-    setParams(initialParams ?? initParams())
+
+    // Limpiar estado común en todos los casos
+    setNameError(''); setError(null)
     setValidation(null); setValidationFailure(null)
-    setGdd(null); setMeta(null); setError(null); setApproving(false)
     setIdeas([]); setIdeaLoading(false); setIdeaError(null); setZoomIdea(null)
+    setOpeningCanvas(false)
+    setStagedMembers([]); setMemberSearch(''); setMemberResults([]); setSelectedMember(null)
+
+    if (!projectId) {
+      // Proyecto nuevo — reset completo al estado inicial
+      setPhase('name')
+      setDraftProjectId(null)
+      setNameInput('')
+      setIdeaPrompt(initialIdea ?? '')
+      setParams(initialParams ?? initParams())
+      setStage0aOutput(null); setGameIdea(null); setSelectedIdeaTitle(null)
+      return
+    }
+
+    // Proyecto existente — cargar estado guardado y restaurar fase
+    setDraftProjectId(projectId)
+    setPhase('form') // fase provisional mientras carga
+
+    Promise.all([
+      getProject(projectId),
+      getIdeaCandidate(projectId).catch(() => null),
+    ]).then(([project, candidate]) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pipeline = project.concept?.pipeline as Record<string, any> | undefined
+
+      if (pipeline?.game_idea?.text) {
+        // 00b completado → ir directo a locked
+        setGameIdea(stripThink(pipeline.game_idea.text))
+        setStage0aOutput(pipeline.idea_expansion?.output ? stripThink(pipeline.idea_expansion.output) : null)
+        setNameInput(project.name)
+        if (candidate) setSelectedIdeaTitle(candidate.title)
+        setPhase('locked')
+      } else if (pipeline?.idea_expansion?.output) {
+        // 00a completado → ir a selección de dirección
+        setStage0aOutput(stripThink(pipeline.idea_expansion.output))
+        setNameInput(project.name)
+        if (candidate) {
+          setIdeaPrompt(buildIdeaPromptFromCard(candidate.idea_data))
+          setSelectedIdeaTitle(candidate.title)
+        } else {
+          setIdeaPrompt(initialIdea ?? '')
+          setSelectedIdeaTitle(null)
+        }
+        setGameIdea(null)
+        setPhase('directions')
+      } else if (candidate) {
+        // Idea seleccionada pero sin expansión → form con idea pre-cargada
+        setIdeaPrompt(buildIdeaPromptFromCard(candidate.idea_data))
+        setSelectedIdeaTitle(candidate.title)
+        setNameInput(project.name)
+        setParams(initialParams ?? initParams())
+        setStage0aOutput(null); setGameIdea(null)
+        setPhase('form')
+      } else {
+        // Sin datos guardados → form vacío
+        setIdeaPrompt(initialIdea ?? '')
+        setParams(initialParams ?? initParams())
+        setNameInput(project.name)
+        setStage0aOutput(null); setGameIdea(null); setSelectedIdeaTitle(null)
+        setPhase('form')
+      }
+    }).catch(() => {
+      setIdeaPrompt(initialIdea ?? '')
+      setParams(initialParams ?? initParams())
+      setStage0aOutput(null); setGameIdea(null); setSelectedIdeaTitle(null)
+      setPhase('form')
+    })
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Escape key
-  const handleKey = useCallback((_e: KeyboardEvent) => { /* solo cierra con botón X */ }, [])
   useEffect(() => {
     if (!open) return
+    const handleKey = (_e: KeyboardEvent) => {}
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [open, handleKey])
+  }, [open])
 
   useEffect(() => {
     if (!memberSearch.trim()) { setMemberResults([]); return }
@@ -439,33 +500,28 @@ export default function NewProjectModal({
   }
 
   // ── Idea generator ─────────────────────────────────────────────────────────
+
   async function handleGenerateIdeas(addMore = false) {
     if (ideaPrompt.trim().length < 10) return
     setIdeaLoading(true); setIdeaError(null)
-
-    // Barra de progreso falsa: avanza rápido al inicio, se frena cerca del 90%
     setIdeaProgress(0)
     if (ideaProgressTimer.current) clearInterval(ideaProgressTimer.current)
     ideaProgressTimer.current = setInterval(() => {
       setIdeaProgress(prev => {
         if (prev >= 90) return prev
-        const increment = Math.max(0.4, (90 - prev) * 0.035)
-        return Math.min(90, prev + increment)
+        return Math.min(90, prev + Math.max(0.4, (90 - prev) * 0.035))
       })
     }, 400)
-
     try {
       const genre  = (params.genre  as string[]).join(', ') || undefined
       const tone   = (params.tone   as string[]).join(', ') || undefined
       const scope  = params.scope   as string || undefined
       const engine = params.engine  as string || undefined
       const result = await generateIdeas({
-        prompt: ideaPrompt.trim(),
-        genre, tone, scope, engine,
-        count:   addMore ? 1 : 3,
+        prompt: ideaPrompt.trim(), genre, tone, scope, engine,
+        count: addMore ? 1 : 3,
         exclude: addMore ? ideas.map(i => i.title) : [],
       })
-      // Salta al 100% y limpia
       if (ideaProgressTimer.current) clearInterval(ideaProgressTimer.current)
       setIdeaProgress(100)
       setIdeas(prev => addMore ? [...prev, ...result.ideas] : result.ideas)
@@ -479,13 +535,25 @@ export default function NewProjectModal({
     }
   }
 
+  function buildIdeaPromptFromCard(idea: IdeaCard): string {
+    return [
+      idea.title, '',
+      idea.elevator_pitch, '',
+      `Genre: ${idea.genre}`,
+      `Tone: ${idea.tone}`,
+      idea.visual_style ? `Visual style: ${idea.visual_style}` : null,
+      '',
+      `Core mechanic: ${idea.core_mechanic}`,
+      `Unique hook: ${idea.unique_hook}`,
+      idea.tags?.length ? `Tags: ${idea.tags.join(', ')}` : null,
+    ].filter((l): l is string => l !== null && l !== undefined).join('\n')
+  }
+
   function handleUseIdea(idea: IdeaCard) {
     const originalDescription = ideaPrompt.trim()
     const lines = [
-      idea.title,
-      '',
-      idea.elevator_pitch,
-      '',
+      idea.title, '',
+      idea.elevator_pitch, '',
       `Genre: ${idea.genre}`,
       `Tone: ${idea.tone}`,
       idea.visual_style ? `Visual style: ${idea.visual_style}` : '',
@@ -508,7 +576,8 @@ export default function NewProjectModal({
     }
   }
 
-  // ── Step 1: create project ──────────────────────────────────────────────────
+  // ── Step 1: crear proyecto ─────────────────────────────────────────────────
+
   async function handleCreateProject() {
     if (!nameInput.trim()) return
     setNameLoading(true); setNameError('')
@@ -525,34 +594,7 @@ export default function NewProjectModal({
     } finally { setNameLoading(false) }
   }
 
-  // ── Step 2: generate ───────────────────────────────────────────────────────
-  async function doGenerate(fullPrompt: string) {
-    setPhase('generating'); setError(null); setGenStep('gdd')
-    genStepTimer.current = setTimeout(() => setGenStep('images'), 46000)
-    try {
-      const res = await generateGDD(fullPrompt, draftProjectId ?? undefined)
-      if (res.async) {
-        // n8n: respuesta inmediata, el GDD llega por webhook — clearar timer de imágenes y pollear
-        if (genStepTimer.current) clearTimeout(genStepTimer.current)
-        const pid = res.project_id || draftProjectId
-        if (!pid) throw new Error('Async GDD generation requires an existing project.')
-        const gdd = await pollForGDD(pid)
-        setGenStep('done')
-        setGdd(gdd); setMeta({})
-        setPhase('review')
-      } else {
-        if (genStepTimer.current) clearTimeout(genStepTimer.current)
-        setGenStep('done')
-        setGdd(res.gdd); setMeta(res.meta)
-        setPhase('review')
-      }
-    } catch (e) {
-      if (genStepTimer.current) clearTimeout(genStepTimer.current)
-      setGenStep(null)
-      setError(e instanceof Error ? e.message : 'Generation failed')
-      setPhase('form')
-    }
-  }
+  // ── Step 2: validate + expand (00a) ────────────────────────────────────────
 
   async function handleSubmit() {
     if (ideaPrompt.trim().length < 10) return
@@ -562,117 +604,127 @@ export default function NewProjectModal({
       const genre    = (params.genre          as string[]).join(', ') || undefined
       const tone     = (params.tone           as string[]).join(', ') || undefined
       const audience = (params.target_audience as string[]).join(', ') || undefined
-      const v = await validateIdea({ prompt: fullPrompt, genre, tone, audience,
-        scope:      params.scope      as string || undefined,
-        engine:     params.engine     as string || undefined,
+      const v = await validateIdea({
+        prompt: fullPrompt, genre, tone, audience,
+        scope:      params.scope       as string || undefined,
+        engine:     params.engine      as string || undefined,
         references: params.inspiration as string || undefined,
       })
       setValidation(v)
-      if (v.coherence_score >= 60) {
-        await doGenerate(fullPrompt)
-      } else {
-        setPhase('form'); setValidationFailure(v)
+      if (v.coherence_score < 60) {
+        setPhase('form'); setValidationFailure(v); return
       }
     } catch (e) {
-      setPhase('form'); setError(e instanceof Error ? e.message : 'Validation failed — please retry')
+      setPhase('form'); setError(e instanceof Error ? e.message : 'Validation failed — please retry'); return
+    }
+    await handleExpand()
+  }
+
+  async function handleExpand() {
+    if (!draftProjectId) return
+    setPhase('expanding'); setError(null)
+    try {
+      const genre  = (params.genre  as string[]).join(', ') || undefined
+      const tone   = (params.tone   as string[]).join(', ') || undefined
+      const scope  = params.scope   as string || undefined
+      const engine = params.engine  as string || undefined
+      const res = await ideaExpansion({
+        project_id: draftProjectId,
+        raw_idea:   ideaPrompt.trim(),
+        genre, tone, scope, engine,
+      })
+      setStage0aOutput(stripThink(res.output))
+      setPhase('directions')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Idea expansion failed — please retry')
+      setPhase('form')
     }
   }
 
-  async function handleApprove() {
-    if (!gdd || !draftProjectId) return
-    setApproving(true); setError(null)
-    const payload = { project_id: draftProjectId, gdd, prompt: buildFullPrompt(), meta, member_id: memberId ?? undefined }
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        if (attempt > 1) await new Promise(r => setTimeout(r, 2000))
-        const res = await approveStep1(payload)
-        saveGDDInput(res.project_id, { ideaPrompt, params })
-        if (isRegenMode) {
-          // Regeneración del GDD: el concepto pudo cambiar, preguntar si ajustar pipeline
-          setPendingProject(res.project)
-          setShowPipelineSuggestion(true)
-          setApproving(false)
-        } else {
-          // Proyecto nuevo: abrir canvas directamente sin interrupciones
-          onProjectCreated(res.project)
-        }
-        return
-      } catch (e) {
-        if (attempt === 2) {
-          setError(e instanceof Error ? e.message : 'Failed to approve project')
-          setApproving(false)
-        }
-      }
+  // ── Step 3: lock direction (00b) ───────────────────────────────────────────
+
+  async function handleDirectionSelect(dir: 1 | 2 | 3) {
+    if (!stage0aOutput || !draftProjectId) return
+    setPhase('locking'); setError(null)
+    try {
+      const res = await directionLock({
+        project_id:         draftProjectId,
+        stage0a_output:     stage0aOutput,
+        selected_direction: dir,
+      })
+      setGameIdea(res.game_idea)
+      setPhase('locked')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Direction lock failed — please retry')
+      setPhase('directions')
     }
   }
 
-  if (showPipelineSuggestion && pendingProject) {
-    return (
-      <PipelineSuggestionModal
-        project={pendingProject}
-        onConfirm={(activeNodes) => {
-          setShowPipelineSuggestion(false)
-          onProjectCreated({
-            ...pendingProject!,
-            concept: {
-              ...pendingProject!.concept,
-              pipeline_config: { active_nodes: activeNodes, configured_at: new Date().toISOString() },
-            },
-          })
-        }}
-        onSkip={() => { setShowPipelineSuggestion(false); onProjectCreated(pendingProject!) }}
-      />
-    )
+  // ── Step 4: abrir canvas ───────────────────────────────────────────────────
+
+  async function handleOpenCanvas() {
+    if (!draftProjectId) return
+    setOpeningCanvas(true); setError(null)
+    try {
+      const project = await getProject(draftProjectId)
+      onProjectCreated(project)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load project')
+      setOpeningCanvas(false)
+    }
   }
 
   if (!open) return null
 
-  const conflicted  = conflictedParamIds(params)
-  const showIdeas   = phase === 'form' && (ideas.length > 0 || ideaLoading)
+  const conflicted = conflictedParamIds(params)
+  const showIdeas  = phase === 'form' && (ideas.length > 0 || ideaLoading)
+  const parsedDirs = stage0aOutput ? parseDirections(stage0aOutput) : []
 
-  // ── Overlay ────────────────────────────────────────────────────────────────
+  // Ancho del modal según fase
+  const modalMaxWidth = showIdeas ? 1100 : (phase === 'directions' ? 760 : 600)
+
+  // Índice del step activo para el indicador del header
+  const activeStepIdx = STEP_PHASES.findIndex(s => s.phases.includes(phase))
+
   return (
     <>
     {zoomIdea && (
-      <IdeaZoomOverlay
-        idea={zoomIdea}
-        onClose={() => setZoomIdea(null)}
-        onUse={() => handleUseIdea(zoomIdea)}
-      />
+      <IdeaZoomOverlay idea={zoomIdea} onClose={() => setZoomIdea(null)} onUse={() => handleUseIdea(zoomIdea)} />
     )}
     <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 2000,
-        background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(3px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-      }}
+      style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
       onClick={e => e.stopPropagation()}
     >
       <div style={{
         background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12,
-        width: '100%', maxWidth: showIdeas ? 1100 : 600, maxHeight: '90vh', display: 'flex', flexDirection: 'column',
-        overflow: 'hidden', boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
-        transition: 'max-width 0.3s ease',
+        width: '100%', maxWidth: modalMaxWidth, maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+        overflow: 'hidden', boxShadow: '0 24px 80px rgba(0,0,0,0.6)', transition: 'max-width 0.3s ease',
       }}>
 
         {/* Header */}
         <div style={{ padding: '18px 24px 14px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-0)', letterSpacing: '-0.01em' }}>
-              {isRegenMode ? 'Regenerate GDD' : phase === 'name' ? 'New project' : (nameInput || projectName || 'New project')}
+              {isRegenMode ? 'Regenerate concept' : phase === 'name' ? 'New project' : (nameInput || projectName || 'New project')}
             </div>
             {!isRegenMode && (
               <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
-                {(['name', 'form'] as const).map((s, i) => {
-                  const done = phase !== 'name' && s === 'name'
-                  const active = phase === s || (s === 'form' && ['validating', 'generating', 'review'].includes(phase))
+                {STEP_PHASES.map((step, i) => {
+                  const done   = i < activeStepIdx
+                  const active = i === activeStepIdx
                   return (
-                    <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <div style={{ width: 16, height: 16, borderRadius: '50%', fontSize: 9, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, background: done ? 'var(--state-success)' : active ? 'var(--action)' : 'var(--bg-3)', color: done || active ? 'var(--action-fg)' : 'var(--text-3)', opacity: done || active ? 1 : 0.45 }}>
+                    <div key={step.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <div style={{
+                        width: 16, height: 16, borderRadius: '50%', fontSize: 9, fontFamily: 'var(--font-mono)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700,
+                        background: done ? 'var(--state-success)' : active ? 'var(--action)' : 'var(--bg-3)',
+                        color: done || active ? 'var(--action-fg)' : 'var(--text-3)',
+                        opacity: done || active ? 1 : 0.45,
+                      }}>
                         {done ? '✓' : i + 1}
                       </div>
                       <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: active ? 'var(--text-1)' : done ? 'var(--state-success)' : 'var(--text-3)', opacity: done || active ? 1 : 0.45 }}>
-                        {s === 'name' ? 'Project' : 'Blueprint'}
+                        {step.label}
                       </span>
                     </div>
                   )
@@ -683,11 +735,11 @@ export default function NewProjectModal({
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: 20, padding: 0, lineHeight: 1 }}>×</button>
         </div>
 
-        {/* Body — dos columnas cuando el panel de ideas está activo */}
+        {/* Body */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         <div style={{ flex: showIdeas ? '0 0 480px' : '1', overflowY: 'auto', padding: '20px 24px', borderRight: showIdeas ? '1px solid var(--line-2)' : 'none' }}>
 
-          {/* ── Step 1: project name + members ── */}
+          {/* ── Fase: name ── */}
           {phase === 'name' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <Field label="Project name">
@@ -701,11 +753,10 @@ export default function NewProjectModal({
                 />
               </Field>
 
-              {/* Members section */}
               <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Team members <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>(optional)</span></div>
-
-                {/* Staged list */}
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  Team members <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>(optional)</span>
+                </div>
                 {stagedMembers.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                     {stagedMembers.map((s, i) => (
@@ -725,8 +776,6 @@ export default function NewProjectModal({
                     ))}
                   </div>
                 )}
-
-                {/* Search input */}
                 <div style={{ position: 'relative' }}>
                   <input
                     value={memberSearch}
@@ -756,8 +805,6 @@ export default function NewProjectModal({
                     </div>
                   )}
                 </div>
-
-                {/* Discipline + Role + Add */}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <select value={memberDisc} onChange={e => setMemberDisc(e.target.value as Discipline)} style={{ ...INPUT, flex: 1, cursor: 'pointer' }}>
                     {DISCIPLINES.map(d => <option key={d} value={d}>{d}</option>)}
@@ -765,68 +812,54 @@ export default function NewProjectModal({
                   <select value={memberRole} onChange={e => setMemberRole(e.target.value)} style={{ ...INPUT, flex: 1, cursor: 'pointer' }}>
                     {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
-                  <button
-                    type="button"
-                    onClick={addStagedMember}
-                    disabled={!selectedMember}
+                  <button type="button" onClick={addStagedMember} disabled={!selectedMember}
                     style={{ padding: '8px 14px', borderRadius: 6, border: 'none', cursor: selectedMember ? 'pointer' : 'not-allowed', background: selectedMember ? 'var(--bg-3)' : 'var(--bg-2)', color: selectedMember ? 'var(--text-0)' : 'var(--text-4)', fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600, flexShrink: 0 }}
                   >+ Add</button>
                 </div>
               </div>
 
               {nameError && <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)' }}>{nameError}</div>}
-              <Btn
-                label={nameLoading ? 'Creating…' : 'Create project →'}
-                onClick={handleCreateProject}
-                accent
-                disabled={nameLoading || !nameInput.trim()}
-              />
+              <Btn label={nameLoading ? 'Creating…' : 'Create project →'} onClick={handleCreateProject} accent disabled={nameLoading || !nameInput.trim()} />
             </div>
           )}
 
-          {/* ── Step 2 loading states ── */}
-          {(phase === 'validating' || phase === 'generating') && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '24px 0' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 22, animation: 'brain-pulse 1.4s ease-in-out infinite' }}>🧠</span>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-0)', letterSpacing: '-0.01em' }}>
-                    Forge AI is analyzing your game vision
-                  </span>
-                </div>
-                <style>{`@keyframes brain-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.88)} }`}</style>
-                <p style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', margin: 0, paddingLeft: 32 }}>
-                  This may take a minute — images are being generated in parallel
-                </p>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 4 }}>
-              {/* Validating */}
-              <GenCheckItem
-                label="Validating idea…"
-                status={phase === 'validating' ? 'running' : 'done'}
-                detail={validation ? `Coherence ${validation.coherence_score}/100` : undefined}
-              />
-              {/* GDD text */}
-              {phase === 'generating' && (
-                <GenCheckItem
-                  label="Generating GDD…"
-                  status={genStep === 'gdd' ? 'running' : 'done'}
-                />
-              )}
-              {/* Images */}
-              {phase === 'generating' && (genStep === 'images' || genStep === 'done') && (
-                <GenCheckItem
-                  label="Generating images…"
-                  status={genStep === 'images' ? 'running' : 'done'}
-                />
-              )}
-              </div>
+          {/* ── Fase: validating ── */}
+          {phase === 'validating' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '24px 0' }}>
+              <GenCheckItem label="Validating idea coherence…" status="running" />
             </div>
           )}
 
-          {/* ── Step 2: idea form ── */}
+          {/* ── Fase: expanding (00a) ── */}
+          {phase === 'expanding' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '24px 0' }}>
+              <GenCheckItem label="Validation passed" status="done" detail={validation ? `Coherence ${validation.coherence_score}/100` : undefined} />
+              <GenCheckItem label="Expanding your idea into 3 design directions…" status="running" />
+            </div>
+          )}
+
+          {/* ── Fase: locking (00b) ── */}
+          {phase === 'locking' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '24px 0' }}>
+              <GenCheckItem label="3 directions generated" status="done" />
+              <GenCheckItem label="Locking selected direction…" status="running" />
+            </div>
+          )}
+
+          {/* ── Fase: form ── */}
           {phase === 'form' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {selectedIdeaTitle && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'color-mix(in oklch, var(--cat-audio) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--cat-audio) 25%, transparent)', borderRadius: 6 }}>
+                  <span style={{ fontSize: 10, color: 'var(--cat-audio)' }}>✦</span>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-audio)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    Using: <strong>{selectedIdeaTitle}</strong>
+                  </span>
+                  <button type="button" onClick={() => { setSelectedIdeaTitle(null); setIdeaPrompt('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', padding: 0 }}>
+                    clear
+                  </button>
+                </div>
+              )}
               {validationFailure && <ValidationFeedback result={validationFailure} />}
               {error && (
                 <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--state-error) 25%, transparent)', borderRadius: 4, padding: '8px 10px', lineHeight: 1.5 }}>
@@ -847,7 +880,6 @@ export default function NewProjectModal({
                       color: ideaLoading || ideaPrompt.trim().length < 10 ? 'var(--text-4)' : 'var(--cat-audio)',
                       fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
                       cursor: ideaLoading || ideaPrompt.trim().length < 10 ? 'not-allowed' : 'pointer',
-                      transition: 'all 0.15s',
                     }}
                   >
                     {ideaLoading && !ideas.length ? '⟳ …' : '✦ Generate ideas'}
@@ -873,11 +905,9 @@ export default function NewProjectModal({
                   ))}
                 </div>
               )}
-              {ideaError && (
-                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--state-error)' }}>{ideaError}</div>
-              )}
+              {ideaError && <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--state-error)' }}>{ideaError}</div>}
               <Btn
-                label={ideaPrompt.trim().length < 10 ? 'Min. 10 characters' : '▶ Validate & generate GDD'}
+                label={ideaPrompt.trim().length < 10 ? 'Min. 10 characters' : '▶ Validate & expand idea'}
                 onClick={handleSubmit}
                 accent
                 disabled={ideaPrompt.trim().length < 10}
@@ -885,67 +915,137 @@ export default function NewProjectModal({
             </div>
           )}
 
-          {/* ── Step 2: review ── */}
-          {phase === 'review' && gdd && (
+          {/* ── Fase: directions ── */}
+          {phase === 'directions' && stage0aOutput && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Title + tags */}
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-0)', letterSpacing: '-0.01em' }}>{gdd.project.name}</div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {gdd.project.genre && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 8px', borderRadius: 99, background: 'color-mix(in oklch, var(--cat-design) 12%, var(--bg-3))', border: '1px solid color-mix(in oklch, var(--cat-design) 25%, transparent)', color: 'var(--cat-design)' }}>{gdd.project.genre}</span>}
-                  {gdd.project.tone && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 8px', borderRadius: 99, background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--text-2)' }}>{gdd.project.tone}</span>}
-                  {(gdd.development?.suggested_engine || (params.engine as string)) && (
-                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 8px', borderRadius: 99, background: 'color-mix(in oklch, var(--cat-code) 10%, var(--bg-3))', border: '1px solid color-mix(in oklch, var(--cat-code) 25%, transparent)', color: 'var(--cat-code)' }}>
-                      {gdd.development?.suggested_engine || (params.engine as string)}
-                    </span>
-                  )}
+              {error && (
+                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--state-error) 25%, transparent)', borderRadius: 4, padding: '8px 10px' }}>
+                  {error}
                 </div>
+              )}
 
-                {/* Elevator pitch */}
-                {gdd.project.elevator_pitch && (
-                  <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>{gdd.project.elevator_pitch}</div>
-                )}
+              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ color: 'var(--state-success)', fontSize: 12 }}>✓</span>
+                Idea expanded — choose a design direction to lock
+              </div>
 
-                {/* Core loop */}
-                {gdd.project.core_loop && (
-                  <div style={{ paddingTop: 8, borderTop: '1px solid var(--line-2)' }}>
-                    <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Core loop</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>{gdd.project.core_loop}</div>
+              {/* Brief del juego — todo excepto las 3 direcciones */}
+              {extractBrief(stage0aOutput) && (
+                <div style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 8, padding: '14px 16px', maxHeight: 220, overflowY: 'auto' }}>
+                  <div className="raw-md" style={{ fontSize: 11, lineHeight: 1.7, color: 'var(--text-1)' }}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{extractBrief(stage0aOutput)}</ReactMarkdown>
                   </div>
-                )}
+                </div>
+              )}
 
-                {/* Named lists */}
-                {(() => {
-                  const sections: { label: string; items: string[] }[] = []
-                  if (gdd.mechanics?.length)   sections.push({ label: 'Mechanics',   items: gdd.mechanics.slice(0, 4).map((m: { name: string }) => m.name) })
-                  if (gdd.characters?.length)  sections.push({ label: 'Characters',  items: gdd.characters.slice(0, 4).map((c: { name: string }) => c.name) })
-                  if (gdd.levels?.length)      sections.push({ label: 'Levels',      items: gdd.levels.slice(0, 4).map((l: { name: string }) => l.name) })
-                  if (gdd.art_direction?.style) sections.push({ label: 'Art style',  items: [gdd.art_direction.style] })
-                  if (sections.length === 0) return null
+              {/* Tarjetas de dirección — accordion */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  Select direction
+                </div>
+                {([1, 2, 3] as const).map(dir => {
+                  const d = parsedDirs[dir - 1]
+                  const isOpen = expandedDir === dir
                   return (
-                    <div style={{ paddingTop: 8, borderTop: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {sections.map(s => (
-                        <div key={s.label}>
-                          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 3 }}>{s.label}</div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                            {s.items.map(name => (
-                              <span key={name} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 7px', borderRadius: 4, background: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--text-1)' }}>{name}</span>
-                            ))}
-                          </div>
+                    <div key={dir} style={{ borderRadius: 8, border: `1px solid ${isOpen ? 'var(--action)' : 'var(--line-2)'}`, overflow: 'hidden', transition: 'border-color 120ms' }}>
+                      {/* Header — siempre visible */}
+                      <button
+                        type="button"
+                        onClick={() => setExpandedDir(isOpen ? null : dir)}
+                        style={{
+                          width: '100%', padding: '10px 14px', background: isOpen ? 'color-mix(in oklch, var(--action) 8%, var(--bg-2))' : 'var(--bg-2)',
+                          border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                          transition: 'background 120ms',
+                        }}
+                      >
+                        <span style={{ width: 22, height: 22, borderRadius: '50%', background: isOpen ? 'var(--action)' : 'var(--bg-4)', color: isOpen ? 'var(--action-fg)' : 'var(--text-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, flexShrink: 0, transition: 'background 120ms' }}>
+                          {dir}
+                        </span>
+                        <span style={{ flex: 1, fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-mono)', color: isOpen ? 'var(--text-0)' : 'var(--text-1)', textAlign: 'left' }}>
+                          {d?.title || `Direction ${dir}`}
+                        </span>
+                        <span style={{ fontSize: 10, color: 'var(--text-4)', flexShrink: 0, transition: 'transform 120ms', transform: isOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
+                      </button>
+
+                      {/* Contenido expandido */}
+                      {isOpen && (
+                        <div style={{ padding: '0 14px 14px', background: 'color-mix(in oklch, var(--action) 5%, var(--bg-2))', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          {d?.fantasy && (
+                            <div>
+                              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--action)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 3 }}>Core fantasy</div>
+                              <p style={{ margin: 0, fontSize: 11, fontFamily: 'var(--font-sans)', color: 'var(--text-1)', lineHeight: 1.6 }}>{d.fantasy}</p>
+                            </div>
+                          )}
+                          {d?.differentiator && (
+                            <div>
+                              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 3 }}>Differentiator</div>
+                              <p style={{ margin: 0, fontSize: 11, fontFamily: 'var(--font-sans)', color: 'var(--text-2)', lineHeight: 1.6 }}>{d.differentiator}</p>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDirectionSelect(dir)}
+                            style={{ alignSelf: 'flex-start', padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--action)', color: 'var(--action-fg)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, cursor: 'pointer' }}
+                          >
+                            Select direction {dir} →
+                          </button>
                         </div>
-                      ))}
+                      )}
                     </div>
                   )
-                })()}
+                })}
               </div>
-              {error && <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)' }}>{error}</div>}
-              <Btn label={approving ? 'Saving…' : 'Save & open canvas →'} onClick={handleApprove} accent disabled={approving} />
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Btn label="↺ Regenerate" onClick={() => doGenerate(buildFullPrompt())} disabled={approving} small />
-                <Btn label="← Edit idea"  onClick={() => setPhase('form')} disabled={approving} small />
-              </div>
+
+              <button
+                type="button"
+                onClick={() => setPhase('form')}
+                style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+              >
+                ← Edit idea
+              </button>
             </div>
           )}
+
+          {/* ── Fase: locked ── */}
+          {phase === 'locked' && gameIdea && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 16, color: 'var(--state-success)' }}>✓</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-0)' }}>Game concept locked</span>
+              </div>
+
+              <div style={{ background: 'color-mix(in oklch, var(--state-success) 6%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--state-success) 25%, transparent)', borderRadius: 8, padding: '14px 16px', maxHeight: 320, overflowY: 'auto' }}>
+                <pre style={{ margin: 0, fontSize: 11, lineHeight: 1.7, color: 'var(--text-1)', fontFamily: 'var(--font-mono)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {gameIdea}
+                </pre>
+              </div>
+
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', lineHeight: 1.6 }}>
+                This concept will guide all 12 GDD sections. Each section can be generated and approved individually in the canvas.
+              </div>
+
+              {error && (
+                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--state-error)', background: 'color-mix(in oklch, var(--state-error) 8%, var(--bg-2))', border: '1px solid color-mix(in oklch, var(--state-error) 25%, transparent)', borderRadius: 4, padding: '8px 10px' }}>
+                  {error}
+                </div>
+              )}
+
+              <Btn
+                label={openingCanvas ? 'Opening canvas…' : 'Open canvas →'}
+                onClick={handleOpenCanvas}
+                accent
+                disabled={openingCanvas}
+              />
+              <button
+                type="button"
+                onClick={() => setPhase('directions')}
+                style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+              >
+                ← Back to directions
+              </button>
+            </div>
+          )}
+
         </div>{/* end left column */}
 
         {/* ── Panel derecho: ideas ── */}
@@ -956,34 +1056,23 @@ export default function NewProjectModal({
                 Ideas {ideas.length > 0 && `· ${ideas.length}`}
               </div>
               {ideas.length > 0 && !ideaLoading && (
-                <button
-                  type="button"
-                  onClick={() => handleGenerateIdeas(true)}
-                  style={{ padding: '4px 10px', borderRadius: 5, fontSize: 10, fontFamily: 'var(--font-mono)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-2)', cursor: 'pointer' }}
-                >
+                <button type="button" onClick={() => handleGenerateIdeas(true)} style={{ padding: '4px 10px', borderRadius: 5, fontSize: 10, fontFamily: 'var(--font-mono)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-2)', cursor: 'pointer' }}>
                   + One more
                 </button>
               )}
             </div>
 
             {ideaLoading && ideas.length === 0 && (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '40px 16px' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16, padding: '40px 16px' }}>
                 <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', animation: 'item-pulse 1.6s ease-in-out infinite' }}>
                       {ideaProgress < 40 ? 'Generating ideas…' : ideaProgress < 80 ? 'Generating images…' : 'Almost ready…'}
                     </span>
-                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-audio)' }}>
-                      {Math.round(ideaProgress)}%
-                    </span>
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cat-audio)' }}>{Math.round(ideaProgress)}%</span>
                   </div>
                   <div style={{ width: '100%', height: 3, background: 'var(--bg-3)', borderRadius: 99, overflow: 'hidden' }}>
-                    <div style={{
-                      height: '100%', borderRadius: 99,
-                      background: 'linear-gradient(90deg, var(--cat-audio), var(--cat-design))',
-                      width: `${ideaProgress}%`,
-                      transition: 'width 0.4s ease',
-                    }} />
+                    <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, var(--cat-audio), var(--cat-design))', width: `${ideaProgress}%`, transition: 'width 0.4s ease' }} />
                   </div>
                 </div>
               </div>

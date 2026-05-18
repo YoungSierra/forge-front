@@ -200,18 +200,6 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
 
       <div className="tb-divider" />
 
-      {/* Botón de configuración del pipeline */}
-      {hasProject && (
-        <button
-          className="tb-btn"
-          onClick={() => setShowPipelineModal(true)}
-          title="Configurar pipeline del proyecto"
-          style={{ color: 'var(--text-2)' }}
-        >
-          ⚙ Pipeline
-        </button>
-      )}
-
       <div className="tb-divider" />
 
       {/* Stack de miembros del proyecto */}

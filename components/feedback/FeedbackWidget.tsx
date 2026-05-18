@@ -122,18 +122,18 @@ export default function FeedbackWidget() {
 
   return (
     <>
-      {/* Floating button — esquina inferior izquierda para no solapar el inspector */}
+      {/* Floating button — se mantiene a la derecha del panel library */}
       <button
         onClick={() => setOpen(true)}
         title="Send feedback"
         style={{
-          position: 'fixed', bottom: 24, left: 24, zIndex: 900,
+          position: 'fixed', bottom: 24, left: 'calc(var(--forge-library-w, 0px) + 24px)', zIndex: 900,
           background: 'var(--bg-3)', border: '1px solid var(--line-2)',
           borderRadius: 99, padding: '7px 14px',
           fontSize: 11, fontFamily: 'monospace', color: 'var(--text-2)',
           cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
           display: 'flex', alignItems: 'center', gap: 6,
-          transition: 'all 120ms',
+          transition: 'left 200ms ease, border-color 120ms, color 120ms',
         }}
         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--cat-design)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--cat-design)' }}
         onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--line-2)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-2)' }}
@@ -144,7 +144,7 @@ export default function FeedbackWidget() {
       {/* Modal */}
       {open && (
         <div
-          style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-start', padding: 24, pointerEvents: 'none' }}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-start', paddingBottom: 24, paddingLeft: 'calc(var(--forge-library-w, 0px) + 24px)', paddingRight: 24, paddingTop: 24, pointerEvents: 'none', transition: 'padding-left 200ms ease' }}
         >
           <div style={{ pointerEvents: 'all', background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, width: 360, boxShadow: '0 8px 40px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 

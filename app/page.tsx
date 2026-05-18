@@ -29,7 +29,7 @@ export default function HomePage() {
                   style={{
                     background: 'none', border: 'none', cursor: 'pointer',
                     padding: '4px 20px 8px 0', fontSize: 22, fontWeight: 700,
-                    letterSpacing: '-0.01em',
+                    fontFamily: 'var(--font-sans)', letterSpacing: '-0.01em',
                     color: active ? 'var(--text-0)' : 'var(--text-3)',
                     borderBottom: active ? '2px solid var(--action)' : '2px solid transparent',
                     marginBottom: -1, transition: 'color 120ms',

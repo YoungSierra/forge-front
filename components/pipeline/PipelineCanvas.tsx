@@ -310,7 +310,9 @@ function PipelineApp({
   const gddHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const gddCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const isDraft = (p: Project | null) => !p?.concept?.pipeline?.gdd
+  // Draft = no GDD generado (flow viejo) y sin game_idea locked (flow nuevo)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const isDraft = (p: Project | null) => !p?.concept?.pipeline?.gdd && !(p?.concept?.pipeline as any)?.game_idea?.text
   const [modalOpen, setModalOpen]           = useState(isDraft(initialProject))
   const [regenProjectId, setRegenProjectId] = useState<string | null>(
     initialProject && isDraft(initialProject) ? initialProject.id : null

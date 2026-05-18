@@ -3,7 +3,7 @@
 import React, { memo, useEffect } from 'react'
 import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react'
 
-export type ForgeNodeStatus = 'idle' | 'running' | 'complete' | 'error' | 'locked' | 'gate-pending' | 'pending_review'
+export type ForgeNodeStatus = 'idle' | 'running' | 'review' | 'complete' | 'error' | 'locked' | 'gate-pending' | 'pending_review'
 
 export type ForgeNodeCategory =
   | 'design' | 'asset' | 'level' | 'code'

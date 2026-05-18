@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { getProject } from '@/lib/api'
 import type { Project } from '@/lib/types'
-import PipelineCanvas from '@/components/pipeline/PipelineCanvas'
+import ForgePipeline from '@/components/pipeline/ForgePipeline'
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -70,5 +70,5 @@ export default function ProjectPage({ params }: PageProps) {
     )
   }
 
-  return <PipelineCanvas project={project} onRefresh={load} />
+  return <ForgePipeline project={project} onRefresh={load} />
 }

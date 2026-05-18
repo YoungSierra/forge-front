@@ -616,8 +616,8 @@ function GDDPreviewModal({ gdd, onClose }: { gdd: GDD; onClose: () => void }) {
                   onClick={() => setTab(t.id)}
                   style={{
                     background: 'none', border: 'none', cursor: 'pointer',
-                    padding: '7px 12px', fontFamily: 'var(--font-sans)', fontSize: 11,
-                    fontWeight: active ? 600 : 400,
+                    padding: '7px 12px', fontFamily: 'var(--font-sans)', fontSize: 13,
+                    fontWeight: active ? 600 : 500,
                     color: active ? 'var(--text-0)' : 'var(--text-3)',
                     borderBottom: active ? '2px solid var(--node-color, var(--cat-design))' : '2px solid transparent',
                     marginBottom: -1, transition: 'color 100ms',
@@ -1742,8 +1742,8 @@ function ArtDirectionIntakePanel({ project, onRefresh, onLog, onResult, locked, 
               return (
                 <button key={t.id} onClick={() => setTab(t.id)} style={{
                   background: 'none', border: 'none', cursor: 'pointer',
-                  padding: '5px 10px', fontFamily: 'var(--font-sans)', fontSize: 10,
-                  fontWeight: active ? 600 : 400,
+                  padding: '5px 10px', fontFamily: 'var(--font-sans)', fontSize: 13,
+                  fontWeight: active ? 600 : 500,
                   color: active ? 'var(--text-0)' : 'var(--text-3)',
                   borderBottom: active ? '2px solid var(--node-color, var(--cat-design))' : '2px solid transparent',
                   marginBottom: -1,
@@ -1960,8 +1960,8 @@ function VisualGuidePanel({ project, onRefresh, onLog, onResult, locked, nodeCon
                   onClick={() => setTab(t.id)}
                   style={{
                     background: 'none', border: 'none', cursor: 'pointer',
-                    padding: '5px 10px', fontFamily: 'var(--font-sans)', fontSize: 10,
-                    fontWeight: active ? 600 : 400,
+                    padding: '5px 10px', fontFamily: 'var(--font-sans)', fontSize: 13,
+                    fontWeight: active ? 600 : 500,
                     color: active ? 'var(--text-0)' : 'var(--text-3)',
                     borderBottom: active ? '2px solid var(--node-color, var(--cat-design))' : '2px solid transparent',
                     marginBottom: -1,
@@ -2250,7 +2250,7 @@ function ConceptArtPanel({ project, onRefresh, onLog, onResult, locked, nodeCont
               const active = tab === t.id
               return (
                 <button key={t.id} onClick={() => setTab(t.id)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px 10px', fontFamily: 'var(--font-sans)', fontSize: 10, fontWeight: active ? 600 : 400, color: active ? 'var(--text-0)' : 'var(--text-3)', borderBottom: active ? '2px solid var(--node-color, var(--cat-design))' : '2px solid transparent', marginBottom: -1, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '5px 10px', fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: active ? 600 : 500, color: active ? 'var(--text-0)' : 'var(--text-3)', borderBottom: active ? '2px solid var(--node-color, var(--cat-design))' : '2px solid transparent', marginBottom: -1, display: 'flex', alignItems: 'center', gap: 5 }}>
                   {t.label}
                   {t.count !== undefined && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: active ? 'var(--node-color, var(--cat-design))' : 'var(--text-3)', background: 'var(--bg-3)', padding: '1px 5px', borderRadius: 8 }}>{t.count}</span>}
                 </button>
@@ -2896,12 +2896,14 @@ interface Props {
   nodeContext?: import('@/lib/nodeExecutionContext').InputContext
   onRequestNewProject?: () => void
   onRequestRegenerate?: (projectId: string) => void
+  onRunNode?:     () => void
+  isNodeLocked?:  boolean
 }
 
 // Nodos sin botón View Detail
 const NO_DETAIL_STEPS = new Set(['export', 'playtesting'])
 
-export default function InspectorPanel({ node, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode, nodeContext, onRequestNewProject, onRequestRegenerate }: Props) {
+export default function InspectorPanel({ node, project, onRefresh, onApproved, onLog, onProjectCreated, onApproveNode, nodeContext, onRequestNewProject, onRequestRegenerate, onRunNode, isNodeLocked }: Props) {
   // Banner reactivo: muestra generaciones en curso aunque el usuario esté en otro nodo
   const [, forceUpdate] = useState(0)
   useEffect(() => subscribeGen(() => forceUpdate(n => n + 1)), [])
@@ -2944,7 +2946,8 @@ export default function InspectorPanel({ node, project, onRefresh, onApproved, o
   const STATUS_LABEL: Record<string, string> = {
     idle:           'Idle — ready to run',
     running:        'Generating…',
-    complete:       'Output ready',
+    review:         'Pending review',
+    complete:       'Output ready — approved',
     error:          'Error',
     locked:         'Locked — upstream pending',
     'gate-pending': 'Awaiting your review',
@@ -2996,9 +2999,33 @@ export default function InspectorPanel({ node, project, onRefresh, onApproved, o
       </div>
 
       {/* Footer fijo — visible aunque haya mucho contenido */}
-      {hasDetail && (
-        <div className="insp-footer">
-          <ViewDetailBtn onClick={() => setDetailOpen(true)} />
+      {(onRunNode || hasDetail) && (
+        <div className="insp-footer" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {onRunNode ? (
+            <>
+              {/* Botón principal — abre NodeRunModal; deshabilitado cuando el nodo está bloqueado y sin output */}
+              <ActionBtn
+                label={
+                  data.approved
+                    ? `⊞ View result — ${data.label}`
+                    : data.status === 'review'
+                      ? `⊞ Review output — ${data.label}`
+                      : isNodeLocked
+                        ? `⊘ Previous node required`
+                        : `▶ Generate ${data.label}`
+                }
+                onClick={isNodeLocked && !data.approved && data.status !== 'review' ? () => {} : onRunNode}
+                variant={data.approved || data.status === 'review' ? 'ghost' : isNodeLocked ? 'ghost' : 'run'}
+                disabled={!!(isNodeLocked && !data.approved && data.status !== 'review')}
+              />
+              {/* Botón Approve directo — solo cuando hay output pendiente de revisión */}
+              {data.status === 'review' && project && (
+                <QuickApproveBtn stepKey={stepKey} project={project} onRefresh={onRefresh} />
+              )}
+            </>
+          ) : (
+            hasDetail && <ViewDetailBtn onClick={() => setDetailOpen(true)} />
+          )}
         </div>
       )}
 
@@ -3012,6 +3039,31 @@ export default function InspectorPanel({ node, project, onRefresh, onApproved, o
         />
       )}
     </aside>
+  )
+}
+
+function QuickApproveBtn({ stepKey, project, onRefresh }: { stepKey: string; project: Project; onRefresh: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const pipeline  = project.concept?.pipeline as Record<string, unknown> | undefined
+  const nodeEntry = pipeline?.[stepKey] as Record<string, unknown> | undefined
+  if (!nodeEntry) return null
+
+  async function handleApprove() {
+    setBusy(true)
+    try {
+      const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+      await approveNode(project.id, stepKey, { output: nodeEntry!.output, image_url: nodeEntry!.image_url }, memberId ?? undefined)
+      onRefresh()
+    } catch { /* silencioso */ } finally { setBusy(false) }
+  }
+
+  return (
+    <ActionBtn
+      label={busy ? '…' : '✓ Approve'}
+      onClick={handleApprove}
+      variant="approve"
+      disabled={busy}
+    />
   )
 }
 

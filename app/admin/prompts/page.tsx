@@ -18,6 +18,7 @@ export default function PromptsPage() {
   const [rows, setRows] = useState<Record<string, RowState>>({})
   const [loading, setLoading] = useState(true)
   const [globalError, setGlobalError] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     getAdminPromptConfigs()
@@ -71,6 +72,14 @@ export default function PromptsPage() {
     }
   }, [rows])
 
+  // Mapa de order_index por container key para construir el índice "1.2"
+  const containerIndex = configs
+    .filter(c => c.step_type === 'container')
+    .reduce<Record<string, number>>((acc, c) => {
+      acc[c.key] = c.order_index ?? 0
+      return acc
+    }, {})
+
   const cell: React.CSSProperties = {
     padding: '10px 12px',
     borderBottom: '1px solid var(--line-2)',
@@ -120,15 +129,57 @@ export default function PromptsPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: 'var(--bg-2)' }}>
-              <th style={{ ...cell, color: 'var(--text-3)', textAlign: 'left', width: 160 }}>Node key</th>
-              <th style={{ ...cell, color: 'var(--text-3)', textAlign: 'left', width: '50%' }}>Description</th>
-              <th style={{ ...cell, color: 'var(--text-3)', textAlign: 'left', width: '50%' }}>R2 path</th>
+              <th style={{ ...cell, color: 'var(--text-3)', textAlign: 'left', width: 180 }}>Step key</th>
+              <th style={{ ...cell, color: 'var(--text-3)', textAlign: 'left', width: 180 }}>Description</th>
+              <th style={{ ...cell, color: 'var(--text-3)', textAlign: 'left' }}>R2 path</th>
               <th style={{ ...cell, color: 'var(--text-3)', textAlign: 'left', width: 100 }}>Status</th>
               <th style={{ ...cell, color: 'var(--text-3)', textAlign: 'right', width: 80 }}></th>
             </tr>
           </thead>
           <tbody>
-            {configs.map(cfg => {
+            {configs.map((cfg, i) => {
+              if (cfg.step_type === 'container') {
+                const isCollapsed = collapsed.has(cfg.key)
+                return (
+                  <tr
+                    key={cfg.key}
+                    onClick={() => setCollapsed(prev => {
+                      const next = new Set(prev)
+                      next.has(cfg.key) ? next.delete(cfg.key) : next.add(cfg.key)
+                      return next
+                    })}
+                    style={{ cursor: 'pointer', userSelect: 'none', background: 'var(--bg-2)' }}
+                  >
+                    <td colSpan={5} style={{
+                      padding: '8px 12px',
+                      borderBottom: '1px solid var(--line-2)',
+                      borderLeft: '3px solid var(--action)',
+                      fontSize: 11,
+                      fontFamily: 'var(--font-sans)',
+                      fontWeight: 600,
+                      color: 'var(--text-1)',
+                      letterSpacing: '0.04em',
+                    }}>
+                      <span style={{
+                        display: 'inline-block',
+                        marginRight: 8,
+                        color: 'var(--action)',
+                        transition: 'transform 120ms',
+                        transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                      }}>▶</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', marginRight: 8 }}>
+                        {cfg.order_index ?? ''}
+                      </span>
+                      {cfg.description || cfg.key}
+                    </td>
+                  </tr>
+                )
+              }
+
+              // buscar el container padre para saber si está colapsado
+              const parentCfg = configs.slice(0, i).reverse().find(c => c.step_type === 'container')
+              if (cfg.step_type === 'node' && parentCfg && collapsed.has(parentCfg.key)) return null
+
               const row = rows[cfg.key]
               if (!row) return null
               const hasR2 = !!cfg.r2_path
@@ -136,21 +187,18 @@ export default function PromptsPage() {
                 <tr key={cfg.key} style={{ background: row.dirty ? 'var(--bg-2)' : 'transparent' }}>
 
                   {/* Key */}
-                  <td style={{ ...cell, color: 'var(--text-1)', fontWeight: 600 }}>
+                  <td style={{ ...cell, color: 'var(--text-1)', fontWeight: 600, paddingLeft: cfg.parent_key ? 28 : 12 }}>
+                    {cfg.parent_key && (
+                      <span style={{ color: 'var(--text-3)', fontWeight: 400, marginRight: 6, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                        {containerIndex[cfg.parent_key] ?? ''}.{cfg.order_index}
+                      </span>
+                    )}
                     {cfg.key}
                   </td>
 
                   {/* Description */}
-                  <td style={cell}>
-                    <input
-                      value={row.description}
-                      onChange={e => handleChange(cfg.key, 'description', e.target.value)}
-                      placeholder="Short description…"
-                      style={{
-                        width: '100%', background: 'transparent', border: 'none', outline: 'none',
-                        color: 'var(--text-2)', fontSize: 12, fontFamily: 'monospace',
-                      }}
-                    />
+                  <td style={{ ...cell, color: 'var(--text-3)' }}>
+                    {cfg.description || '—'}
                   </td>
 
                   {/* R2 path */}
@@ -163,7 +211,7 @@ export default function PromptsPage() {
                         width: '100%', background: 'var(--bg-0)',
                         border: '1px solid var(--line-2)', borderRadius: 4,
                         padding: '4px 8px', outline: 'none',
-                        color: 'var(--text-1)', fontSize: 12, fontFamily: 'monospace',
+                        color: 'var(--text-1)', fontSize: 12, fontFamily: 'var(--font-mono)',
                       }}
                     />
                     {row.error && (
@@ -176,7 +224,7 @@ export default function PromptsPage() {
                     <span style={{
                       display: 'inline-block',
                       padding: '2px 8px', borderRadius: 10,
-                      fontSize: 10, fontFamily: 'monospace', fontWeight: 600,
+                      fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
                       background: hasR2 ? 'rgba(34,197,94,0.12)' : 'var(--bg-2)',
                       color: hasR2 ? 'var(--green, #22c55e)' : 'var(--text-3)',
                       border: `1px solid ${hasR2 ? 'rgba(34,197,94,0.3)' : 'var(--line-2)'}`,
@@ -188,7 +236,7 @@ export default function PromptsPage() {
                   {/* Save */}
                   <td style={{ ...cell, textAlign: 'right' }}>
                     {row.saved ? (
-                      <span style={{ color: 'var(--green, #22c55e)', fontSize: 11, fontFamily: 'monospace' }}>
+                      <span style={{ color: 'var(--green, #22c55e)', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
                         saved
                       </span>
                     ) : (
@@ -196,9 +244,9 @@ export default function PromptsPage() {
                         onClick={() => handleSave(cfg.key)}
                         disabled={!row.dirty || row.saving}
                         style={{
-                          padding: '4px 12px', borderRadius: 4, fontSize: 11, fontFamily: 'monospace',
+                          padding: '4px 12px', borderRadius: 4, fontSize: 11, fontFamily: 'var(--font-mono)',
                           border: '1px solid var(--line-2)', cursor: row.dirty ? 'pointer' : 'default',
-                          background: row.dirty ? 'var(--accent, #6366f1)' : 'var(--bg-2)',
+                          background: row.dirty ? 'var(--action)' : 'var(--bg-2)',
                           color: row.dirty ? '#fff' : 'var(--text-3)',
                           opacity: row.saving ? 0.6 : 1,
                           transition: 'background 120ms',

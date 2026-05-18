@@ -317,6 +317,10 @@ export type ComfyUIWorkflow = {
 export type StepConfig = {
   id: string
   step_key: string
+  step_type: 'node' | 'container' | 'service'
+  parent_key: string | null
+  order_index: number
+  label: string | null
   integration_type: 'llm' | 'comfyui' | 'n8n'
   model_name: string | null
   comfyui_workflow_id: string | null
@@ -343,6 +347,9 @@ export type PromptConfig = {
   r2_path: string | null
   description: string | null
   updated_at: string
+  step_type?: 'node' | 'container' | 'service'
+  order_index?: number
+  parent_key?: string | null
 }
 
 export type GameFormData = {

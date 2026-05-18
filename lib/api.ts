@@ -934,3 +934,159 @@ export interface VisualGuide {
   do_list: string[]
   dont_list: string[]
 }
+
+// ─── Stage 0 — Idea Expansion & Direction Lock ───────────────────────────────
+
+export async function ideaExpansion(payload: {
+  project_id: string
+  raw_idea: string
+  genre?: string
+  tone?: string
+  scope?: string
+  engine?: string
+}): Promise<{ output: string; meta: unknown }> {
+  const data = await request<{ success: boolean; output: string; meta: unknown }>(
+    '/api/generate/idea-expansion',
+    { method: 'POST', body: JSON.stringify(payload) }
+  )
+  return { output: data.output, meta: data.meta }
+}
+
+export async function directionLock(payload: {
+  project_id: string
+  stage0a_output: string
+  selected_direction: 1 | 2 | 3
+}): Promise<{ game_idea: string; meta: unknown }> {
+  const data = await request<{ success: boolean; game_idea: string; meta: unknown }>(
+    '/api/generate/direction-lock',
+    { method: 'POST', body: JSON.stringify(payload) }
+  )
+  return { game_idea: data.game_idea, meta: data.meta }
+}
+
+// ─── GDD Sections ────────────────────────────────────────────────────────────
+
+export type GddSectionKey =
+  | 'gdd_overview'
+  | 'gdd_genre_platform'
+  | 'gdd_gameplay'
+  | 'gdd_core_loop'
+  | 'gdd_mechanics'
+  | 'gdd_progression'
+  | 'gdd_narrative'
+  | 'gdd_characters'
+  | 'gdd_ui_ux'
+  | 'gdd_art_audio'
+  | 'gdd_economy'
+  | 'gdd_technical'
+
+export interface GddSectionStatus {
+  section_key: GddSectionKey
+  order: number
+  generated: boolean
+  generated_at: string | null
+  output: string | null
+}
+
+export async function generateGddSection(payload: {
+  project_id: string
+  section_key: GddSectionKey
+  prior_context?: string
+}): Promise<{ output: string; section_key: GddSectionKey; meta: unknown }> {
+  const data = await request<{ success: boolean; output: string; section_key: GddSectionKey; meta: unknown }>(
+    '/api/generate/gdd-section',
+    { method: 'POST', body: JSON.stringify(payload) }
+  )
+  return { output: data.output, section_key: data.section_key, meta: data.meta }
+}
+
+export async function getGddSections(project_id: string): Promise<GddSectionStatus[]> {
+  const data = await request<{ success: boolean; sections: GddSectionStatus[] }>(
+    `/api/generate/gdd-section/${project_id}`
+  )
+  return data.sections
+}
+
+// ─── Pipeline config ──────────────────────────────────────────────────────────
+
+export interface PipelineNodeConfig {
+  step_key:         string
+  label:            string
+  order_index:      number | null
+  integration_type: string
+  model_name:       string | null
+  is_active:        boolean
+}
+
+export interface PipelineContainerConfig {
+  step_key:         string
+  label:            string
+  order_index:      number | null
+  integration_type: string
+  is_active:        boolean
+  children:         PipelineNodeConfig[]
+}
+
+export async function getPipelineConfig(): Promise<PipelineContainerConfig[]> {
+  const data = await request<{ success: boolean; containers: PipelineContainerConfig[] }>('/api/pipeline/config')
+  return data.containers
+}
+
+// Elemento estructurado retornado por nodos con STEP_SCHEMAS en el backend
+export interface PipelineNodeItem {
+  name?:         string
+  [key: string]: unknown
+  image_url?:    string | null
+}
+
+export async function runPipelineNode(
+  projectId: string,
+  stepKey:   string,
+): Promise<{ output: string; image_url?: string | null; items?: PipelineNodeItem[] | null }> {
+  const data = await request<{ success: boolean; output: string; image_url?: string | null; items?: PipelineNodeItem[] | null }>(
+    '/api/pipeline/run',
+    { method: 'POST', body: JSON.stringify({ project_id: projectId, step_key: stepKey }) }
+  )
+  return { output: data.output, image_url: data.image_url, items: data.items }
+}
+
+export async function regeneratePipelineItem(
+  projectId:  string,
+  stepKey:    string,
+  itemIndex:  number,
+): Promise<{ item: PipelineNodeItem; item_index: number }> {
+  const data = await request<{ success: boolean; item: PipelineNodeItem; item_index: number }>(
+    '/api/pipeline/regenerate-item',
+    { method: 'POST', body: JSON.stringify({ project_id: projectId, step_key: stepKey, item_index: itemIndex }) }
+  )
+  return { item: data.item, item_index: data.item_index }
+}
+
+export async function savePipelineImageVersion(
+  projectId: string,
+  stepKey:   string,
+  imageUrl:  string,
+): Promise<void> {
+  await request<{ success: boolean }>(
+    '/api/pipeline/save-image-version',
+    { method: 'POST', body: JSON.stringify({ project_id: projectId, step_key: stepKey, image_url: imageUrl }) }
+  )
+}
+
+export async function saveNodeDraft(
+  projectId: string,
+  stepKey:   string,
+  output:    string,
+  imageUrl?: string | null,
+  items?:    PipelineNodeItem[] | null,
+): Promise<void> {
+  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+  await request<{ success: boolean }>(
+    '/api/pipeline/save-draft',
+    { method: 'POST', body: JSON.stringify({
+      project_id: projectId, step_key: stepKey, output, image_url: imageUrl,
+      ...(items && items.length > 0 ? { items } : {}),
+      ...(memberId ? { member_id: memberId } : {}),
+    }) }
+  )
+}
