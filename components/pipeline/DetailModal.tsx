@@ -24,7 +24,7 @@ interface Props {
 /* Determine if a step already has generated output */
 function stepHasOutput(stepKey: string, project: Project, pendingData?: unknown): boolean {
   if (pendingData != null) return true
-  const key = stepKey.replace('-gate', '')
+  const key = stepKey
   const g   = project.concept?.pipeline?.gdd
   const pipeline = project.concept?.pipeline
   switch (key) {
@@ -2236,15 +2236,10 @@ export function CharatersModal({ project, onClose, onApproved }: { project: Proj
 const STEP_TITLES: Record<string, string> = {
   // Wizard steps
   'gdd':           'Game Design Document',
-  'gdd-gate':      'GDD Gate — Review',
   'sprites':       'Sprites — Characters',
-  'sprites-gate':  'Sprites Gate — Review',
   'levels':        'Level Layouts',
-  'levels-gate':   'Levels Gate — Review',
   'code':          'Source Code — Architecture',
-  'code-gate':     'Code Gate — Review',
   'audio':         'Audio Direction',
-  'audio-gate':    'Audio Gate — Review',
   'export':        'Export — Package',
   'playtesting':   'Playtesting',
   // Pipeline nodes (2D)
@@ -2489,7 +2484,7 @@ export default function DetailModal({ stepKey, project, pendingData, onClose, no
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const contentKey   = stepKey.replace('-gate', '')
+  const contentKey   = stepKey
   const hasOutput    = stepHasOutput(stepKey, project, pendingData)
   const hasSources   = nodeContext != null
     ? Object.keys(nodeContext).length > 0

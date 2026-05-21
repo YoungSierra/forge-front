@@ -107,10 +107,7 @@ export default function NewProjectPage() {
       position: 'sticky', top: 0, zIndex: 30,
     }}>
       <Link href="/" className="forge-logo">
-        <svg width="18" height="18" viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
-          <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
-        </svg>
+        <img src="/forgy/forgyi.png" alt="Forge" width={18} height={18} style={{ objectFit: 'contain' }} />
         <span className="forge-logo-wordmark" style={{ fontSize: 13 }}>Forge</span>
       </Link>
       <span style={{ margin: '0 10px', color: 'var(--line-2)' }}>/</span>
@@ -132,18 +129,84 @@ export default function NewProjectPage() {
   /* ─── Form / Validating ─── */
   if (state === 'form' || state === 'validating') {
     return (
-      <div style={{ minHeight: '100vh', background: 'var(--bg-0)' }}>
-        <TopBar />
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 24px' }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-0)', textAlign: 'center', marginBottom: 32, maxWidth: 560, letterSpacing: '-0.01em', lineHeight: 1.35 }}>
-            What game idea will we build today?
-          </h1>
-          <ErrorBanner />
-          <GameIdeaForm
-            onSubmit={handleFormSubmit}
-            loading={state === 'validating'}
-            initialData={formData ?? undefined}
+      <div style={{
+        minHeight: '100vh',
+        background: 'var(--bg-0)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '80px 24px 40px',
+      }}>
+        {/* Wrapper con overflow visible para que el mascot sobresalga */}
+        <div style={{ position: 'relative', width: '100%', maxWidth: 640 }}>
+
+          {/* Mascot — superpuesto sobre la esquina top-left del card */}
+          <img
+            src="/forgy/forgyi.png"
+            alt="Forge"
+            style={{
+              position: 'absolute',
+              top: -36,
+              left: -16,
+              width: 80,
+              height: 80,
+              objectFit: 'contain',
+              zIndex: 2,
+              filter: 'drop-shadow(0 4px 16px rgba(255,138,61,0.25))',
+              pointerEvents: 'none',
+            }}
           />
+
+          {/* Modal card */}
+          <div style={{
+            background: 'var(--bg-1)',
+            borderRadius: 16,
+            border: '1px solid var(--line-2)',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03)',
+            position: 'relative',
+            overflow: 'hidden',
+          }}>
+
+            {/* Botón cerrar */}
+            <button
+              onClick={() => router.push('/')}
+              style={{
+                position: 'absolute', top: 14, right: 14,
+                border: 'none', background: 'var(--bg-3)',
+                color: 'var(--text-2)', borderRadius: 6,
+                padding: '4px 9px', fontSize: 12,
+                cursor: 'pointer', lineHeight: 1,
+              }}
+            >
+              ✕
+            </button>
+
+            {/* Header */}
+            <div style={{ padding: '52px 32px 20px' }}>
+              <h1 style={{
+                fontSize: 20, fontWeight: 700,
+                color: 'var(--text-0)', marginBottom: 6,
+                letterSpacing: '-0.01em',
+              }}>
+                We create a new project!
+              </h1>
+              <p style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                Describe your game idea and we&apos;ll help you build it.
+              </p>
+            </div>
+
+            <div style={{ height: 1, background: 'var(--line-2)' }} />
+
+            {/* Cuerpo del formulario */}
+            <div style={{ padding: '24px 32px 32px' }}>
+              <ErrorBanner />
+              <GameIdeaForm
+                onSubmit={handleFormSubmit}
+                loading={state === 'validating'}
+                initialData={formData ?? undefined}
+              />
+            </div>
+          </div>
         </div>
       </div>
     )

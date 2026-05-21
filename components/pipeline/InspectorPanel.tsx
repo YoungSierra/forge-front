@@ -1044,10 +1044,7 @@ function NewGamePanel({ onProjectCreated, onLog, memberId }: NewGamePanelProps) 
   if (phase === 'validating' || phase === 'generating') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '24px 0' }}>
-        <svg width="28" height="28" viewBox="0 0 32 32" style={{ animation: 'spin 2s linear infinite', flexShrink: 0 }}>
-          <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
-          <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
-        </svg>
+        <img src="/forgy/forgyi.png" alt="Forge" width={28} height={28} style={{ objectFit: 'contain', animation: 'spin 2s linear infinite', flexShrink: 0 }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', textAlign: 'center', lineHeight: 1.6 }}>
           {phase === 'validating' ? 'Validating idea…' : 'Generating GDD…'}
@@ -2950,7 +2947,6 @@ export default function InspectorPanel({ node, project, onRefresh, onApproved, o
     complete:       'Output ready — approved',
     error:          'Error',
     locked:         'Locked — upstream pending',
-    'gate-pending': 'Awaiting your review',
   }
 
   return (
@@ -3143,10 +3139,7 @@ function NodeContent({
     if (!project) {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '40px 0', textAlign: 'center' }}>
-          <svg width="40" height="40" viewBox="0 0 32 32" style={{ opacity: 0.3, flexShrink: 0 }}>
-            <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
-            <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
-          </svg>
+          <img src="/forgy/forgyi.png" alt="Forge" width={40} height={40} style={{ objectFit: 'contain', opacity: 0.3, flexShrink: 0 }} />
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', marginBottom: 4 }}>No project yet</div>
             <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>Create a project to generate the GDD</div>
@@ -3186,19 +3179,6 @@ function NodeContent({
     )
   }
 
-  /* ── GDD Gate ── */
-  if (stepKey === 'gdd-gate' && project) {
-    const gddApproved = (project.generation_jobs ?? []).some(j => j.current_step === 'gdd' && j.status === 'approved')
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <SectionTitle>GDD Gate</SectionTitle>
-        <MonoRow k="artifact" v="GDD Document" accent />
-        <MonoRow k="status" v={gddApproved ? 'approved' : 'pending'} />
-        {gddApproved && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cat-code)', textAlign: 'center' }}>✓ GDD approved — pipeline unlocked</div>}
-      </div>
-    )
-  }
-
   /* ── Generation nodes ── */
   if (!project) {
     return (
@@ -3208,16 +3188,16 @@ function NodeContent({
     )
   }
 
-  if (stepKey === 'sprites' || stepKey === 'sprites-gate') {
+  if (stepKey === 'sprites') {
     return <SpritesPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
   }
-  if (stepKey === 'levels' || stepKey === 'levels-gate') {
+  if (stepKey === 'levels') {
     return <LevelsPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} onResult={onPendingResult} />
   }
-  if (stepKey === 'audio' || stepKey === 'audio-gate') {
+  if (stepKey === 'audio') {
     return <AudioPanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
   }
-  if (stepKey === 'code' || stepKey === 'code-gate') {
+  if (stepKey === 'code') {
     return <CodePanel project={project} onRefresh={onRefresh} onLog={onLog} locked={locked} memberId={memberId} nodeContext={nodeContext} />
   }
   if (stepKey === 'export') {

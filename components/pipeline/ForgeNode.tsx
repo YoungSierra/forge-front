@@ -3,11 +3,11 @@
 import React, { memo, useEffect } from 'react'
 import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react'
 
-export type ForgeNodeStatus = 'idle' | 'running' | 'review' | 'complete' | 'error' | 'locked' | 'gate-pending' | 'pending_review'
+export type ForgeNodeStatus = 'idle' | 'running' | 'review' | 'complete' | 'error' | 'locked' | 'pending_review'
 
 export type ForgeNodeCategory =
   | 'design' | 'asset' | 'level' | 'code'
-  | 'audio'  | 'output' | 'gate' | 'test' | 'input'
+  | 'audio'  | 'output' | 'test' | 'input'
 
 export const CAT_VAR: Record<ForgeNodeCategory, string> = {
   design: 'var(--cat-design)',
@@ -16,7 +16,6 @@ export const CAT_VAR: Record<ForgeNodeCategory, string> = {
   code:   'var(--cat-code)',
   audio:  'var(--cat-audio)',
   output: 'var(--cat-output)',
-  gate:   'var(--cat-gate)',
   test:   'var(--cat-test)',
   input:  'var(--cat-input)',
 }
@@ -29,7 +28,6 @@ export const TYPE_VAR: Record<ForgeNodeCategory, string> = {
   code:   'var(--type-code)',
   audio:  'var(--type-audio)',
   output: 'var(--type-final)',
-  gate:   'var(--type-text)',
   test:   'var(--type-code)',
   input:  'var(--type-text)',
 }
@@ -37,7 +35,6 @@ export const TYPE_VAR: Record<ForgeNodeCategory, string> = {
 /* Role rail color — 2px left-edge strip indicating the agent role */
 function roleRailColor(category: ForgeNodeCategory): string {
   switch (category) {
-    case 'gate':   return 'var(--accent-amber)'
     case 'output': return 'var(--action)'
     case 'input':  return 'var(--accent-violet)'
     default:       return 'var(--accent-blue)'
@@ -100,11 +97,6 @@ function NodeStatusBadge({ status, approved, compact }: {
   )
   if (status === 'locked') return (
     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', lineHeight: 1, userSelect: 'none' }}>⊘</span>
-  )
-  if (status === 'gate-pending') return (
-    <span style={{ ...s, color: 'var(--state-warning)', background: 'color-mix(in oklch, var(--state-warning) 10%, transparent)', border: '1px solid color-mix(in oklch, var(--state-warning) 28%, transparent)' }}>
-      ◇{!compact && ' gate'}
-    </span>
   )
   // idle — dot LED
   return <div className="node-led" />
@@ -196,12 +188,10 @@ function ForgeNode({ id, data, selected }: { id: string; data: ForgeNodeData; se
   const stateClass = [
     'forge-node',
     data.compact                   ? 'compact' : '',
-    data.category === 'gate'       ? 'gate-node' : '',
     data.status === 'running'        ? 'running' : '',
     data.status === 'complete'       ? 'complete' : '',
     data.status === 'error'          ? 'error' : '',
     data.status === 'locked'         ? 'locked' : '',
-    data.status === 'gate-pending'   ? 'gate-pending' : '',
     data.status === 'pending_review' ? 'pending-review' : '',
     data.approved                    ? 'approved' : '',
     selected                       ? 'selected' : '',

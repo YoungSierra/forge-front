@@ -83,7 +83,6 @@ function statusDot(status: ForgeNodeData['status'], approved?: boolean): { char:
     case 'pending_review':  return { char: '◈', color: 'var(--state-human)', pulse: true }
     case 'running':         return { char: '⟳', color: 'var(--state-running)', pulse: true }
     case 'error':           return { char: '✕', color: 'var(--state-error)' }
-    case 'gate-pending':    return { char: '◇', color: 'var(--state-warning)' }
     case 'idle':            return { char: '●', color: 'var(--cat-design)' }
     case 'locked':
     default:                return { char: '○', color: 'var(--text-3)' }

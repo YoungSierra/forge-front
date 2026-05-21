@@ -188,10 +188,7 @@ export default function PipelineSuggestionModal({ project, onConfirm, onSkip }: 
 
           {loading && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '40px 0' }}>
-              <svg width="28" height="28" viewBox="0 0 32 32" style={{ animation: 'spin 2s linear infinite', flexShrink: 0 }}>
-                <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
-                <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
-              </svg>
+              <img src="/forgy/forgyi.png" alt="Forge" width={28} height={28} style={{ objectFit: 'contain', animation: 'spin 2s linear infinite', flexShrink: 0 }} />
               <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)' }}>
                 Analyzing GDD…

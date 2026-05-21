@@ -5,7 +5,6 @@ export type NodeCategory =
   | 'code'
   | 'audio'
   | 'export'
-  | 'gate'
   | 'playtesting'
   | 'review'
 
@@ -25,7 +24,6 @@ export const CATEGORY_COLOR: Record<NodeCategory, string> = {
   code: '#16a34a',
   audio: '#d97706',
   export: '#dc2626',
-  gate: '#ea580c',
   playtesting: '#6b7280',
   review: '#6b7280',
 }
@@ -37,7 +35,6 @@ export const CATEGORY_LABEL: Record<NodeCategory, string> = {
   code: 'Code',
   audio: 'Audio',
   export: 'Export',
-  gate: 'Gate',
   playtesting: 'Playtesting',
   review: 'Review',
 }

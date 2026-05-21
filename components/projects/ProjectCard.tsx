@@ -37,11 +37,12 @@ export default function ProjectCard({ project }: { project: Project }) {
     if (user?.id) getMemberByAuth(user.id).then(m => setCurrentMemberId(m?.id ?? null))
   }, [user?.id])
 
-  // Prefer server-computed node stats (from DB canvas_layout), fallback to localStorage
+  // Conteo de steps aprobados — sin denominador hasta que el pipeline esté completo
   const [localNodeStats, setLocalNodeStats] = useState<{ approved: number; total: number } | null>(null)
 
   useEffect(() => {
-    if (project.node_total_count != null) return // server has it, skip localStorage
+    if (project.approved_job_count != null) return
+    if (project.node_total_count != null) return
     const layout = loadLayout(project.id)
     if (!layout?.nodes?.length) return
     const approvable = layout.nodes.filter(n => {
@@ -53,20 +54,12 @@ export default function ProjectCard({ project }: { project: Project }) {
       total:    approvable.length,
       approved: approvable.filter(n => !!(n.data as Record<string, unknown>).approved).length,
     })
-  }, [project.id, project.node_total_count])
+  }, [project.id, project.approved_job_count, project.node_total_count])
 
-  const nodeStats = project.node_total_count != null
-    ? { approved: project.node_approved_count ?? 0, total: project.node_total_count }
-    : localNodeStats
-
-  // Use canvas stats when available, fall back to wizard steps
-  const displayApproved = nodeStats?.approved ?? wizApproved
-  const displayTotal    = nodeStats?.total    ?? 6
-  // Clamp dot count to 6 for the visual bar (more dots = visual noise)
-  const dotCount        = Math.min(displayTotal, 6)
-  const dotApproved     = nodeStats
-    ? Math.round((displayApproved / displayTotal) * dotCount)
-    : wizApproved
+  const displayApproved = project.approved_job_count ?? localNodeStats?.approved ?? wizApproved
+  // Dots visuales: fijos en 6 como referencia genérica
+  const dotCount    = 6
+  const dotApproved = Math.min(displayApproved, dotCount)
 
   return (
     <>
@@ -142,7 +135,7 @@ export default function ProjectCard({ project }: { project: Project }) {
             )
           })}
           <span style={{ marginLeft: 6, fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)' }}>
-            {displayApproved}/{displayTotal}
+            {displayApproved > 0 ? `${displayApproved} done` : '—'}
           </span>
         </div>
 

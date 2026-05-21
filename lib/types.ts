@@ -252,6 +252,8 @@ export type Project = {
   approved_wizard_count?: number
   node_approved_count?: number
   node_total_count?: number
+  approved_job_count?: number
+  total_job_count?: number
   canvas_layout?: unknown
   generation_jobs?: GenerationJob[]
   repo_config?: RepoConfig
@@ -317,11 +319,12 @@ export type ComfyUIWorkflow = {
 export type StepConfig = {
   id: string
   step_key: string
-  step_type: 'node' | 'container' | 'service'
+  step_type: 'node' | 'container' | 'service' | 'phase'
   parent_key: string | null
   order_index: number
   label: string | null
-  integration_type: 'llm' | 'comfyui' | 'n8n'
+  description: string | null
+  integration_type: 'llm' | 'comfyui' | 'n8n' | 'human' | 'collaborative' | null
   model_name: string | null
   comfyui_workflow_id: string | null
   webhook_url: string | null
@@ -347,7 +350,7 @@ export type PromptConfig = {
   r2_path: string | null
   description: string | null
   updated_at: string
-  step_type?: 'node' | 'container' | 'service'
+  step_type?: 'node' | 'container' | 'service' | 'phase'
   order_index?: number
   parent_key?: string | null
 }

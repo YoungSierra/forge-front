@@ -94,10 +94,7 @@ export default function ProjectsList() {
   if (projects.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 16, textAlign: 'center' }}>
-        <svg width="48" height="48" viewBox="0 0 32 32" aria-hidden="true" style={{ opacity: 0.3, flexShrink: 0 }}>
-            <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
-            <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
-          </svg>
+        <img src="/forgy/forgyi.png" alt="Forge" width={48} height={48} style={{ objectFit: 'contain', opacity: 0.3, flexShrink: 0 }} />
         <div>
           <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', marginBottom: 4 }}>No projects yet</p>
           <p style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'monospace' }}>Start your first prototype</p>

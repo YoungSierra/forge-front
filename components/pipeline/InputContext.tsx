@@ -71,7 +71,7 @@ function getArtGuide(project: Project): { label: string; data: unknown; color: s
 /* ─── Input sources map ─── */
 
 export function getInputSources(stepKey: string, project: Project): InputSource[] {
-  const key = stepKey.replace('-gate', '')
+  const key = stepKey
   const p   = project
   const g   = p.concept?.pipeline?.gdd  // GDD data accessor
 

@@ -43,9 +43,11 @@ const AUTO_DETECT: Record<'prompt' | 'width' | 'height' | 'seed', Record<string,
 const EXTRA_TYPES: ExtraInjectPoint['type'][] = ['string', 'int', 'float', 'image']
 
 const TYPE_COLOR: Record<string, string> = {
-  llm:     'var(--cat-code)',
-  comfyui: 'var(--cat-output)',
-  n8n:     '#f5a623',
+  llm:           'var(--cat-code)',
+  comfyui:       'var(--cat-output)',
+  n8n:           '#f5a623',
+  human:         'var(--cat-design)',
+  collaborative: '#a78bfa',
 }
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
@@ -70,6 +72,13 @@ const btnStyle = (active = true, accent = false): React.CSSProperties => ({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function stepConfigHint(s: StepConfig, workflows: ComfyUIWorkflow[]): string {
+  if (!s.integration_type) {
+    if (s.step_type === 'phase') return '— phase'
+    return '—'
+  }
+  if (s.integration_type === 'human')         return '👤 human'
+  if (s.integration_type === 'collaborative') return '🤝 collaborative'
+
   let main = ''
   if (s.integration_type === 'llm') {
     main = s.model_name ? (() => { const [p, ...r] = s.model_name!.split(':'); return `${p} / ${r.join(':')}` })() : 'default model'
@@ -731,18 +740,20 @@ function ImageTester({ model, onClose }: { model: string; onClose: () => void })
 
 // ─── StepConfigEditor ─────────────────────────────────────────────────────────
 
-function StepConfigEditor({ config, workflows, availableProviders, containers, onSaved }: {
+function StepConfigEditor({ config, workflows, availableProviders, containers, phases, onSaved }: {
   config: StepConfig
   workflows: ComfyUIWorkflow[]
   availableProviders: Record<string, boolean>
   containers: StepConfig[]
+  phases: StepConfig[]
   onSaved: (c: StepConfig) => void
 }) {
-  const [stepType, setStepType] = useState<'node' | 'container' | 'service'>(config.step_type ?? 'node')
-  const [label, setLabel]       = useState(config.label || '')
+  const [stepType, setStepType]     = useState<StepConfig['step_type']>(config.step_type ?? 'node')
+  const [label, setLabel]           = useState(config.label || '')
+  const [description, setDescription] = useState(config.description || '')
   const [orderIndex, setOrderIndex] = useState(config.order_index ?? 0)
   const [parentKey, setParentKey]   = useState(config.parent_key || '')
-  const [type, setType]         = useState(config.integration_type)
+  const [type, setType]         = useState<StepConfig['integration_type']>(config.integration_type)
   const [model, setModel]       = useState<string | null>(config.model_name)
   const [wfId, setWfId]         = useState<string | null>(config.comfyui_workflow_id)
   const [url, setUrl]           = useState(config.webhook_url || '')
@@ -760,7 +771,8 @@ function StepConfigEditor({ config, workflows, availableProviders, containers, o
     setImageTesting(false)
     setStepType(config.step_type ?? 'node')
     setLabel(config.label || ''); setOrderIndex(config.order_index ?? 0); setParentKey(config.parent_key || '')
-    setType(config.integration_type); setModel(config.model_name)
+    setDescription(config.description || '')
+    setType(config.integration_type ?? null); setModel(config.model_name)
     setWfId(config.comfyui_workflow_id); setUrl(config.webhook_url || '')
     setImgEnabled(config.image_enabled)
     setImgType(config.image_integration_type || 'comfyui')
@@ -773,12 +785,14 @@ function StepConfigEditor({ config, workflows, availableProviders, containers, o
     e.preventDefault()
     setSaving(true); setError(''); setSuccess('')
     try {
+      const hasParent = stepType === 'node' || stepType === 'container'
       const payload: Partial<StepConfig> = {
-        integration_type: type,
+        integration_type: stepType === 'phase' ? null : type,
         step_type: stepType,
         label: label || null,
+        description: description || null,
         order_index: orderIndex,
-        parent_key: stepType === 'node' ? (parentKey || null) : null,
+        parent_key: hasParent ? (parentKey || null) : null,
       }
       if (type === 'llm')     { payload.model_name = model }
       if (type === 'comfyui') { payload.comfyui_workflow_id = wfId }
@@ -806,8 +820,8 @@ function StepConfigEditor({ config, workflows, availableProviders, containers, o
 
       <div>
         <label style={labelStyle}>Type</label>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {(['node', 'container', 'service'] as const).map(t => (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {(['phase', 'container', 'node', 'service'] as const).map(t => (
             <button key={t} type="button" onClick={() => setStepType(t)} style={{
               flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer',
               border: `1px solid ${stepType === t ? 'var(--action)' : 'var(--line-2)'}`,
@@ -829,12 +843,26 @@ function StepConfigEditor({ config, workflows, availableProviders, containers, o
         </div>
       </div>
 
-      {stepType === 'node' && (
+      <div>
+        <label style={labelStyle}>Description <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
+        <textarea
+          style={{ ...inputStyle, resize: 'vertical', minHeight: 64, lineHeight: 1.5 }}
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Short description of what this step does…"
+          rows={3}
+        />
+      </div>
+
+      {(stepType === 'node' || stepType === 'container') && (
         <div>
           <label style={labelStyle}>Parent <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(empty = top level)</span></label>
           <select style={selectStyle} value={parentKey} onChange={e => setParentKey(e.target.value)}>
             <option value="">— top level —</option>
-            {containers.sort((a, b) => a.order_index - b.order_index).map(c => (
+            {(stepType === 'node'
+              ? containers.sort((a, b) => a.order_index - b.order_index)
+              : phases.sort((a, b) => a.order_index - b.order_index)
+            ).map(c => (
               <option key={c.step_key} value={c.step_key}>
                 {c.order_index}. {c.label || c.step_key}
               </option>
@@ -843,28 +871,36 @@ function StepConfigEditor({ config, workflows, availableProviders, containers, o
         </div>
       )}
 
-      <div>
-        <label style={labelStyle}>Integration type</label>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {(['llm', 'comfyui', 'n8n'] as const).map(t => (
-            <button key={t} type="button" onClick={() => setType(t)} style={{
+      {stepType !== 'phase' && (
+        <div>
+          <label style={labelStyle}>Integration type</label>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(['llm', 'comfyui', 'n8n', 'human', 'collaborative'] as const).map(t => (
+              <button key={t} type="button" onClick={() => setType(t)} style={{
+                flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                border: `1px solid ${type === t ? TYPE_COLOR[t] : 'var(--line-2)'}`,
+                background: type === t ? `color-mix(in srgb, ${TYPE_COLOR[t]} 15%, var(--bg-1))` : 'transparent',
+                color: type === t ? TYPE_COLOR[t] : 'var(--text-3)',
+              }}>{t}</button>
+            ))}
+            <button type="button" onClick={() => setType(null)} style={{
               flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer',
-              border: `1px solid ${type === t ? TYPE_COLOR[t] : 'var(--line-2)'}`,
-              background: type === t ? `color-mix(in srgb, ${TYPE_COLOR[t]} 15%, var(--bg-1))` : 'transparent',
-              color: type === t ? TYPE_COLOR[t] : 'var(--text-3)',
-            }}>{t}</button>
-          ))}
+              border: `1px solid ${type === null ? 'var(--text-3)' : 'var(--line-2)'}`,
+              background: type === null ? 'var(--bg-3)' : 'transparent',
+              color: type === null ? 'var(--text-1)' : 'var(--text-3)',
+            }}>none</button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {type === 'llm' && (
+      {type === 'llm' && stepType !== 'phase' && (
         <div>
           <label style={labelStyle}>Model <span style={{ color: 'var(--text-3)', textTransform: 'none', letterSpacing: 0 }}>(empty = default)</span></label>
           <ModelSelector value={model} onChange={setModel} availableProviders={availableProviders} />
         </div>
       )}
 
-      {type === 'comfyui' && (
+      {type === 'comfyui' && stepType !== 'phase' && (
         <div>
           <label style={labelStyle}>Workflow</label>
           <select style={selectStyle} value={wfId || ''} onChange={e => setWfId(e.target.value || null)}>
@@ -883,7 +919,7 @@ function StepConfigEditor({ config, workflows, availableProviders, containers, o
         </div>
       )}
 
-      {type === 'n8n' && (
+      {type === 'n8n' && stepType !== 'phase' && (
         <div>
           <label style={labelStyle}>Webhook URL</label>
           <input style={inputStyle} type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..." />
@@ -1264,102 +1300,120 @@ export default function IntegrationsPage() {
           <>
             <div style={{ width: 400, borderRight: '1px solid var(--line-2)', overflowY: 'auto', flexShrink: 0 }}>
               {(() => {
-                const containers = stepConfigs
-                  .filter(s => s.step_type === 'container')
-                  .sort((a, b) => a.order_index - b.order_index)
-                const topNodes = stepConfigs
-                  .filter(s => s.step_type === 'node' && !s.parent_key)
-                  .sort((a, b) => a.order_index - b.order_index)
-                const services = stepConfigs
-                  .filter(s => s.step_type === 'service')
-                  .sort((a, b) => a.order_index - b.order_index)
+                const sort = (arr: StepConfig[]) => [...arr].sort((a, b) => a.order_index - b.order_index)
+                const phases          = sort(stepConfigs.filter(s => s.step_type === 'phase'))
+                const orphanContainers = sort(stepConfigs.filter(s => s.step_type === 'container' && !s.parent_key))
+                const topNodes        = sort(stepConfigs.filter(s => s.step_type === 'node' && !s.parent_key))
+                const services        = sort(stepConfigs.filter(s => s.step_type === 'service'))
 
-                const renderRow = (s: StepConfig, indent = false) => (
-                  <div key={s.step_key} onClick={() => setSelectedStep(s)} style={{
-                    padding: indent ? '7px 16px 7px 32px' : '9px 16px',
-                    cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
-                    background: selectedStep?.step_key === s.step_key ? 'var(--bg-2)' : indent ? 'color-mix(in srgb, var(--bg-1) 60%, transparent)' : 'transparent',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                      {indent && <span style={{ color: 'var(--line-2)', fontSize: 10 }}>└</span>}
-                      <span style={{ fontSize: indent ? 10 : 11, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', fontWeight: 600, flex: 1 }}>
-                        {s.order_index > 0 && s.parent_key ? `${stepConfigs.find(p => p.step_key === s.parent_key)?.order_index ?? ''}.${s.order_index}  ` : ''}{s.label || s.step_key}
-                      </span>
-                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>{s.step_key}</span>
-                    </div>
-                    {!indent && (
-                      <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
-                        {stepConfigHint(s, workflows)}
-                      </div>
-                    )}
-                    {indent && (
-                      <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', paddingLeft: 14 }}>
-                        {stepConfigHint(s, workflows)}
-                      </div>
-                    )}
+                const sectionHeader = (label: string) => (
+                  <div style={{ padding: '6px 16px', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--action-fg)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'var(--action)', borderBottom: '1px solid var(--line-2)', position: 'sticky', top: 0, zIndex: 2 }}>
+                    {label}
                   </div>
                 )
 
+                const toggle = (key: string, e: React.MouseEvent) => {
+                  e.stopPropagation()
+                  setExpandedContainers(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next })
+                }
+
+                // Nodo hoja
+                const renderNode = (s: StepConfig, pl: number, prefix: string) => (
+                  <div key={s.step_key} onClick={() => setSelectedStep(s)} style={{
+                    paddingLeft: pl, paddingRight: 16, paddingTop: 7, paddingBottom: 7,
+                    cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
+                    background: selectedStep?.step_key === s.step_key ? 'var(--bg-2)' : 'transparent',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <span style={{ color: 'var(--line-2)', fontSize: 10, flexShrink: 0 }}>└</span>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', flexShrink: 0 }}>{prefix}{s.order_index}</span>
+                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', fontWeight: 600, flex: 1 }}>
+                        {s.label || s.step_key}
+                      </span>
+                      {s.integration_type && (
+                        <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: TYPE_COLOR[s.integration_type] ?? 'var(--text-3)', flexShrink: 0 }}>{s.integration_type}</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', paddingLeft: 14 }}>
+                      {s.step_key}
+                    </div>
+                  </div>
+                )
+
+                // Container expandible
+                const renderContainer = (container: StepConfig, pl: number, prefix: string) => {
+                  const nodes    = sort(stepConfigs.filter(s => s.step_type === 'node' && s.parent_key === container.step_key))
+                  const expanded = expandedContainers.has(container.step_key)
+                  const cPrefix  = `${prefix}${container.order_index}.`
+                  return (
+                    <div key={container.step_key}>
+                      <div style={{
+                        paddingLeft: pl, paddingRight: 16, paddingTop: 8, paddingBottom: 8,
+                        cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
+                        background: selectedStep?.step_key === container.step_key ? 'var(--bg-2)' : 'var(--bg-1)',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span onClick={e => toggle(container.step_key, e)} style={{ fontSize: 11, color: expanded ? 'var(--action)' : 'var(--text-1)', cursor: 'pointer', transition: 'transform 150ms, color 150ms', display: 'inline-block', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', userSelect: 'none', padding: '0 3px', fontWeight: 700, flexShrink: 0 }}>▶</span>
+                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', flexShrink: 0 }}>{prefix}{container.order_index}</span>
+                          <span onClick={() => setSelectedStep(container)} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', fontWeight: 700, flex: 1 }}>
+                            {container.label || container.step_key}
+                          </span>
+                          <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 99, background: 'color-mix(in srgb, var(--action) 12%, var(--bg-1))', color: 'var(--action)', flexShrink: 0 }}>container</span>
+                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', flexShrink: 0 }}>{nodes.length}</span>
+                        </div>
+                      </div>
+                      {expanded && nodes.map(n => renderNode(n, pl + 20, cPrefix))}
+                    </div>
+                  )
+                }
+
                 return (
                   <>
-                    {/* Section header */}
-                    <div style={{ padding: '6px 16px', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--action-fg)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'var(--action)', borderBottom: '1px solid var(--line-2)', position: 'sticky', top: 0, zIndex: 1 }}>
-                      Nodes
-                    </div>
-
-                    {/* Containers with their children */}
-                    {containers.map(container => {
-                      const children = stepConfigs
-                        .filter(s => s.parent_key === container.step_key)
-                        .sort((a, b) => a.order_index - b.order_index)
-                      const expanded = expandedContainers.has(container.step_key)
-                      const toggle = (e: React.MouseEvent) => {
-                        e.stopPropagation()
-                        setExpandedContainers(prev => {
-                          const next = new Set(prev)
-                          next.has(container.step_key) ? next.delete(container.step_key) : next.add(container.step_key)
-                          return next
-                        })
-                      }
+                    {/* ── Phases ── */}
+                    {phases.length > 0 && sectionHeader('Phases')}
+                    {phases.map(phase => {
+                      const phaseContainers = sort(stepConfigs.filter(s => s.step_type === 'container' && s.parent_key === phase.step_key))
+                      const expanded        = expandedContainers.has(phase.step_key)
+                      const pPrefix         = `${phase.order_index}.`
                       return (
-                        <div key={container.step_key}>
+                        <div key={phase.step_key}>
                           <div style={{
-                            padding: '9px 16px', cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
-                            background: selectedStep?.step_key === container.step_key ? 'var(--bg-2)' : 'var(--bg-1)',
+                            padding: '10px 16px', cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
+                            background: selectedStep?.step_key === phase.step_key ? 'var(--bg-2)' : 'var(--bg-0, var(--bg-1))',
                           }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <span onClick={toggle} style={{ fontSize: 13, color: expanded ? 'var(--action)' : 'var(--text-1)', cursor: 'pointer', transition: 'transform 150ms, color 150ms', display: 'inline-block', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', userSelect: 'none', padding: '0 4px', fontWeight: 700 }}>▶</span>
-                              <span onClick={() => setSelectedStep(container)} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', fontWeight: 700, flex: 1 }}>
-                                {container.order_index}.  {container.label || container.step_key}
+                              <span onClick={e => toggle(phase.step_key, e)} style={{ fontSize: 13, color: expanded ? 'var(--action)' : 'var(--text-1)', cursor: 'pointer', transition: 'transform 150ms, color 150ms', display: 'inline-block', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', userSelect: 'none', padding: '0 4px', fontWeight: 700, flexShrink: 0 }}>▶</span>
+                              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', flexShrink: 0 }}>{phase.order_index}</span>
+                              <span onClick={() => setSelectedStep(phase)} style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', fontWeight: 700, flex: 1 }}>
+                                {phase.label || phase.step_key}
                               </span>
-                              <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 99, background: 'color-mix(in srgb, var(--action) 15%, var(--bg-1))', color: 'var(--action)' }}>container</span>
-                              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>{children.length} steps</span>
+                              <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', padding: '1px 6px', borderRadius: 99, background: 'color-mix(in srgb, var(--cat-design) 15%, var(--bg-1))', color: 'var(--cat-design)', flexShrink: 0 }}>phase</span>
+                              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', flexShrink: 0 }}>{phaseContainers.length} containers</span>
                             </div>
                           </div>
-                          {expanded && children.map(child => renderRow(child, true))}
+                          {expanded && phaseContainers.map(c => renderContainer(c, 24, pPrefix))}
                         </div>
                       )
                     })}
 
-                    {/* Top-level nodes (no parent) */}
-                    {topNodes.map(s => renderRow(s, false))}
+                    {/* ── Legacy containers (sin phase) ── */}
+                    {orphanContainers.length > 0 && sectionHeader('Containers')}
+                    {orphanContainers.map(c => renderContainer(c, 16, ''))}
 
-                    {/* Services */}
-                    {services.length > 0 && (
-                      <>
-                        <div style={{ padding: '6px 16px', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--action-fg)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'var(--action)', borderBottom: '1px solid var(--line-2)', position: 'sticky', top: 0, zIndex: 1 }}>
-                          Services
-                        </div>
-                        {services.map(s => renderRow(s, false))}
-                      </>
-                    )}
+                    {/* ── Top-level nodes ── */}
+                    {topNodes.length > 0 && sectionHeader('Standalone nodes')}
+                    {topNodes.map(s => renderNode(s, 16, ''))}
+
+                    {/* ── Services ── */}
+                    {services.length > 0 && sectionHeader('Services')}
+                    {services.map(s => renderNode(s, 16, ''))}
                   </>
                 )
               })()}
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
               {selectedStep
-                ? <StepConfigEditor key={selectedStep.step_key} config={selectedStep} workflows={workflows} availableProviders={availableProviders} containers={stepConfigs.filter(s => s.step_type === 'container')} onSaved={handleStepSaved} />
+                ? <StepConfigEditor key={selectedStep.step_key} config={selectedStep} workflows={workflows} availableProviders={availableProviders} containers={stepConfigs.filter(s => s.step_type === 'container')} phases={stepConfigs.filter(s => s.step_type === 'phase')} onSaved={handleStepSaved} />
                 : <div style={{ color: 'var(--text-3)', fontSize: 12, fontFamily: 'var(--font-mono)' }}>Select a step</div>
               }
             </div>

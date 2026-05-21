@@ -20,7 +20,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'Forge — AI Game Pipeline',
   description: 'Generate complete game prototypes with AI',
-  icons: { icon: '/icon.svg' },
+  icons: { icon: '/forgy/forgyi.png', apple: '/forgy/forgyi.png' },
 }
 
 export default function RootLayout({

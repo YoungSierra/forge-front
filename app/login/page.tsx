@@ -32,6 +32,17 @@ export default function LoginPage() {
   const [inviteSaving, setInviteSaving] = useState(false)
   const [inviteError, setInviteError]   = useState('')
 
+  // Forzar dark mode en el login independientemente del tema del usuario
+  useEffect(() => {
+    const html = document.documentElement
+    const prev = html.getAttribute('data-theme')
+    html.setAttribute('data-theme', 'dark')
+    return () => {
+      if (prev) html.setAttribute('data-theme', prev)
+      else html.removeAttribute('data-theme')
+    }
+  }, [])
+
   useEffect(() => {
     if (_inviteConsumed) return
     if (!_rawHash.includes('access_token') || !_rawHash.includes('type=invite')) return
@@ -97,31 +108,31 @@ export default function LoginPage() {
 
   const cardStyle: React.CSSProperties = {
     position: 'relative', zIndex: 10,
-    width: 360,
-    background: '#111115',
-    border: '1px solid #2a2a36',
-    borderRadius: 12,
+    width: 400,
+    background: 'var(--modal-bg)',
+    border: '1px solid var(--modal-border)',
+    borderRadius: 8,
     padding: 28,
-    boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+    boxShadow: '0 18px 42px rgba(0,0,0,0.6), 0 0 0 1px var(--line-2)',
+    fontFamily: 'var(--font-sans)',
   }
 
   const inputStyle: React.CSSProperties = {
-    background: '#0a0a0c', border: '1px solid #2a2a36', borderRadius: 5,
+    background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 5,
     padding: '9px 11px', color: '#f0f0f2', fontSize: 13, outline: 'none',
     width: '100%', transition: 'border-color 120ms', boxSizing: 'border-box',
-    fontFamily: 'inherit',
+    fontFamily: 'var(--font-sans)',
   }
 
   const labelStyle: React.CSSProperties = {
-    fontFamily: 'monospace', fontSize: 10, textTransform: 'uppercase',
-    letterSpacing: '0.1em', color: '#50505e',
+    fontFamily: 'var(--font-mono)', fontSize: 12, color: '#50505e',
   }
 
   return (
-    <div style={{
+    <div data-theme="dark" style={{
       position: 'fixed', inset: 0, background: '#0a0a0c',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'var(--font-inter, system-ui, sans-serif)',
+      fontFamily: 'var(--font-sans)',
     }}>
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none',
@@ -133,14 +144,11 @@ export default function LoginPage() {
 
       <div style={cardStyle}>
         {/* Brand */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22 }}>
-          <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true" style={{ flexShrink: 0 }}>
-            <path d="M16 4 L26 14 L26 22 L20 28 L12 28 L6 22 L6 14 Z" fill="#ff8a3d" stroke="#1a0d04" strokeWidth="0.5"/>
-            <path d="M16 10 L22 16 L22 21 L18 25 L14 25 L10 21 L10 16 Z" fill="#ffe7d4" opacity="0.85"/>
-          </svg>
-          <div>
-            <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.02em', color: '#f0f0f2', lineHeight: 1, fontFamily: 'var(--font-inter, system-ui, sans-serif)' }}>Forge</div>
-            <div style={{ fontFamily: 'var(--font-jetbrains-mono, monospace)', fontSize: 9, color: '#50505e', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 3 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <img src="/forgy/forgyi.png" alt="Forge" width={80} height={80} style={{ objectFit: 'contain', flexShrink: 0, display: 'block' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, paddingTop: 24 }}>
+            <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em', color: '#f0f0f2', lineHeight: 1, fontFamily: 'var(--font-sans)' }}>Forge</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#50505e', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
               AI Game Pipeline
             </div>
           </div>
@@ -151,7 +159,7 @@ export default function LoginPage() {
         {/* ── Invite mode ─────────────────────────────────── */}
         {invite ? (
           !inviteReady ? (
-            <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#50505e', textAlign: 'center', padding: '20px 0' }}>
+            <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: '#50505e', textAlign: 'center', padding: '20px 0' }}>
               Setting up your account…
             </div>
           ) : (
@@ -169,7 +177,7 @@ export default function LoginPage() {
                   <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} required autoFocus
                     style={inputStyle}
                     onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
-                    onBlur={e =>  { e.currentTarget.style.borderColor = '#2a2a36' }}
+                    onBlur={e =>  { e.currentTarget.style.borderColor = 'var(--line-2)' }}
                   />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -177,7 +185,7 @@ export default function LoginPage() {
                   <input type="password" value={invitePw} onChange={e => setInvitePw(e.target.value)} required
                     style={inputStyle}
                     onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
-                    onBlur={e =>  { e.currentTarget.style.borderColor = '#2a2a36' }}
+                    onBlur={e =>  { e.currentTarget.style.borderColor = 'var(--line-2)' }}
                   />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -185,11 +193,11 @@ export default function LoginPage() {
                   <input type="password" value={invitePwC} onChange={e => setInvitePwC(e.target.value)} required
                     style={inputStyle}
                     onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
-                    onBlur={e =>  { e.currentTarget.style.borderColor = '#2a2a36' }}
+                    onBlur={e =>  { e.currentTarget.style.borderColor = 'var(--line-2)' }}
                   />
                 </div>
                 {inviteError && (
-                  <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#f87171', padding: '7px 10px', borderRadius: 4, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#f87171', padding: '7px 10px', borderRadius: 4, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)' }}>
                     {inviteError}
                   </div>
                 )}
@@ -216,7 +224,7 @@ export default function LoginPage() {
                 <input id="email" type="email" value={email} required onChange={e => setEmail(e.target.value)}
                   autoComplete="email" placeholder="you@studio.com" style={inputStyle}
                   onFocus={e => { e.currentTarget.style.borderColor = '#ff8a3d' }}
-                  onBlur={e =>  { e.currentTarget.style.borderColor = '#2a2a36' }}
+                  onBlur={e =>  { e.currentTarget.style.borderColor = 'var(--line-2)' }}
                 />
               </div>
 
@@ -229,7 +237,7 @@ export default function LoginPage() {
                     autoComplete="current-password" placeholder="••••••••"
                     style={{ ...inputStyle, padding: '9px 38px 9px 11px' }}
                     onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
-                    onBlur={e =>  { e.currentTarget.style.borderColor = '#2a2a36' }}
+                    onBlur={e =>  { e.currentTarget.style.borderColor = 'var(--line-2)' }}
                   />
                   <button type="button" tabIndex={-1} onClick={() => setShowPassword(v => !v)}
                     style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#50505e', display: 'grid', placeItems: 'center', padding: 2 }}>
@@ -242,7 +250,7 @@ export default function LoginPage() {
               </div>
 
               {error && (
-                <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#f87171', padding: '7px 10px', borderRadius: 4, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#f87171', padding: '7px 10px', borderRadius: 4, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)' }}>
                   {error}
                 </div>
               )}
@@ -261,7 +269,7 @@ export default function LoginPage() {
           </>
         )}
 
-        <div style={{ fontFamily: 'monospace', fontSize: 10, color: '#50505e', textAlign: 'center', marginTop: 20, letterSpacing: '0.05em' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#50505e', textAlign: 'center', marginTop: 20, letterSpacing: '0.05em' }}>
           V57 Studio · Authorized access only
         </div>
       </div>

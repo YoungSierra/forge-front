@@ -1032,6 +1032,133 @@ export async function getPipelineConfig(): Promise<PipelineContainerConfig[]> {
   return data.containers
 }
 
+// ─── Phase canvas types ────────────────────────────────────────────────────────
+
+export interface PhaseNodeConfig {
+  step_key:         string
+  label:            string
+  description:      string | null
+  order_index:      number
+  integration_type: string | null
+  model_name:       string | null
+  is_active:        boolean
+}
+
+export interface PhaseContainerConfig {
+  step_key:         string
+  label:            string
+  description:      string | null
+  order_index:      number
+  integration_type: string | null
+  is_active:        boolean
+  nodes:            PhaseNodeConfig[]
+}
+
+export interface PhaseConfig {
+  step_key:    string
+  label:       string
+  description: string | null
+  order_index: number
+  is_active:   boolean
+  containers:  PhaseContainerConfig[]
+}
+
+export async function getPipelinePhases(): Promise<PhaseConfig[]> {
+  const data = await request<{ success: boolean; phases: PhaseConfig[] }>('/api/pipeline/config')
+  return data.phases ?? []
+}
+
+// ─── Ideation (Pipeline Fase 1.1) ─────────────────────────────────────────────
+
+export interface IdeationVariation {
+  id:      string
+  concept: string
+}
+
+export interface IdeationScoredConcept {
+  id:               string
+  concept:          string
+  total:            number
+  originality:      number
+  market_fit:       number
+  team_alignment:   number
+  feasibility:      number
+}
+
+export interface IdeationCandidate {
+  id:              string
+  concept:         string
+  score:           number
+  rationale:       string
+  hook:            string
+  target_audience: string
+  image_url?:      string | null
+}
+
+export async function generateConceptVariations(brief: string, genres: string[], count: number, stepKey?: string) {
+  return request<{ success: boolean; variations: IdeationVariation[]; meta: unknown }>(
+    '/api/ideation/generate-variations',
+    { method: 'POST', body: JSON.stringify({ brief, genres, count, step_key: stepKey }) }
+  )
+}
+
+export async function scoreRankConcepts(variations: IdeationVariation[], brief: string, genres: string[], stepKey?: string) {
+  return request<{ success: boolean; scored: IdeationScoredConcept[]; meta: unknown }>(
+    '/api/ideation/score-rank',
+    { method: 'POST', body: JSON.stringify({ variations, brief, genres, step_key: stepKey }) }
+  )
+}
+
+export async function surfaceTopCandidates(scored: IdeationScoredConcept[], countTop: number, stepKey?: string) {
+  return request<{ success: boolean; candidates: IdeationCandidate[]; meta: unknown }>(
+    '/api/ideation/surface-candidates',
+    { method: 'POST', body: JSON.stringify({ scored, count_top: countTop, step_key: stepKey }) }
+  )
+}
+
+export async function generateCandidateImages(
+  candidates: Pick<IdeationCandidate, 'id' | 'concept' | 'hook'>[],
+  projectId: string,
+  stepKey?: string,
+) {
+  return request<{ success: boolean; images: { id: string; image_url: string | null }[] }>(
+    '/api/ideation/generate-candidate-images',
+    { method: 'POST', body: JSON.stringify({ candidates, project_id: projectId, step_key: stepKey }) }
+  )
+}
+
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  role:    'user' | 'assistant'
+  content: string
+}
+
+export async function saveChatHistory(
+  projectId:   string,
+  stepKey:     string,
+  chatHistory: ChatMessage[],
+): Promise<void> {
+  await request<{ success: boolean }>(
+    '/api/pipeline/save-chat-history',
+    { method: 'POST', body: JSON.stringify({ project_id: projectId, step_key: stepKey, chat_history: chatHistory }) }
+  )
+}
+
+export async function chatWithNode(
+  stepKey:       string,
+  messages:      ChatMessage[],
+  userMessage:   string,
+  currentOutput: unknown,
+  projectId:     string,
+  applyMode?:    boolean,
+) {
+  return request<{ success: boolean; reply: string; meta: unknown }>(
+    '/api/chat/node',
+    { method: 'POST', body: JSON.stringify({ step_key: stepKey, messages, user_message: userMessage, current_output: currentOutput, project_id: projectId, apply_mode: applyMode }) }
+  )
+}
+
 // Elemento estructurado retornado por nodos con STEP_SCHEMAS en el backend
 export interface PipelineNodeItem {
   name?:         string

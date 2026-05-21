@@ -68,6 +68,11 @@
   --type-code:    #b5b9c4;   /* gray    — scripts, configs, env          */
   --type-final:   #f5c451;   /* gold    — shipped output                 */
 
+  /* Modales — fondo y borde estándar */
+  --modal-bg:     #222222;
+  --modal-border: #333333;
+  --modal-text:   #f0f0f2;
+
   /* Accent tokens — Node Kit role rail & node-state borders */
   --accent-blue:   #5aa3ff;  /* agent role rail; selected border  */
   --accent-teal:   #4fd2c2;  /* running border/led                */
@@ -76,8 +81,38 @@
   --accent-amber:  #f5c451;  /* gate role rail                    */
 }
 
+/* ─── Autofill — evita que el browser fuerce fondo blanco ─── */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0px 1000px #1c1f25 inset;
+  -webkit-text-fill-color: #f0f0f2;
+  caret-color: #f0f0f2;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+/* ─── Placeholder uniforme — brand tokens ─── */
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-3);
+  font-family: var(--font-sans);
+  font-size: inherit;
+  opacity: 1;
+}
+
+/* ─── Modal card utility ─── */
+.modal-card {
+  background: var(--modal-bg);
+  border: 1px solid var(--modal-border);
+  color: var(--modal-text);
+}
+
 /* ─── Light theme ─── */
 [data-theme="light"] {
+  --modal-bg:     #ffffff;
+  --modal-border: #e0e0e0;
+  --modal-text:   #0f1115;
   /* Superficies — warm off-white, nunca blanco puro */
   --bg-0: #f6f7f9;
   --bg-1: #ffffff;

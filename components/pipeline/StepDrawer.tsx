@@ -11,17 +11,12 @@ import Step6Export from '@/components/wizard/Step6Export'
 import { CATEGORY_COLOR, type NodeCategory } from './constants'
 
 const STEP_FOR_NODE: Record<string, { label: string; category: NodeCategory; stepKey: string }> = {
-  gdd: { label: 'Game Design Document', category: 'gdd', stepKey: 'gdd' },
-  'gdd-gate': { label: 'GDD Review', category: 'gate', stepKey: 'gdd' },
-  sprites: { label: 'Sprites Generation', category: 'sprites', stepKey: 'sprites' },
-  'sprites-gate': { label: 'Sprites Review', category: 'gate', stepKey: 'sprites' },
-  levels: { label: 'Levels Generation', category: 'levels', stepKey: 'levels' },
-  'levels-gate': { label: 'Levels Review', category: 'gate', stepKey: 'levels' },
-  code: { label: 'Code Generation', category: 'code', stepKey: 'code' },
-  'code-gate': { label: 'Code Review', category: 'gate', stepKey: 'code' },
-  audio: { label: 'Audio Generation', category: 'audio', stepKey: 'audio' },
-  'audio-gate': { label: 'Audio Review', category: 'gate', stepKey: 'audio' },
-  export: { label: 'Export Project', category: 'export', stepKey: 'export' },
+  gdd:     { label: 'Game Design Document', category: 'gdd',    stepKey: 'gdd' },
+  sprites: { label: 'Sprites Generation',   category: 'sprites', stepKey: 'sprites' },
+  levels:  { label: 'Levels Generation',    category: 'levels',  stepKey: 'levels' },
+  code:    { label: 'Code Generation',      category: 'code',    stepKey: 'code' },
+  audio:   { label: 'Audio Generation',     category: 'audio',   stepKey: 'audio' },
+  export:  { label: 'Export Project',       category: 'export',  stepKey: 'export' },
 }
 
 interface Props {

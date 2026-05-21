@@ -261,7 +261,6 @@ export default function GDDSectionModal({ gdd, section, onClose, onViewFull }: P
 
   return createPortal(
     <div
-      onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 1100,
         background: 'rgba(0,0,0,0.55)',
