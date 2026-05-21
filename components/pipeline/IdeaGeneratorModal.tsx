@@ -185,12 +185,13 @@ export interface IdeaGeneratorModalProps {
   project:      Project
   nodes?:       PhaseNodeConfig[]
   label?:       string
+  description?: string | null
   icon?:        string
   initialStep?: number
   onClose:      () => void
 }
 
-export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea Generation', icon = '⬡', initialStep, onClose }: IdeaGeneratorModalProps) {
+export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea Generation', description, icon = '⬡', initialStep, onClose }: IdeaGeneratorModalProps) {
   const node1       = nodes.find(n => n.order_index === 1)
   const node2       = nodes.find(n => n.order_index === 2)
   const node3       = nodes.find(n => n.order_index === 3)
@@ -708,26 +709,44 @@ export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea 
       }}>
 
         {/* Header */}
-        <div style={{ padding: '18px 24px 16px', borderBottom: '1px solid var(--modal-border)', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0, background: 'var(--bg-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
-            {icon}
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-0)', lineHeight: 1.2, marginBottom: 3 }}>
-              {label}
+        {(() => {
+          const activeNode =
+            currentView === 1 ? node1 :
+            currentView === 2 ? node2 :
+            currentView === 3 ? node3 :
+            null
+          const headerLabel = activeNode?.label ?? label
+          const headerDesc  = activeNode?.description ?? description ?? null
+          return (
+            <div style={{ padding: '18px 24px 16px', borderBottom: '1px solid var(--modal-border)', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0, background: 'var(--bg-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+                {icon}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {activeNode && (
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', marginBottom: 2 }}>
+                    {label}
+                  </div>
+                )}
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-0)', lineHeight: 1.2, marginBottom: headerDesc ? 3 : 0 }}>
+                  {headerLabel}
+                </div>
+                {headerDesc && (
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                    {headerDesc}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={isRunning ? undefined : handleClose}
+                disabled={isRunning}
+                style={{ border: 'none', background: 'var(--bg-3)', cursor: isRunning ? 'not-allowed' : 'pointer', color: 'var(--text-2)', fontSize: 14, padding: '5px 9px', borderRadius: 6, flexShrink: 0, opacity: isRunning ? 0.4 : 1 }}
+              >
+                ✕
+              </button>
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
-              Generates concept variations, scores them, and surfaces the top candidates.
-            </div>
-          </div>
-          <button
-            onClick={isRunning ? undefined : handleClose}
-            disabled={isRunning}
-            style={{ border: 'none', background: 'var(--bg-3)', cursor: isRunning ? 'not-allowed' : 'pointer', color: 'var(--text-2)', fontSize: 14, padding: '5px 9px', borderRadius: 6, flexShrink: 0, opacity: isRunning ? 0.4 : 1 }}
-          >
-            ✕
-          </button>
-        </div>
+          )
+        })()}
 
         {/* Body scroll */}
         <div ref={bodyRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -962,6 +981,22 @@ export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea 
                 </div>
               )}
 
+              {/* Step 2 idle sin items pero step 1 tiene datos — permite arrancar */}
+              {step2.phase === 'idle' && scored.length === 0 && !step2Approved && variations.length > 0 && (
+                <div style={{ padding: '14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', flex: 1 }}>
+                    Ready to score and rank {variations.length} concepts.
+                  </span>
+                </div>
+              )}
+
+              {/* Step 2 idle sin datos de step 1 — no hay nada que procesar */}
+              {step2.phase === 'idle' && scored.length === 0 && !step2Approved && variations.length === 0 && (
+                <div style={{ padding: '14px' }}>
+                  <button onClick={() => setCurrentView(1)} style={regenBtnStyle}>← Go back to Step 1</button>
+                </div>
+              )}
+
               {/* Step 2 aprobado pero sin items — datos perdidos */}
               {step2Approved && step2.phase !== 'running' && scored.length === 0 && (
                 <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start' }}>
@@ -1035,6 +1070,22 @@ export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea 
                   <button onClick={() => runStep3(scored)} style={regenBtnStyle}>↺ Retry Step 3</button>
                 </div>
               )}
+
+              {/* Step 3 idle sin items pero step 2 tiene datos — permite arrancar */}
+              {step3.phase === 'idle' && candidates.length === 0 && !step3Approved && scored.length > 0 && (
+                <div style={{ padding: '14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', flex: 1 }}>
+                    Ready to surface top {topCount} candidates from {scored.length} scored concepts.
+                  </span>
+                </div>
+              )}
+
+              {/* Step 3 idle sin datos de step 2 */}
+              {step3.phase === 'idle' && candidates.length === 0 && !step3Approved && scored.length === 0 && (
+                <div style={{ padding: '14px' }}>
+                  <button onClick={() => setCurrentView(2)} style={regenBtnStyle}>← Go back to Step 2</button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1057,6 +1108,18 @@ export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea 
             </>
           )}
 
+          {/* Acción: step 2 listo para correr por primera vez */}
+          {currentView === 2 && step2.phase === 'idle' && scored.length === 0 && !step2Approved && variations.length > 0 && (
+            <>
+              <div style={{ flex: 1, fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                {isRunning ? 'Running — please wait…' : ''}
+              </div>
+              <button onClick={() => runStep2(variations)} disabled={isRunning} style={approveBtnStyle(isRunning)}>
+                Run Step 2 →
+              </button>
+            </>
+          )}
+
           {/* Acciones step 2 */}
           {currentView === 2 && step2.phase === 'done' && scored.length > 0 && (
             <>
@@ -1069,6 +1132,18 @@ export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea 
               {!step2Approved && (
                 <button onClick={approveStep2} disabled={isRunning} style={approveBtnStyle(isRunning)}>Approve Step →</button>
               )}
+            </>
+          )}
+
+          {/* Acción: step 3 listo para correr por primera vez */}
+          {currentView === 3 && step3.phase === 'idle' && candidates.length === 0 && !step3Approved && scored.length > 0 && (
+            <>
+              <div style={{ flex: 1, fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                {isRunning ? 'Running — please wait…' : ''}
+              </div>
+              <button onClick={() => runStep3(scored)} disabled={isRunning} style={approveBtnStyle(isRunning)}>
+                Run Step 3 →
+              </button>
             </>
           )}
 
@@ -1087,8 +1162,8 @@ export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea 
           {/* Status text — formulario / running / estados sin acción */}
           {(currentView === 'form' || isRunning ||
             (currentView === 1 && step1.phase !== 'done') ||
-            (currentView === 2 && step2.phase !== 'done') ||
-            (currentView === 3 && step3.phase !== 'done')
+            (currentView === 2 && step2.phase !== 'done' && !(step2.phase === 'idle' && scored.length === 0 && !step2Approved && variations.length > 0)) ||
+            (currentView === 3 && step3.phase !== 'done' && !(step3.phase === 'idle' && candidates.length === 0 && !step3Approved && scored.length > 0))
           ) && (
             <div style={{ flex: 1, fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
               {isRunning

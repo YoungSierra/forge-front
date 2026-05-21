@@ -638,6 +638,7 @@ function ContainerDrawer({
           project={project}
           nodes={container.nodes}
           label={container.label}
+          description={container.description}
           icon={containerIcon}
           initialStep={ideaGenOpen}
           onClose={() => { setIdeaGenOpen(false); onRefresh?.() }}
@@ -1113,6 +1114,7 @@ function ContainerCanvasInner({
           project={project}
           nodes={container.nodes}
           label={container.label}
+          description={container.description}
           icon={containerIcon}
           initialStep={ideaGenStep}
           onClose={() => { setIdeaGenStep(false); onRefresh?.() }}
@@ -1511,6 +1513,7 @@ export default function PhaseCanvas({ project, unlockedUpTo = 1, onRefresh }: Ph
           project={project}
           nodes={expandedIdeaGen.container.nodes}
           label={expandedIdeaGen.container.label}
+          description={expandedIdeaGen.container.description}
           icon={CONTAINER_ICON[expandedIdeaGen.container.step_key] ?? '⬡'}
           initialStep={expandedIdeaGen.nodeOrderIndex}
           onClose={() => { setExpandedIdeaGen(null); onRefresh?.() }}
