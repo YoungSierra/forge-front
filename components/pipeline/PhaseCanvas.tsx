@@ -1239,7 +1239,7 @@ export default function PhaseCanvas({ project, unlockedUpTo = 1, onRefresh }: Ph
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
       if (activeContainerRef.current) return
-      if (!canvasRef.current?.contains(e.target as Node)) return
+      if (!canvasRef.current?.contains(e.target as globalThis.Node)) return
       e.preventDefault()
       setScale(s => Math.min(Math.max(s * (e.deltaY > 0 ? 0.92 : 1.09), 0.3), 2))
     }
