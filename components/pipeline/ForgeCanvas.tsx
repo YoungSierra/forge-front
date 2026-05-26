@@ -1543,7 +1543,7 @@ function ImportAsOutputButton({ projectId, canvasNode, onImported }: {
   }
 
   async function handleImport() {
-    if (!assetId) return
+    if (!assetId || !canvasNode.node) return
     setSaving(true)
     setError(null)
     try {
