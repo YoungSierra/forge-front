@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { getProject } from '@/lib/api'
 import type { Project } from '@/lib/types'
-import PhaseCanvas from '@/components/pipeline/PhaseCanvas'
+import ForgeCanvas from '@/components/pipeline/ForgeCanvas'
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -67,5 +67,5 @@ export default function ProjectPage({ params }: PageProps) {
     )
   }
 
-  return <PhaseCanvas project={project} onRefresh={load} />
+  return <ForgeCanvas project={project} onRefresh={load} />
 }

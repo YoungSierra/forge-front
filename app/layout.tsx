@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
-import Script from 'next/script'
 import './globals.css'
 import { AuthProvider } from '@/lib/auth-context'
 import FeedbackWidget from '@/components/feedback/FeedbackWidget'
@@ -31,7 +30,7 @@ export default function RootLayout({
   return (
     <html lang="es" className={`${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
       <head>
-        <Script id="theme-init" strategy="beforeInteractive"
+        <script
           dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem('forge-theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}` }}
         />
       </head>

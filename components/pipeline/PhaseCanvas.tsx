@@ -13,13 +13,17 @@ import '@xyflow/react/dist/style.css'
 import ForgeEdge from '@/components/pipeline/ForgeEdge'
 import { saveContainerLayout, loadContainerLayout } from '@/lib/canvas-storage'
 import type { CanvasLayout } from '@/lib/canvas-storage'
-import { getPipelinePhases, saveChatHistory } from '@/lib/api'
+import { getPipelinePhases, saveChatHistory, getActionNodes, addActionInstance, removeActionInstance } from '@/lib/api'
 import type { PhaseConfig, PhaseContainerConfig, PhaseNodeConfig, PipelineNodeConfig, PipelineContainerConfig, ChatMessage } from '@/lib/api'
-import type { Project } from '@/lib/types'
+import type { Project, ActionInstance, StepConfig } from '@/lib/types'
 import ForgeToolbar from '@/components/pipeline/ForgeToolbar'
 import NodeRunModal from '@/components/pipeline/NodeRunModal'
 import IdeaGeneratorModal from '@/components/pipeline/IdeaGeneratorModal'
+import MarketResearchModal from '@/components/pipeline/MarketResearchModal'
+import HumanNodeModal from '@/components/pipeline/HumanNodeModal'
 import NodeChatWindow from '@/components/shared/NodeChatWindow'
+import ActionStepNode, { type ActionStepNodeData } from '@/components/pipeline/ActionStepNode'
+import ActionModal from '@/components/pipeline/ActionModal'
 
 const FORGYI_KEYFRAME = `@keyframes forgyi-ping { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.45;transform:scale(1.25)} }`
 
@@ -426,11 +430,13 @@ function ContainerDrawer({
   onClose:         () => void
   onRefresh?:      () => void
 }) {
-  const [runNode,       setRunNode]       = useState<PhaseNodeConfig | null>(null)
-  const [ideaGenOpen,   setIdeaGenOpen]   = useState<number | false>(false)
+  const [runNode,        setRunNode]        = useState<PhaseNodeConfig | null>(null)
+  const [ideaGenOpen,    setIdeaGenOpen]    = useState<number | false>(false)
+  const [mktResOpen,     setMktResOpen]     = useState<number | false>(false)
+  const [sourceModal,    setSourceModal]    = useState<{ containerStepKey: string; nodeStep: number } | null>(null)
 
-  // El container de idea generation abre el modal propio en vez de NodeRunModal
   const isIdeaGenContainer = container.step_key === 'idtn_idea_generation'
+  const isMktResContainer  = container.step_key === 'idtn_market_research'
 
   const containerIcon    = CONTAINER_ICON[container.step_key] ?? '⬡'
   const uniqueIntgTypes  = Array.from(new Set(container.nodes.map(n => n.integration_type).filter(Boolean))) as string[]
@@ -565,7 +571,7 @@ function ContainerDrawer({
             return (
               <button
                 key={n.step_key}
-                onClick={() => isIdeaGenContainer ? setIdeaGenOpen(n.order_index) : setRunNode(n)}
+                onClick={() => isIdeaGenContainer ? setIdeaGenOpen(n.order_index) : isMktResContainer ? setMktResOpen(n.order_index) : setRunNode(n)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '11px 14px', borderRadius: 8, width: '100%', textAlign: 'left',
@@ -644,6 +650,38 @@ function ContainerDrawer({
           onClose={() => { setIdeaGenOpen(false); onRefresh?.() }}
         />
       )}
+
+      {/* MarketResearchModal para el container idtn_market_research */}
+      {mktResOpen !== false && (
+        <MarketResearchModal
+          project={project}
+          nodes={container.nodes}
+          label={container.label}
+          description={container.description}
+          icon={containerIcon}
+          initialStep={mktResOpen}
+          onOpenSource={(key, step) => setSourceModal({ containerStepKey: key, nodeStep: step })}
+          onClose={() => { setMktResOpen(false); onRefresh?.() }}
+        />
+      )}
+
+      {/* IdeaGeneratorModal apilado al abrir "Open 1.1.3 →" */}
+      {sourceModal && (() => {
+        const src = allContainers.find(c => c.step_key === sourceModal.containerStepKey)
+        if (!src) return null
+        return (
+          <IdeaGeneratorModal
+            project={project}
+            nodes={src.nodes}
+            label={src.label}
+            description={src.description}
+            icon={CONTAINER_ICON[src.step_key] ?? '⬡'}
+            initialStep={sourceModal.nodeStep}
+            layered={true}
+            onClose={() => setSourceModal(null)}
+          />
+        )
+      })()}
     </>
   )
 }
@@ -911,8 +949,26 @@ const ContainerStepNode = React.memo(function ContainerStepNode({ data }: { data
   )
 })
 
-const CONTAINER_STEP_NODE_TYPES = { containerStep: ContainerStepNode }
-const CONTAINER_EDGE_TYPES      = { forgeEdge: ForgeEdge }
+const ACTION_ICON_SMALL: Record<string, string> = {
+  'docx':          '📄',
+  'pptx':          '📊',
+  'pdf':           '📑',
+  'artefact-html': '🌐',
+  'pitch-deck':    '🎯',
+  'one-pager':     '📋',
+  'social-kit':    '📢',
+  'press-release': '📰',
+  'spreadsheet':   '🗂️',
+  'email-draft':   '✉️',
+  'wiki-starter':  '📚',
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const CONTAINER_STEP_NODE_TYPES: Record<string, any> = {
+  containerStep: ContainerStepNode,
+  actionStep:    ActionStepNode,
+}
+const CONTAINER_EDGE_TYPES = { forgeEdge: ForgeEdge }
 
 const CNODE_W   = 260
 const CNODE_GAP = 100
@@ -936,49 +992,133 @@ function ContainerCanvasInner({
     [container.nodes]
   )
 
-  const initNodes = useMemo((): Node[] => {
-    // localStorage tiene prioridad (drags más recientes); si vacío, fallback a BD
-    const saved =
+  // Catálogo de action nodes disponibles
+  const [actionCatalog, setActionCatalog] = useState<StepConfig[]>([])
+  useEffect(() => {
+    getActionNodes().then(r => setActionCatalog(r.action_nodes)).catch(() => {})
+  }, [])
+
+  // Instancias de este container
+  const containerInstances = useMemo(
+    () => (project.action_instances ?? []).filter(i => i.container_key === container.step_key),
+    [project.action_instances, container.step_key]
+  )
+
+  const savedLayoutData = useMemo(
+    () =>
       loadContainerLayout(project.id, container.step_key) ??
       (project.canvas_layout as CanvasLayout)?.container_layouts?.[container.step_key] ??
-      null
-    return sorted.map((node, i) => ({
+      null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [project.id, container.step_key]
+  )
+  const savedLayout   = savedLayoutData?.positions ?? null
+  const savedViewport = savedLayoutData?.viewport   ?? null
+
+  const buildPipelineNodes = useCallback((): Node[] =>
+    sorted.map((node, i) => ({
       id:       node.step_key,
       type:     'containerStep',
-      position: saved?.[node.step_key] ?? { x: i * (CNODE_W + CNODE_GAP), y: 0 },
+      position: savedLayout?.[node.step_key] ?? { x: i * (CNODE_W + CNODE_GAP), y: 0 },
       data: {
         node,
         status:      getNodeStatus(node.step_key),
         locked:      node.order_index > unlockedNodeIdx,
         onChatClick: () => setChatNode(node),
       },
-    }))
-  }, [sorted, getNodeStatus, unlockedNodeIdx, project.id, container.step_key, project.canvas_layout])
+    })),
+    [sorted, getNodeStatus, unlockedNodeIdx, savedLayout]
+  )
 
-  const initEdges = useMemo((): Edge[] => sorted.slice(0, -1).map((n, i) => ({
-    id:         `e-${n.step_key}`,
-    source:     n.step_key,
-    target:     sorted[i + 1].step_key,
-    type:       'forgeEdge',
-    deletable:  false,
-    selectable: false,
-    data:       { color: '#6b7280', active: false },
-  })), [sorted])
+  const buildActionNodes = useCallback((instances: ActionInstance[], pipelineNodes: Node[], existingNodes: Node[] = []): Node[] =>
+    instances.map((inst, i) => {
+      const catalog  = actionCatalog.find(c => c.step_key === inst.action_step_key)
+      const label    = catalog?.label ?? inst.action_type
+      const existing = existingNodes.find(n => n.id === `action:${inst.id}`)
+      // Si ya existe, conservar posición pero actualizar instance, label Y callbacks (closure fresca con inst actualizado)
+      if (existing) return {
+        ...existing,
+        data: {
+          ...existing.data,
+          instance: inst,
+          label,
+          onOpen:   () => { setActionAutoRun(false); setActionModal(inst) },
+          onRun:    () => { setActionAutoRun(true);  setActionModal(inst) },
+          onRemove: () => handleRemoveAction(inst.id),
+        },
+      }
+      const src = pipelineNodes.find(n => n.id === inst.source_step_key)
+      const defaultPos = src
+        ? { x: src.position.x + CNODE_W + 80, y: src.position.y + i * 95 }
+        : { x: i * 200, y: 250 }
+      return {
+        id:       `action:${inst.id}`,
+        type:     'actionStep',
+        position: savedLayout?.[`action:${inst.id}`] ?? defaultPos,
+        data: {
+          instance: inst,
+          label,
+          onOpen:   () => { setActionAutoRun(false); setActionModal(inst) },
+          onRun:    () => { setActionAutoRun(true);  setActionModal(inst) },
+          onRemove: () => handleRemoveAction(inst.id),
+        } as ActionStepNodeData,
+      }
+    }),
+    [actionCatalog, savedLayout]
+  )
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initNodes)
-  const [edges]                          = useEdgesState(initEdges)
+  const buildPipelineEdges = useCallback((): Edge[] =>
+    sorted.slice(0, -1).map((n, i) => ({
+      id:         `e-${n.step_key}`,
+      source:     n.step_key,
+      target:     sorted[i + 1].step_key,
+      type:       'forgeEdge',
+      deletable:  false,
+      selectable: false,
+      data:       { color: '#6b7280', active: false },
+    })),
+    [sorted]
+  )
 
-  // Ref siempre actualizado — evita capturar stale state en los callbacks
+  const buildActionEdges = useCallback((instances: ActionInstance[]): Edge[] =>
+    instances.map(inst => ({
+      id:         `ae-${inst.id}`,
+      source:     inst.source_step_key,
+      target:     `action:${inst.id}`,
+      type:       'forgeEdge',
+      deletable:  false,
+      selectable: false,
+      data:       { color: '#ff8a3d', active: inst.status === 'done' },
+    })),
+    []
+  )
+
+  const initPipelineNodes = useMemo(() => buildPipelineNodes(), [buildPipelineNodes])
+  const initPipelineEdges = useMemo(() => buildPipelineEdges(), [buildPipelineEdges])
+  const initActionNodes   = useMemo(() => buildActionNodes(containerInstances, initPipelineNodes, []), [buildActionNodes, containerInstances, initPipelineNodes])
+  const initActionEdges   = useMemo(() => buildActionEdges(containerInstances), [buildActionEdges, containerInstances])
+
+  const [nodes, setNodes, onNodesChange] = useNodesState([...initPipelineNodes, ...initActionNodes])
+  const [edges, setEdges]                = useEdgesState([...initPipelineEdges, ...initActionEdges])
+
   const nodesRef = useRef(nodes)
   nodesRef.current = nodes
 
-  const [runNode,     setRunNode]     = useState<PhaseNodeConfig | null>(null)
-  const [ideaGenStep, setIdeaGenStep] = useState<number | false>(false)
-  const [chatNode,    setChatNode]    = useState<PhaseNodeConfig | null>(null)
+  const [runNode,      setRunNode]      = useState<PhaseNodeConfig | null>(null)
+  const [humanNode,    setHumanNode]    = useState<PhaseNodeConfig | null>(null)
+  const [ideaGenStep,  setIdeaGenStep]  = useState<number | false>(false)
+  const [mktResStep,   setMktResStep]   = useState<number | false>(false)
+  const [sourceModal,  setSourceModal]  = useState<{ containerStepKey: string; nodeStep: number } | null>(null)
+  const [chatNode,     setChatNode]     = useState<PhaseNodeConfig | null>(null)
+  const [actionModal,  setActionModal]  = useState<ActionInstance | null>(null)
+  const [actionAutoRun, setActionAutoRun] = useState(false)
+  const [ctxMenu,      setCtxMenu]      = useState<{ x: number; y: number; sourceStepKey: string; sourceLabel: string } | null>(null)
+  const ctxMenuRef = useRef<HTMLDivElement>(null)
 
-  // Sincroniza status/locked en los nodos cuando cambia generation_jobs (sin tocar posiciones)
+  // Sincroniza status/locked en pipeline nodes cuando cambia generation_jobs
   useEffect(() => {
     setNodes(prev => prev.map(n => {
+      if (n.id.startsWith('action:')) return n
       const phaseNode = sorted.find(s => s.step_key === n.id)
       if (!phaseNode) return n
       const newStatus = getNodeStatus(phaseNode.step_key)
@@ -989,51 +1129,128 @@ function ContainerCanvasInner({
     }))
   }, [getNodeStatus, unlockedNodeIdx, sorted, setNodes])
 
+  // Sincroniza action nodes cuando cambian las instancias
+  useEffect(() => {
+    const all          = nodesRef.current
+    const pipelineNodes = all.filter(n => !n.id.startsWith('action:'))
+    const newActionNodes = buildActionNodes(containerInstances, pipelineNodes, all)
+    setNodes(prev => [
+      ...prev.filter(n => !n.id.startsWith('action:')),
+      ...newActionNodes,
+    ])
+    setEdges(prev => [
+      ...prev.filter(e => !e.id.startsWith('ae-')),
+      ...buildActionEdges(containerInstances),
+    ])
+  }, [containerInstances, buildActionNodes, buildActionEdges, setNodes, setEdges])
+
+  async function handleRemoveAction(instanceId: string) {
+    try {
+      await removeActionInstance(project.id, instanceId)
+      onRefresh?.()
+    } catch (err) {
+      console.error('[action-nodes] remove failed', err)
+    }
+  }
+
   const isIdeaGen        = container.step_key === 'idtn_idea_generation'
+  const isMktRes         = container.step_key === 'idtn_market_research'
   const containerIcon    = CONTAINER_ICON[container.step_key] ?? '⬡'
   const legacyContainer  = useMemo(() => toLegacyContainer(container), [container])
   const legacyContainers = useMemo(() => allContainers.map(toLegacyContainer), [allContainers])
 
-  const { zoomIn, zoomOut, fitView } = useReactFlow()
+  const { zoomIn, zoomOut, fitView, getViewport } = useReactFlow()
   const { zoom } = useViewport()
 
   const handleNodeClick = useCallback((_: React.MouseEvent, rfNode: Node) => {
+    setCtxMenu(null)
+    if (rfNode.id.startsWith('action:')) return // action nodes usan su propio onClick
     const d = rfNode.data as ContainerStepNodeData
     if (d.locked) return
     const phaseNode = container.nodes.find(n => n.step_key === rfNode.id)
     if (!phaseNode) return
-    if (isIdeaGen) setIdeaGenStep(phaseNode.order_index)
-    else           setRunNode(phaseNode)
-  }, [container.nodes, isIdeaGen])
+    if      (isIdeaGen)                              setIdeaGenStep(phaseNode.order_index)
+    else if (isMktRes)                               setMktResStep(phaseNode.order_index)
+    else if (phaseNode.integration_type === 'human') setHumanNode(phaseNode)
+    else                                             setRunNode(phaseNode)
+  }, [container.nodes, isIdeaGen, isMktRes])
 
-  // Usa nodesRef para capturar TODOS los nodos (no solo el arrastrado)
-  const handleNodeDragStop = useCallback(() => {
+  const handleNodeContextMenu = useCallback((e: React.MouseEvent, rfNode: Node) => {
+    e.preventDefault()
+    if (rfNode.id.startsWith('action:')) return
+    const d = rfNode.data as ContainerStepNodeData
+    if (d.locked) return
+    setCtxMenu({ x: e.clientX, y: e.clientY, sourceStepKey: rfNode.id, sourceLabel: d.node.label })
+  }, [])
+
+  const handleAddAction = useCallback(async (actionStepKey: string) => {
+    if (!ctxMenu) return
+    setCtxMenu(null)
+    try {
+      await addActionInstance(project.id, {
+        action_step_key: actionStepKey,
+        source_step_key: ctxMenu.sourceStepKey,
+        container_key:   container.step_key,
+      })
+      onRefresh?.()
+    } catch (err) {
+      console.error('[action-nodes] add failed', err)
+    }
+  }, [ctxMenu, project.id, container.step_key, onRefresh])
+
+  // Guarda posiciones + viewport actual
+  const saveLayout = useCallback(() => {
     const positions: Record<string, { x: number; y: number }> = {}
     nodesRef.current.forEach(n => { positions[n.id] = n.position })
-    saveContainerLayout(project.id, container.step_key, positions)
-  }, [project.id, container.step_key])
+    saveContainerLayout(project.id, container.step_key, positions, getViewport())
+  }, [project.id, container.step_key, getViewport])
+
+  const handleNodeDragStop = useCallback(() => { saveLayout() }, [saveLayout])
+  const handleMoveEnd      = useCallback(() => { saveLayout() }, [saveLayout])
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-      {/* Breadcrumb / back — flujo normal, no absolute */}
+      {/* Breadcrumb / back */}
       <div style={{
         flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '10px 16px', borderBottom: '1px solid var(--line-2)',
-        background: 'var(--bg-1)', gap: 8,
+        padding: '0 16px', height: 44,
+        borderBottom: '1px solid var(--line-2)',
+        background: 'var(--bg-1)', gap: 0,
       }}>
+        {/* Botón back */}
         <button onClick={onBack} style={{
-          border: 'none', background: 'var(--bg-2)', cursor: 'pointer',
-          color: 'var(--text-1)', fontSize: 11, fontFamily: 'var(--font-mono)',
-          padding: '4px 8px', borderRadius: 5, lineHeight: 1,
-        }}>
-          ← Back
+          border: 'none', background: 'transparent', cursor: 'pointer',
+          color: 'var(--text-3)', fontSize: 11, fontFamily: 'var(--font-mono)',
+          padding: '5px 10px 5px 0', display: 'flex', alignItems: 'center', gap: 5,
+          transition: 'color 120ms',
+        }}
+          onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-0)')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-3)')}
+        >
+          <span style={{ fontSize: 13 }}>←</span>
+          <span>Back</span>
         </button>
-        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
+
+        {/* Separador */}
+        <span style={{ color: 'var(--line-2)', fontSize: 14, marginRight: 10 }}>/</span>
+
+        {/* Índice */}
+        <span style={{
+          fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+          color: 'var(--text-4)', letterSpacing: '0.05em', marginRight: 8,
+        }}>
           {phaseIdx}.{container.order_index}
         </span>
-        <span style={{ fontSize: 14, lineHeight: 1 }}>{containerIcon}</span>
-        <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-0)' }}>
+
+        {/* Icono */}
+        <span style={{ fontSize: 16, lineHeight: 1, marginRight: 7 }}>{containerIcon}</span>
+
+        {/* Label */}
+        <span style={{
+          fontSize: 15, fontFamily: 'var(--font-mono)', fontWeight: 700,
+          color: 'var(--text-0)', letterSpacing: '-0.01em',
+        }}>
           {container.label}
         </span>
       </div>
@@ -1086,10 +1303,13 @@ function ContainerCanvasInner({
         nodeTypes={CONTAINER_STEP_NODE_TYPES}
         edgeTypes={CONTAINER_EDGE_TYPES}
         onNodeClick={handleNodeClick}
+        onNodeContextMenu={handleNodeContextMenu}
         onNodeDragStop={handleNodeDragStop}
+        onMoveEnd={handleMoveEnd}
         proOptions={{ hideAttribution: true }}
-        fitView
+        fitView={!savedViewport}
         fitViewOptions={{ padding: 0.3 }}
+        defaultViewport={savedViewport ?? undefined}
         nodesDraggable
         nodesConnectable={false}
         deleteKeyCode={null}
@@ -1097,6 +1317,58 @@ function ContainerCanvasInner({
       >
         <Background variant={BackgroundVariant.Dots} color="var(--line-2)" gap={28} size={1} style={{ opacity: 0 }} />
       </ReactFlow>
+
+      {/* Context menu — click derecho en un pipeline node */}
+      {ctxMenu && actionCatalog.length > 0 && (
+        <>
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 199 }}
+          onClick={() => setCtxMenu(null)}
+          onContextMenu={e => { e.preventDefault(); setCtxMenu(null) }}
+        />
+        <div
+          ref={ctxMenuRef}
+          style={{
+            position: 'fixed', zIndex: 200,
+            left: Math.min(ctxMenu.x, window.innerWidth - 220),
+            top:  Math.min(ctxMenu.y, window.innerHeight - 40),
+            background: 'var(--bg-1)',
+            border: '1px solid var(--line-2)',
+            borderRadius: 10,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+            minWidth: 200,
+            overflow: 'hidden',
+          }}
+          onContextMenu={e => e.preventDefault()}
+        >
+          <div style={{
+            padding: '8px 12px', borderBottom: '1px solid var(--line-2)',
+            fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)',
+            textTransform: 'uppercase', letterSpacing: '0.08em',
+          }}>
+            Attach action to <span style={{ color: 'var(--text-1)' }}>{ctxMenu.sourceLabel}</span>
+          </div>
+          {actionCatalog.map(a => (
+            <button
+              key={a.step_key}
+              onClick={() => handleAddAction(a.step_key)}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '8px 12px', border: 'none',
+                background: 'transparent', cursor: 'pointer',
+                fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-0)',
+                borderBottom: '1px solid var(--line-2)',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-2)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+            >
+              <span style={{ marginRight: 6 }}>{ACTION_ICON_SMALL[a.action_type ?? ''] ?? '⚡'}</span>
+              {a.label ?? a.step_key}
+            </button>
+          ))}
+        </div>
+        </>
+      )}
 
       {runNode && (
         <NodeRunModal
@@ -1107,6 +1379,15 @@ function ContainerCanvasInner({
           color="#A78BFA"
           onClose={() => setRunNode(null)}
           onApproved={() => { setRunNode(null); onRefresh?.() }}
+        />
+      )}
+
+      {humanNode && (
+        <HumanNodeModal
+          node={humanNode}
+          project={project}
+          onClose={() => setHumanNode(null)}
+          onSaved={() => { onRefresh?.() }}
         />
       )}
       {ideaGenStep !== false && (
@@ -1120,6 +1401,37 @@ function ContainerCanvasInner({
           onClose={() => { setIdeaGenStep(false); onRefresh?.() }}
         />
       )}
+      {mktResStep !== false && (
+        <MarketResearchModal
+          project={project}
+          nodes={container.nodes}
+          label={container.label}
+          description={container.description}
+          icon={containerIcon}
+          initialStep={mktResStep}
+          onOpenSource={(key, step) => setSourceModal({ containerStepKey: key, nodeStep: step })}
+          onClose={() => { setMktResStep(false); onRefresh?.() }}
+        />
+      )}
+
+      {/* IdeaGeneratorModal apilado al abrir "Open 1.1.3 →" */}
+      {sourceModal && (() => {
+        const src = allContainers.find(c => c.step_key === sourceModal.containerStepKey)
+        if (!src) return null
+        return (
+          <IdeaGeneratorModal
+            project={project}
+            nodes={src.nodes}
+            label={src.label}
+            description={src.description}
+            icon={CONTAINER_ICON[src.step_key] ?? '⬡'}
+            initialStep={sourceModal.nodeStep}
+            layered={true}
+            onClose={() => setSourceModal(null)}
+          />
+        )
+      })()}
+
       {chatNode && (() => {
         const artifact    = project.concept?.pipeline?.[chatNode.step_key] as { chat_history?: ChatMessage[] } | undefined
         const initialMsgs = artifact?.chat_history ?? []
@@ -1134,6 +1446,22 @@ function ContainerCanvasInner({
             initialMessages={initialMsgs}
             onMessagesChange={msgs => saveChatHistory(project.id, chatNode.step_key, msgs).catch(() => {})}
             onClose={() => setChatNode(null)}
+          />
+        )
+      })()}
+
+      {actionModal && (() => {
+        const catalog = actionCatalog.find(c => c.step_key === actionModal.action_step_key)
+        const srcNode = container.nodes.find(n => n.step_key === actionModal.source_step_key)
+        return (
+          <ActionModal
+            instance={actionModal}
+            sourceLabel={srcNode?.label ?? actionModal.source_step_key}
+            actionLabel={catalog?.label ?? actionModal.action_type}
+            projectId={project.id}
+            autoRun={actionAutoRun}
+            onClose={() => { setActionModal(null); setActionAutoRun(false) }}
+            onRunComplete={() => { setActionAutoRun(false); onRefresh?.() }}
           />
         )
       })()}
@@ -1218,12 +1546,16 @@ export default function PhaseCanvas({ project, unlockedUpTo = 1, onRefresh }: Ph
   const [scale,           setScale]           = useState(1)
 
   // Modales directos desde vista expandida
-  const [expandedRunModal,  setExpandedRunModal]  = useState<{ container: PhaseContainerConfig; node: PhaseNodeConfig } | null>(null)
-  const [expandedIdeaGen, setExpandedIdeaGen] = useState<{ container: PhaseContainerConfig; nodeOrderIndex: number } | null>(null)
+  const [expandedRunModal,    setExpandedRunModal]    = useState<{ container: PhaseContainerConfig; node: PhaseNodeConfig } | null>(null)
+  const [expandedIdeaGen,     setExpandedIdeaGen]     = useState<{ container: PhaseContainerConfig; nodeOrderIndex: number } | null>(null)
+  const [expandedMktRes,      setExpandedMktRes]      = useState<{ container: PhaseContainerConfig; nodeOrderIndex: number } | null>(null)
+  const [expandedSourceModal, setExpandedSourceModal] = useState<{ containerStepKey: string; nodeStep: number } | null>(null)
 
   function handleNodeClick(container: PhaseContainerConfig, node: PhaseNodeConfig) {
     if (container.step_key === 'idtn_idea_generation') {
       setExpandedIdeaGen({ container, nodeOrderIndex: node.order_index })
+    } else if (container.step_key === 'idtn_market_research') {
+      setExpandedMktRes({ container, nodeOrderIndex: node.order_index })
     } else {
       setExpandedRunModal({ container, node })
     }
@@ -1294,6 +1626,26 @@ export default function PhaseCanvas({ project, unlockedUpTo = 1, onRefresh }: Ph
     return ni
   }, [project.generation_jobs])
 
+  // Devuelve el order_index de la última fase accesible
+  // Una fase se desbloquea cuando TODOS los nodos de TODOS sus containers están aprobados
+  const computedPhaseIdx = useMemo(() => {
+    if (!phases.length) return 1
+    const jobs   = project.generation_jobs ?? []
+    const isDone = (sk: string) => jobs.some(j => j.current_step === sk && j.status === 'approved')
+    const sorted = [...phases].sort((a, b) => a.order_index - b.order_index)
+    let idx = 1
+    for (const phase of sorted) {
+      const allDone = phase.containers.every(c => c.nodes.every(n => isDone(n.step_key)))
+      if (allDone) {
+        idx = phase.order_index + 1
+      } else {
+        idx = phase.order_index
+        break
+      }
+    }
+    return idx
+  }, [phases, project.generation_jobs])
+
   // Devuelve el order_index del último container accesible en la fase activa
   const computedContainerIdx = useMemo(() => {
     if (!activePhase) return 1
@@ -1352,7 +1704,7 @@ export default function PhaseCanvas({ project, unlockedUpTo = 1, onRefresh }: Ph
         background: 'var(--bg-1)', flexShrink: 0, overflowX: 'auto',
       }}>
         {phases.map((phase, i) => {
-          const locked = phase.order_index > unlockedUpTo
+          const locked = phase.order_index > computedPhaseIdx
           return (
             <PhaseTab
               key={phase.step_key}
@@ -1519,6 +1871,37 @@ export default function PhaseCanvas({ project, unlockedUpTo = 1, onRefresh }: Ph
           onClose={() => { setExpandedIdeaGen(null); onRefresh?.() }}
         />
       )}
+
+      {expandedMktRes && (
+        <MarketResearchModal
+          project={project}
+          nodes={expandedMktRes.container.nodes}
+          label={expandedMktRes.container.label}
+          description={expandedMktRes.container.description}
+          icon={CONTAINER_ICON[expandedMktRes.container.step_key] ?? '⬡'}
+          initialStep={expandedMktRes.nodeOrderIndex}
+          onOpenSource={(key, step) => setExpandedSourceModal({ containerStepKey: key, nodeStep: step })}
+          onClose={() => { setExpandedMktRes(null); onRefresh?.() }}
+        />
+      )}
+
+      {/* IdeaGeneratorModal apilado al abrir "Open 1.1.3 →" desde vista expandida */}
+      {expandedSourceModal && (() => {
+        const src = activePhase?.containers.find(c => c.step_key === expandedSourceModal.containerStepKey)
+        if (!src) return null
+        return (
+          <IdeaGeneratorModal
+            project={project}
+            nodes={src.nodes}
+            label={src.label}
+            description={src.description}
+            icon={CONTAINER_ICON[src.step_key] ?? '⬡'}
+            initialStep={expandedSourceModal.nodeStep}
+            layered={true}
+            onClose={() => setExpandedSourceModal(null)}
+          />
+        )
+      })()}
 
       {expandedRunModal && (
         <NodeRunModal

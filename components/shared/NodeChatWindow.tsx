@@ -1,16 +1,19 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { chatWithNode } from '@/lib/api'
 import type { ChatMessage } from '@/lib/api'
 import type { Project } from '@/lib/types'
+import { MD_COMPONENTS } from '@/lib/md-components'
 
 const KEYFRAMES = `
   @keyframes chat-dot { 0%,80%,100%{opacity:.2;transform:scale(0.8)} 40%{opacity:1;transform:scale(1)} }
 `
 
-const WINDOW_W = 400
-const WINDOW_H = 560
+const WINDOW_W = 560
+const WINDOW_H = 680
 
 // ─── Typing dots ──────────────────────────────────────────────────────────────
 
@@ -31,7 +34,7 @@ function TypingDots() {
 
 // ─── Burbuja ──────────────────────────────────────────────────────────────────
 
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+function MessageBubble({ msg, onExpand }: { msg: ChatMessage; onExpand?: (content: string) => void }) {
   const isUser = msg.role === 'user'
   return (
     <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', gap: 8 }}>
@@ -46,23 +49,56 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           <img src="/forgy/forgyi.png" alt="Forge" style={{ width: 14, height: 14, objectFit: 'contain' }} />
         </div>
       )}
-      <div style={{
-        maxWidth: '80%', padding: '9px 13px',
-        borderRadius: isUser ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
-        background: isUser
-          ? 'color-mix(in srgb, var(--action) 16%, var(--bg-2))'
-          : 'var(--bg-2)',
-        border: `1px solid ${isUser
-          ? 'color-mix(in srgb, var(--action) 30%, transparent)'
-          : 'var(--line-2)'}`,
-        fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65,
-        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-      }}>
-        {msg.content}
+      <div style={{ maxWidth: isUser ? '80%' : '96%', position: 'relative' }}>
+        <div style={{
+          padding: '9px 13px',
+          borderRadius: isUser ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
+          background: isUser
+            ? 'color-mix(in srgb, var(--action) 16%, var(--bg-2))'
+            : 'var(--bg-2)',
+          border: `1px solid ${isUser
+            ? 'color-mix(in srgb, var(--action) 30%, transparent)'
+            : 'var(--line-2)'}`,
+          fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65,
+          wordBreak: 'break-word',
+        }}>
+          {isUser ? (
+            <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
+          ) : (
+            <div style={{ fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65 }}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                {msg.content}
+              </ReactMarkdown>
+            </div>
+          )}
+        </div>
+
+        {/* Botón expandir — solo en mensajes del asistente */}
+        {!isUser && onExpand && (
+          <button
+            onClick={() => onExpand(msg.content)}
+            title="Expand response"
+            style={{
+              position: 'absolute', top: 6, right: 6,
+              width: 20, height: 20, borderRadius: 4,
+              border: '1px solid var(--line-2)',
+              background: 'var(--bg-3)',
+              color: 'var(--text-3)', fontSize: 10,
+              cursor: 'pointer', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              lineHeight: 1, padding: 0,
+              opacity: 0, transition: 'opacity 120ms',
+            }}
+            className="msg-expand-btn"
+          >
+            ⊞
+          </button>
+        )}
       </div>
     </div>
   )
 }
+
 
 // ─── NodeChatWindow ───────────────────────────────────────────────────────────
 
@@ -78,17 +114,23 @@ export interface NodeChatWindowProps {
   onApply?:          (data: unknown) => void
   validateOutput?:   (data: unknown) => string | null  // null = válido, string = mensaje de error
   onClose:           () => void
+  // Si se provee, reemplaza la llamada interna a chatWithNode
+  onSend?:          (userMessage: string) => Promise<string>
+  onAccept?:        (content: string) => Promise<void>
+  docUrl?:          string
 }
 
 export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
-  initialMessages, onMessagesChange, onApply, validateOutput, onClose,
+  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, docUrl,
 }: NodeChatWindowProps) {
-  const [messages,  setMessages]  = useState<ChatMessage[]>(initialMessages ?? [])
-  const [input,     setInput]     = useState('')
-  const [sending,   setSending]   = useState(false)
-  const [applying,  setApplying]  = useState(false)
-  const [error,     setError]     = useState<string | null>(null)
+  const [messages,        setMessages]        = useState<ChatMessage[]>(initialMessages ?? [])
+  const [input,           setInput]           = useState('')
+  const [sending,         setSending]         = useState(false)
+  const [applying,        setApplying]        = useState(false)
+  const [accepting,       setAccepting]       = useState(false)
+  const [error,           setError]           = useState<string | null>(null)
+  const [expandedContent, setExpandedContent] = useState<string | null>(null)
 
   // Posición del drag — calculada tras mount para evitar problemas de SSR
   const [pos,        setPos]        = useState({ x: 0, y: 0 })
@@ -97,6 +139,16 @@ export default function NodeChatWindow({
   const dragOrigin = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
 
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Auto-resize del textarea de input
+  useEffect(() => {
+    const ta = inputRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    const lineH   = 20
+    const maxRows = 8
+    ta.style.height = `${Math.min(ta.scrollHeight, lineH * maxRows)}px`
+  }, [input])
   const inputRef  = useRef<HTMLTextAreaElement>(null)
 
   // Posición inicial: lado derecho, centrado verticalmente
@@ -154,14 +206,19 @@ export default function NodeChatWindow({
   const send = async () => {
     const text = input.trim()
     if (!text || sending) return
-    console.log('[chat] currentOutput items:', Array.isArray(currentOutput) ? (currentOutput as unknown[]).length : typeof currentOutput, currentOutput)
     const userMsg: ChatMessage = { role: 'user', content: text }
     setMessages(prev => [...prev, userMsg])
     setInput('')
     setSending(true)
     setError(null)
     try {
-      const { reply } = await chatWithNode(stepKey, messages, text, currentOutput, project.id)
+      let reply: string
+      if (onSend) {
+        reply = await onSend(text)
+      } else {
+        const res = await chatWithNode(stepKey, messages, text, currentOutput, project.id)
+        reply = res.reply
+      }
       setMessages(prev => [...prev, { role: 'assistant', content: reply }])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error contacting assistant')
@@ -306,7 +363,9 @@ export default function NodeChatWindow({
             </div>
           )}
 
-          {messages.map((msg, i) => <MessageBubble key={i} msg={msg} />)}
+          {messages.map((msg, i) => (
+            <MessageBubble key={i} msg={msg} onExpand={msg.role === 'assistant' ? setExpandedContent : undefined} />
+          ))}
 
           {sending && (
             <div style={{ display: 'flex', gap: 8 }}>
@@ -339,6 +398,60 @@ export default function NodeChatWindow({
 
           <div ref={bottomRef} />
         </div>
+
+        {/* Chip de descarga de PDF — aparece tras doc_gen_docx */}
+        {docUrl && (
+          <div style={{ padding: '6px 12px 0', borderTop: '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
+            <a
+              href={docUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                width: '100%', padding: '7px 0', borderRadius: 6, textDecoration: 'none',
+                background: 'color-mix(in srgb, #F59E0B 12%, var(--bg-2))',
+                border: '1px solid color-mix(in srgb, #F59E0B 40%, transparent)',
+                color: '#F59E0B',
+                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                letterSpacing: '.04em', transition: 'all 120ms',
+              }}
+            >
+              ↓ Download PDF
+            </a>
+          </div>
+        )}
+
+        {/* Botón Accept — convierte el último output en forge_asset aprobado */}
+        {onAccept && messages.some(m => m.role === 'assistant') && !locked && (
+          <div style={{ padding: '6px 12px 0', borderTop: docUrl ? 'none' : '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
+            <button
+              onClick={async () => {
+                const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
+                if (!lastAssistant || accepting || sending) return
+                setAccepting(true)
+                setError(null)
+                try {
+                  await onAccept(lastAssistant.content)
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Error accepting output')
+                } finally {
+                  setAccepting(false)
+                }
+              }}
+              disabled={accepting || sending}
+              style={{
+                width: '100%', padding: '7px 0', borderRadius: 6, border: 'none',
+                background: accepting || sending ? 'var(--bg-4)' : '#34D399',
+                color: accepting || sending ? 'var(--text-3)' : '#0a2e1f',
+                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                cursor: accepting || sending ? 'not-allowed' : 'pointer',
+                letterSpacing: '.04em', transition: 'all 120ms',
+              }}
+            >
+              {accepting ? '⟳ Accepting…' : '✓ Accept as output'}
+            </button>
+          </div>
+        )}
 
         {/* Botón Apply — visible cuando hay conversación y onApply está definido */}
         {onApply && messages.length > 0 && messages.some(m => m.role === 'assistant') && (
@@ -378,15 +491,16 @@ export default function NodeChatWindow({
             placeholder={locked
               ? 'Step is approved — read only'
               : 'Ask or describe an adjustment… (Enter to send)'}
-            rows={2}
+            rows={1}
             style={{
-              flex: 1, resize: 'none',
+              flex: 1, resize: 'none', overflow: 'auto',
               background: 'var(--bg-1)', border: '1px solid var(--line-2)',
               borderRadius: 8, padding: '8px 11px',
               color: 'var(--text-0)', fontSize: 12, lineHeight: 1.5,
               outline: 'none', fontFamily: 'inherit',
               opacity: locked ? 0.4 : 1,
               transition: 'border-color 120ms',
+              minHeight: 38,
             }}
             onFocus={e => { if (!locked) e.currentTarget.style.borderColor = 'var(--action)' }}
             onBlur={e => { e.currentTarget.style.borderColor = 'var(--line-2)' }}
@@ -419,6 +533,59 @@ export default function NodeChatWindow({
           </div>
         )}
       </div>
+
+      {/* Modal de lectura expandida */}
+      {expandedContent && (
+        <div
+          onClick={() => setExpandedContent(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 200,
+            background: 'rgba(0,0,0,0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 32,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--bg-1)',
+              border: '1px solid var(--line-2)',
+              borderRadius: 12,
+              width: '100%', maxWidth: 860,
+              maxHeight: '88vh',
+              display: 'flex', flexDirection: 'column',
+              boxShadow: '0 32px 80px rgba(0,0,0,0.7)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              padding: '12px 16px', borderBottom: '1px solid var(--line-2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              flexShrink: 0, background: 'var(--bg-2)',
+            }}>
+              <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                {stepLabel}
+              </span>
+              <button
+                onClick={() => setExpandedContent(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 16, lineHeight: 1, padding: '2px 6px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Contenido */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
+              <div style={{ fontSize: 13, color: 'var(--text-0)', lineHeight: 1.7 }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                  {expandedContent}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

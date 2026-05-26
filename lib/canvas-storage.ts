@@ -6,7 +6,12 @@ export interface CanvasLayout {
   nodes: Node[]
   edges: Edge[]
   viewport?: Viewport
-  container_layouts?: Record<string, Record<string, { x: number; y: number }>>
+  container_layouts?: Record<string, ContainerLayoutData>
+}
+
+export interface ContainerLayoutData {
+  positions: Record<string, { x: number; y: number }>
+  viewport?: Viewport
 }
 
 const key    = (projectId: string) => `forge_canvas_${projectId}`
@@ -19,10 +24,9 @@ export function saveLayout(projectId: string, layout: CanvasLayout): void {
     localStorage.setItem(key(projectId), JSON.stringify(layout))
   } catch { /* storage full or SSR */ }
 
-  // Debounced DB save — 3 seconds after last change
   if (dbTimers[projectId]) clearTimeout(dbTimers[projectId])
   dbTimers[projectId] = setTimeout(() => {
-    saveCanvasLayout(projectId, layout).catch(() => { /* silent — localStorage is the fallback */ })
+    saveCanvasLayout(projectId, layout).catch(() => {})
     delete dbTimers[projectId]
   }, 3000)
 }
@@ -50,9 +54,11 @@ export function saveContainerLayout(
   projectId: string,
   containerKey: string,
   positions: Record<string, { x: number; y: number }>,
+  viewport?: Viewport,
 ): void {
+  const data: ContainerLayoutData = { positions, viewport }
   try {
-    localStorage.setItem(ctrKey(projectId, containerKey), JSON.stringify(positions))
+    localStorage.setItem(ctrKey(projectId, containerKey), JSON.stringify(data))
   } catch { /* noop */ }
 
   const timerKey = `${projectId}_${containerKey}`
@@ -61,7 +67,7 @@ export function saveContainerLayout(
     const existing: CanvasLayout = loadLayout(projectId) ?? { templateId: null, nodes: [], edges: [] }
     const merged: CanvasLayout = {
       ...existing,
-      container_layouts: { ...existing.container_layouts, [containerKey]: positions },
+      container_layouts: { ...existing.container_layouts, [containerKey]: data },
     }
     saveCanvasLayout(projectId, merged).catch(() => {})
     delete dbTimers[timerKey]
@@ -71,10 +77,16 @@ export function saveContainerLayout(
 export function loadContainerLayout(
   projectId: string,
   containerKey: string,
-): Record<string, { x: number; y: number }> | null {
+): ContainerLayoutData | null {
   try {
     const raw = localStorage.getItem(ctrKey(projectId, containerKey))
-    return raw ? JSON.parse(raw) : null
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    // Backward compat: formato viejo era un Record<string, {x,y}> plano (sin clave "positions")
+    if (parsed && typeof parsed === 'object' && !('positions' in parsed)) {
+      return { positions: parsed as Record<string, { x: number; y: number }> }
+    }
+    return parsed as ContainerLayoutData
   } catch { return null }
 }
 
@@ -83,9 +95,14 @@ export function seedContainerLayoutFromDB(
   containerKey: string,
   canvasLayout: unknown,
 ): void {
-  const positions = (canvasLayout as CanvasLayout)?.container_layouts?.[containerKey]
-  if (!positions) return
+  const raw = (canvasLayout as CanvasLayout)?.container_layouts?.[containerKey]
+  if (!raw) return
+  // Backward compat: el DB puede tener el formato viejo (posiciones planas)
+  const rawAny = raw as unknown as Record<string, unknown>
+  const data: ContainerLayoutData = ('positions' in rawAny)
+    ? raw as ContainerLayoutData
+    : { positions: rawAny as unknown as Record<string, { x: number; y: number }> }
   try {
-    localStorage.setItem(ctrKey(projectId, containerKey), JSON.stringify(positions))
+    localStorage.setItem(ctrKey(projectId, containerKey), JSON.stringify(data))
   } catch { /* noop */ }
 }

@@ -821,7 +821,7 @@ function StepConfigEditor({ config, workflows, availableProviders, containers, p
       <div>
         <label style={labelStyle}>Type</label>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(['phase', 'container', 'node', 'service'] as const).map(t => (
+          {(['phase', 'container', 'node', 'service', 'action'] as const).map(t => (
             <button key={t} type="button" onClick={() => setStepType(t)} style={{
               flex: 1, padding: '6px 0', borderRadius: 5, fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer',
               border: `1px solid ${stepType === t ? 'var(--action)' : 'var(--line-2)'}`,
@@ -830,6 +830,13 @@ function StepConfigEditor({ config, workflows, availableProviders, containers, p
             }}>{t}</button>
           ))}
         </div>
+        {stepType === 'action' && config.action_type && (
+          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>action_type</span>
+            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--cat-code)', background: 'color-mix(in srgb, var(--cat-code) 12%, var(--bg-1))', padding: '2px 8px', borderRadius: 5 }}>{config.action_type}</span>
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>(read-only — set in code)</span>
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
@@ -1234,7 +1241,7 @@ function WorkflowEditor({ workflow, onSaved, onDeleted }: {
 type Tab = 'steps' | 'workflows'
 
 export default function IntegrationsPage() {
-  const [tab, setTab]             = useState<Tab>('steps')
+  const [tab, setTab]             = useState<Tab>('workflows')
   const [stepConfigs, setStepConfigs] = useState<StepConfig[]>([])
   const [workflows, setWorkflows] = useState<ComfyUIWorkflow[]>([])
   const [modelsConfig, setModelsConfig] = useState<ModelsConfig | null>(null)
@@ -1282,7 +1289,7 @@ export default function IntegrationsPage() {
 
       {/* Tab bar */}
       <div style={{ padding: '0 20px', borderBottom: '1px solid var(--line-2)', display: 'flex', gap: 2, background: 'var(--bg-1)', flexShrink: 0 }}>
-        {([['steps', 'Step Configs'], ['workflows', 'ComfyUI Workflows']] as [Tab, string][]).map(([t, l]) => (
+        {([['workflows', 'ComfyUI Workflows'], ['steps', 'Step Configs']] as [Tab, string][]).map(([t, l]) => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '10px 16px', background: 'none', border: 'none',
             borderBottom: `2px solid ${tab === t ? 'var(--action)' : 'transparent'}`,
@@ -1305,6 +1312,7 @@ export default function IntegrationsPage() {
                 const orphanContainers = sort(stepConfigs.filter(s => s.step_type === 'container' && !s.parent_key))
                 const topNodes        = sort(stepConfigs.filter(s => s.step_type === 'node' && !s.parent_key))
                 const services        = sort(stepConfigs.filter(s => s.step_type === 'service'))
+                const actionNodes     = [...stepConfigs.filter(s => s.step_type === 'action')].sort((a, b) => (a.label || a.step_key).localeCompare(b.label || b.step_key))
 
                 const sectionHeader = (label: string) => (
                   <div style={{ padding: '6px 16px', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--action-fg)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'var(--action)', borderBottom: '1px solid var(--line-2)', position: 'sticky', top: 0, zIndex: 2 }}>
@@ -1407,6 +1415,24 @@ export default function IntegrationsPage() {
                     {/* ── Services ── */}
                     {services.length > 0 && sectionHeader('Services')}
                     {services.map(s => renderNode(s, 16, ''))}
+
+                    {/* ── Action Nodes ── */}
+                    {actionNodes.length > 0 && sectionHeader('Action Nodes')}
+                    {actionNodes.map(s => (
+                      <div key={s.step_key} onClick={() => setSelectedStep(s)} style={{
+                        paddingLeft: 16, paddingRight: 16, paddingTop: 7, paddingBottom: 7,
+                        cursor: 'pointer', borderBottom: '1px solid var(--line-2)',
+                        background: selectedStep?.step_key === s.step_key ? 'var(--bg-2)' : 'transparent',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', fontWeight: 600, flex: 1 }}>{s.label || s.step_key}</span>
+                          {s.integration_type && (
+                            <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: TYPE_COLOR[s.integration_type] ?? 'var(--text-3)', flexShrink: 0 }}>{s.integration_type}</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>{s.step_key}</div>
+                      </div>
+                    ))}
                   </>
                 )
               })()}

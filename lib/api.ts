@@ -1,4 +1,4 @@
-import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser, StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig, PromptConfig, RepoConfig } from './types'
+import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser, StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig, PromptConfig, RepoConfig, ActionInstance, ActionType } from './types'
 import type { InputContext } from './nodeExecutionContext'
 
 export type { ScriptFile, CodeGenerationResult }
@@ -607,6 +607,28 @@ export async function testAdminWorkflow(
   return { image_url: data.image_url, glb_urls: data.glb_urls ?? [], job_id: data.job_id, prepared_workflow: data.prepared_workflow }
 }
 
+// ─── Admin: skill configs ─────────────────────────────────────────────────────
+
+export interface SkillConfig {
+  key:         string
+  r2_path:     string | null
+  description: string | null
+  updated_at:  string | null
+}
+
+export async function getAdminSkillConfigs(): Promise<SkillConfig[]> {
+  const data = await request<{ success: boolean; skill_configs: SkillConfig[] }>('/api/admin/skill-configs')
+  return data.skill_configs
+}
+
+export async function updateAdminSkillConfig(key: string, payload: { r2_path?: string | null }): Promise<SkillConfig> {
+  const data = await request<{ success: boolean; skill_config: SkillConfig }>(`/api/admin/skill-configs/${key}`, {
+    method: 'PATCH',
+    body:   JSON.stringify(payload),
+  })
+  return data.skill_config
+}
+
 // ─── Admin: prompt configs ────────────────────────────────────────────────────
 
 export async function getAdminPromptConfigs(): Promise<PromptConfig[]> {
@@ -1127,6 +1149,91 @@ export async function generateCandidateImages(
   )
 }
 
+// ─── Market Research (1.2.x) ──────────────────────────────────────────────────
+
+export interface ComparableGame {
+  id:               string
+  title:            string
+  developer:        string
+  publisher:        string
+  platforms:        string[]
+  release_year:     number
+  genre:            string
+  subgenre:         string
+  revenue_tier:     'indie' | 'mid' | 'AA' | 'AAA'
+  metacritic_score: number | null
+  player_sentiment: 'very positive' | 'positive' | 'mixed' | 'negative' | 'unknown'
+  similarity_score: number
+  key_mechanics:    string[]
+  why_comparable:   string
+}
+
+export interface ComparableGamesResult {
+  candidate_id: string
+  comparables:  ComparableGame[]
+}
+
+export interface GapAnalysisResult {
+  candidate_id:          string
+  competitor_strengths:  string[]
+  competitor_weaknesses: string[]
+  market_gaps:           string[]
+  underserved_audiences: string[]
+  timing_opportunities:  string[]
+  positioning_statement: string
+  differentiation_score: number
+}
+
+export interface PlatformSizing {
+  size:      'massive' | 'large' | 'medium' | 'small' | 'niche'
+  rationale: string
+}
+
+export interface AudienceSizingResult {
+  candidate_id:          string
+  platform_breakdown:    Record<string, PlatformSizing>
+  demographic_breakdown: {
+    age_range:   string
+    gender_skew: string
+    player_type: string
+    regions:     string[]
+  }
+  tam:                string
+  sam:                string
+  market_opportunity: 'high' | 'medium' | 'low'
+  confidence:         'high' | 'medium' | 'low'
+  key_assumptions:    string[]
+}
+
+export async function researchComparableGames(candidates: IdeationCandidate[], stepKey?: string) {
+  return request<{ success: boolean; results: ComparableGamesResult[]; meta: unknown }>(
+    '/api/market-research/comparable-games',
+    { method: 'POST', body: JSON.stringify({ candidates, step_key: stepKey }) }
+  )
+}
+
+export async function analyzeGapsPositioning(
+  candidates: IdeationCandidate[],
+  comparablesResults: ComparableGamesResult[],
+  stepKey?: string,
+) {
+  return request<{ success: boolean; results: GapAnalysisResult[]; meta: unknown }>(
+    '/api/market-research/analyze-gaps',
+    { method: 'POST', body: JSON.stringify({ candidates, comparables_results: comparablesResults, step_key: stepKey }) }
+  )
+}
+
+export async function sizeAudience(
+  candidates: IdeationCandidate[],
+  gapResults: GapAnalysisResult[],
+  stepKey?: string,
+) {
+  return request<{ success: boolean; results: AudienceSizingResult[]; meta: unknown }>(
+    '/api/market-research/size-audience',
+    { method: 'POST', body: JSON.stringify({ candidates, gap_results: gapResults, step_key: stepKey }) }
+  )
+}
+
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 
 export interface ChatMessage {
@@ -1156,6 +1263,54 @@ export async function chatWithNode(
   return request<{ success: boolean; reply: string; meta: unknown }>(
     '/api/chat/node',
     { method: 'POST', body: JSON.stringify({ step_key: stepKey, messages, user_message: userMessage, current_output: currentOutput, project_id: projectId, apply_mode: applyMode }) }
+  )
+}
+
+// ─── Forge NodeDNA — chat con sesión persistida ───────────────
+
+export async function chatWithForgeNode(
+  projectId:   string,
+  nodeId:      string,
+  userMessage: string,
+  sessionId?:  string,
+): Promise<{ reply: string; session_id: string; doc_url?: string }> {
+  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+  return request<{ success: boolean; reply: string; session_id: string; doc_url?: string; meta: unknown }>(
+    `/api/projects/${projectId}/canvas/nodes/${nodeId}/chat`,
+    { method: 'POST', body: JSON.stringify({ user_message: userMessage, session_id: sessionId, member_id: memberId }) },
+  )
+}
+
+export async function acceptNodeOutput(
+  projectId: string,
+  nodeId:    string,
+  sessionId: string,
+  content:   string,
+  docUrl?:   string,
+): Promise<{ asset_id: string }> {
+  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+  return request<{ success: boolean; asset_id: string }>(
+    `/api/projects/${projectId}/canvas/nodes/${nodeId}/accept`,
+    { method: 'POST', body: JSON.stringify({ session_id: sessionId, content, member_id: memberId, doc_url: docUrl || undefined }) },
+  )
+}
+
+export async function generateNodePdf(
+  projectId: string,
+  nodeId:    string,
+): Promise<{ url: string }> {
+  return request<{ success: boolean; url: string }>(
+    `/api/projects/${projectId}/canvas/nodes/${nodeId}/generate-pdf`,
+    { method: 'POST' },
+  )
+}
+
+export async function getNodeSession(
+  projectId: string,
+  nodeId:    string,
+): Promise<{ session: { id: string; status: string; iteration_count: number } | null; messages: ChatMessage[] }> {
+  return request<{ success: boolean; session: { id: string; status: string; iteration_count: number } | null; messages: ChatMessage[] }>(
+    `/api/projects/${projectId}/canvas/nodes/${nodeId}/session`,
   )
 }
 
@@ -1216,4 +1371,35 @@ export async function saveNodeDraft(
       ...(memberId ? { member_id: memberId } : {}),
     }) }
   )
+}
+
+// ─── Action Nodes ─────────────────────────────────────────────────────────────
+
+export async function getActionNodes(): Promise<{ action_nodes: StepConfig[] }> {
+  return request('/api/action-nodes')
+}
+
+export async function getActionInstances(projectId: string): Promise<{ action_instances: ActionInstance[] }> {
+  return request(`/api/projects/${projectId}/action-instances`)
+}
+
+export async function addActionInstance(
+  projectId: string,
+  payload: { action_step_key: string; source_step_key: string; container_key: string },
+): Promise<{ instance: ActionInstance }> {
+  return request(`/api/projects/${projectId}/action-instances`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function removeActionInstance(projectId: string, instanceId: string): Promise<void> {
+  await request(`/api/projects/${projectId}/action-instances/${instanceId}`, { method: 'DELETE' })
+}
+
+export async function runActionInstance(
+  projectId: string,
+  instanceId: string,
+): Promise<{ instance_id: string; artifact_url: string; action_type: ActionType; ext: string }> {
+  return request(`/api/projects/${projectId}/action-instances/${instanceId}/run`, { method: 'POST' })
 }

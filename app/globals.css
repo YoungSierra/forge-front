@@ -1090,3 +1090,28 @@ html, body {
   color: var(--text-3); text-align: center; margin-top: 20px;
   letter-spacing: 0.05em;
 }
+
+/* ─── forge-md — markdown renderizado en NodeChatWindow ─── */
+.forge-md { color: var(--text-0); font-size: 12px; line-height: 1.65; }
+.forge-md h1,.forge-md h2,.forge-md h3,.forge-md h4 { font-weight: 700; line-height: 1.25; color: var(--text-0); margin: .8em 0 .3em; }
+.forge-md h1 { font-size: 15px; }
+.forge-md h2 { font-size: 13px; border-bottom: 1px solid var(--line-2); padding-bottom: .2em; }
+.forge-md h3 { font-size: 12px; }
+.forge-md h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); }
+.forge-md p  { margin: .4em 0; }
+.forge-md ul,.forge-md ol { margin: .4em 0; padding-left: 1.4em; }
+.forge-md li { margin: .2em 0; }
+.forge-md strong { font-weight: 700; color: var(--text-0); }
+.forge-md em { font-style: italic; color: var(--text-1); }
+.forge-md hr { border: none; border-top: 1px solid var(--line-2); margin: .8em 0; }
+.forge-md code { font-family: var(--font-mono); font-size: 11px; background: var(--bg-3); padding: 1px 5px; border-radius: 3px; }
+.forge-md pre  { background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 6px; padding: 10px 12px; overflow-x: auto; margin: .5em 0; }
+.forge-md pre code { background: none; padding: 0; }
+.forge-md blockquote { border-left: 3px solid var(--action); margin: .4em 0; padding: .2em .8em; color: var(--text-2); font-style: italic; }
+.forge-md table { border-collapse: collapse; width: 100%; font-size: 11px; margin: .6em 0; }
+.forge-md th { background: var(--bg-3); border: 1px solid var(--line-2); padding: 5px 8px; font-weight: 600; text-align: left; }
+.forge-md td { border: 1px solid var(--line-2); padding: 4px 8px; vertical-align: top; }
+.forge-md tr:nth-child(even) td { background: color-mix(in srgb, var(--bg-3) 45%, transparent); }
+
+/* Expand button en bubble del asistente */
+div:hover > div > .msg-expand-btn { opacity: 1 !important; }

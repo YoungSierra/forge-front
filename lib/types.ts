@@ -255,6 +255,7 @@ export type Project = {
   approved_job_count?: number
   total_job_count?: number
   canvas_layout?: unknown
+  action_instances?: ActionInstance[]
   generation_jobs?: GenerationJob[]
   repo_config?: RepoConfig
 }
@@ -316,10 +317,29 @@ export type ComfyUIWorkflow = {
   updated_at: string
 }
 
+export type ActionType =
+  | 'docx' | 'pptx' | 'pdf' | 'artefact-html' | 'pitch-deck'
+  | 'one-pager' | 'social-kit' | 'press-release' | 'spreadsheet'
+  | 'email-draft' | 'wiki-starter'
+
+export type ActionInstanceStatus = 'pending' | 'running' | 'done' | 'error'
+
+export type ActionInstance = {
+  id: string
+  action_step_key: string
+  action_type: ActionType
+  source_step_key: string
+  container_key: string
+  status: ActionInstanceStatus
+  artifact_url: string | null
+  generated_at: string | null
+}
+
 export type StepConfig = {
   id: string
   step_key: string
-  step_type: 'node' | 'container' | 'service' | 'phase'
+  step_type: 'node' | 'container' | 'service' | 'phase' | 'action'
+  action_type?: ActionType | null
   parent_key: string | null
   order_index: number
   label: string | null

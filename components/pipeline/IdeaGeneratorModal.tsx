@@ -188,10 +188,11 @@ export interface IdeaGeneratorModalProps {
   description?: string | null
   icon?:        string
   initialStep?: number
+  layered?:     boolean   // true cuando se abre encima de otro modal (z-index mayor)
   onClose:      () => void
 }
 
-export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea Generation', description, icon = '⬡', initialStep, onClose }: IdeaGeneratorModalProps) {
+export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea Generation', description, icon = '⬡', initialStep, layered = false, onClose }: IdeaGeneratorModalProps) {
   const node1       = nodes.find(n => n.order_index === 1)
   const node2       = nodes.find(n => n.order_index === 2)
   const node3       = nodes.find(n => n.order_index === 3)
@@ -695,12 +696,12 @@ export default function IdeaGeneratorModal({ project, nodes = [], label = 'Idea 
       )}
 
       {/* Overlay — sin onClick, solo se cierra con X o Esc */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)' }} />
+      <div style={{ position: 'fixed', inset: 0, zIndex: layered ? 85 : 60, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)' }} />
 
       {/* Modal */}
       <div className="modal-card" style={{
         position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-        zIndex: 70, width: 680, maxWidth: 'calc(100vw - 32px)',
+        zIndex: layered ? 90 : 70, width: 680, maxWidth: 'calc(100vw - 32px)',
         maxHeight: 'calc(100vh - 48px)',
         borderRadius: 8,
         boxShadow: '0 18px 42px rgba(0,0,0,0.6), 0 0 0 1px var(--line-2)',
