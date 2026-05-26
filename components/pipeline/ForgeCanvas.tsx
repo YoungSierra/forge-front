@@ -2017,7 +2017,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     return () => { document.documentElement.style.removeProperty('--forge-library-w') }
   }, [sidebarCollapsed])
 
-  const savedLayout = useMemo(() => loadLayout(project.id), [project.id])
+  const [savedLayout, setSavedLayout] = useState(() => loadLayout(project.id))
 
   // Posiciones pendientes de nodos recién dropeados (project_node_id → position)
   const pendingPositionsRef    = useRef<Record<string, { x: number; y: number }>>({})
@@ -2059,9 +2059,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     if (!silent) setLoading(true)
     try {
       const data = await canvasFetch<CanvasData>(`/api/projects/${project.id}/canvas`)
-      // Seed localStorage desde DB si no hay layout guardado localmente
+      // Si no hay layout en localStorage, usar el de DB y actualizarlo en estado para que buildNodes lo use
       if (data.canvas_layout && !loadLayout(project.id)) {
-        seedLayoutFromDB(project.id, data.canvas_layout as Parameters<typeof seedLayoutFromDB>[1])
+        const dbLayout = data.canvas_layout as Parameters<typeof seedLayoutFromDB>[1]
+        seedLayoutFromDB(project.id, dbLayout)
+        setSavedLayout(dbLayout)
       }
       setCanvasData(data)
     } catch (e) {
