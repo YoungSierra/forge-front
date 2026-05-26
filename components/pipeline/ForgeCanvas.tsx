@@ -2312,8 +2312,15 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     }
   }, [canvasData, buildNodes, setNodes, setEdges, persistEdges])
 
-  const { zoomIn, zoomOut, fitView, getViewport, screenToFlowPosition, getNodes } = useReactFlow()
+  const { zoomIn, zoomOut, fitView, getViewport, setViewport, screenToFlowPosition, getNodes } = useReactFlow()
   const { zoom } = useViewport()
+
+  // Aplicar viewport desde DB cuando llega asíncrono (defaultViewport solo aplica en primer render)
+  useEffect(() => {
+    if (savedLayout?.viewport) {
+      setViewport(savedLayout.viewport, { duration: 0 })
+    }
+  }, [savedLayout, setViewport])
 
   const persistLayout = useCallback(() => {
     saveLayout(project.id, {
@@ -2593,7 +2600,6 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             proOptions={{ hideAttribution: true }}
             fitView={!savedLayout?.viewport}
             fitViewOptions={{ padding: 0.3 }}
-            defaultViewport={savedLayout?.viewport ?? undefined}
             nodesDraggable
             nodesConnectable
             deleteKeyCode={null}
