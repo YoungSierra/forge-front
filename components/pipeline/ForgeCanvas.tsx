@@ -12,7 +12,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
-import { saveLayout, loadLayout } from '@/lib/canvas-storage'
+import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
 import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf } from '@/lib/api'
 import type { ChatMessage } from '@/lib/api'
 import type { Project } from '@/lib/types'
@@ -79,6 +79,7 @@ interface CanvasData {
   success: boolean
   nodes: CanvasNode[]
   edges: DbEdge[]
+  canvas_layout: unknown
   active_blueprint: {
     id: string
     blueprint_key: string
@@ -2058,6 +2059,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     if (!silent) setLoading(true)
     try {
       const data = await canvasFetch<CanvasData>(`/api/projects/${project.id}/canvas`)
+      // Seed localStorage desde DB si no hay layout guardado localmente
+      if (data.canvas_layout && !loadLayout(project.id)) {
+        seedLayoutFromDB(project.id, data.canvas_layout as Parameters<typeof seedLayoutFromDB>[1])
+      }
       setCanvasData(data)
     } catch (e) {
       console.error('[forge-canvas] load failed', e)
