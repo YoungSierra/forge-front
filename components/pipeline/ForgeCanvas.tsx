@@ -1728,7 +1728,7 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
                     const slotLabel = (() => {
                       if (!sourceHandle?.startsWith('out-')) return null
                       const idx = parseInt(sourceHandle.replace('out-', ''), 10)
-                      const out = (cn.node?.outputs as NodeOutput[] | undefined)?.[idx]
+                      const out = (cn.node?.outputs as { name: string; format: string }[] | undefined)?.[idx]
                       return out?.name ?? null
                     })()
                     const sub     = isAsset ? (cn.asset?.asset_type ?? '')
