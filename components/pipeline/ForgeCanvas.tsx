@@ -2023,6 +2023,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const pendingPositionsRef    = useRef<Record<string, { x: number; y: number }>>({})
   // Flag: el siguiente canvasData reload debe auto-generar edges de blueprint
   const blueprintJustLoadedRef = useRef(false)
+  // Flag: el layout de DB ya se aplicó en este montaje — no repetir en reloads silenciosos
+  const dbLayoutAppliedRef     = useRef(false)
 
   const persistEdges = useCallback((edgeList: Edge[]) => {
     // Deduplicar por source+handle+target antes de enviar
@@ -2059,8 +2061,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     if (!silent) setLoading(true)
     try {
       const data = await canvasFetch<CanvasData>(`/api/projects/${project.id}/canvas`)
-      // Si no hay layout en localStorage, usar el de DB y actualizarlo en estado para que buildNodes lo use
-      if (data.canvas_layout && !loadLayout(project.id)) {
+      // En el primer load siempre aplicar el layout de DB (fuente de verdad cross-device).
+      // En reloads silenciosos posteriores preservar las posiciones del usuario en esta sesión.
+      if (data.canvas_layout && !dbLayoutAppliedRef.current) {
+        dbLayoutAppliedRef.current = true
         const dbLayout = data.canvas_layout as Parameters<typeof seedLayoutFromDB>[1]
         seedLayoutFromDB(project.id, dbLayout)
         setSavedLayout(dbLayout)
