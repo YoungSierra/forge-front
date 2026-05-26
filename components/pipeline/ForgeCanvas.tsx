@@ -2496,7 +2496,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     setSelectedNode(null)
     setChatLoading(true)
     try {
-      const { session, messages } = await getNodeSession(project.id, node.node.id)
+      const { session, messages } = await getNodeSession(project.id, node.node!.id)
       setChatSessionId(session?.id ?? null)
       setChatMessages(messages)
     } catch {
@@ -2613,16 +2613,18 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       )}
 
       {/* Ventana de chat con el nodo */}
-      {chatNode && !chatLoading && (
+      {chatNode && chatNode.node && !chatLoading && (() => {
+        const chatForgeNode = chatNode.node
+        return (
         <NodeChatWindow
-          stepKey={chatNode.node.node_key}
-          stepLabel={`${chatNode.node.node_key} — ${chatNode.node.title}`}
+          stepKey={chatForgeNode.node_key}
+          stepLabel={`${chatForgeNode.node_key} — ${chatForgeNode.title}`}
           currentOutput={chatNode.session ?? null}
           project={project}
           locked={chatNode.session?.status === 'approved'}
           initialMessages={chatMessages}
           onSend={async (msg) => {
-            const r = await chatWithForgeNode(project.id, chatNode.node.id, msg, chatSessionId ?? undefined)
+            const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined)
             if (r.doc_url) setChatDocUrl(r.doc_url)
             // Actualizar sesión en el estado local si es nueva
             if (!chatSessionId) {
@@ -2630,8 +2632,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               setCanvasData(prev => prev ? {
                 ...prev,
                 nodes: prev.nodes.map(n =>
-                  n.node?.id === chatNode.node!.id
-                    ? { ...n, session: { id: r.session_id, node_id: chatNode.node!.id, status: 'active' as const, iteration_count: 1, started_at: new Date().toISOString(), completed_at: null, output_asset_id: null, output_asset: null } }
+                  n.node?.id === chatForgeNode.id
+                    ? { ...n, session: { id: r.session_id, node_id: chatForgeNode.id, status: 'active' as const, iteration_count: 1, started_at: new Date().toISOString(), completed_at: null, output_asset_id: null, output_asset: null } }
                     : n
                 ),
               } : null)
@@ -2641,9 +2643,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             return r.reply
           }}
           onAccept={async (content) => {
-            if (!chatSessionId || !chatNode) return
-            await acceptNodeOutput(project.id, chatNode.node.id, chatSessionId, content, chatDocUrl ?? undefined)
-            invalidateAssetDeckCache(project.id, chatNode.node.id)
+            if (!chatSessionId) return
+            await acceptNodeOutput(project.id, chatForgeNode.id, chatSessionId, content, chatDocUrl ?? undefined)
+            invalidateAssetDeckCache(project.id, chatForgeNode.id)
             setChatNode(null)
             setChatMessages([])
             setChatSessionId(null)
@@ -2654,7 +2656,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           docUrl={chatDocUrl ?? undefined}
           onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); setChatDocUrl(null) }}
         />
-      )}
+        )
+      })()}
 
       {/* ── Botón de gate — visible cuando el gate está listo pero fue descartado (REFINE) ── */}
       {gateReady && gateDismissed && !gateKilled && canvasData?.active_blueprint?.gate && (
