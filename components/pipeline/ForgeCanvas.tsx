@@ -87,7 +87,6 @@ interface CanvasData {
     phase: string
     gate: BlueprintGate | null
     gate_decision: string | null
-    total_nodes: number
   } | null
 }
 
@@ -2142,9 +2141,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     const bp = canvasData?.active_blueprint
     if (!bp?.gate || bp.gate_decision) return false
     const bpNodes = canvasData!.nodes.filter(n => n.blueprint_id === bp.id && n.node_type === 'forge_node')
-    // Exigir que todos los nodos del blueprint estén en canvas (evita gate falso al eliminar un nodo)
-    if (bp.total_nodes > 0 && bpNodes.length < bp.total_nodes) return false
-    return bpNodes.length > 0 && bpNodes.every(n => n.session?.status === 'approved')
+    if (bpNodes.length === 0) return false
+    // Todos los forge_nodes en canvas deben estar aprobados (incluyendo los re-agregados sin blueprint_id)
+    const allForgeNodes = canvasData!.nodes.filter(n => n.node_type === 'forge_node')
+    return allForgeNodes.every(n => n.session?.status === 'approved')
   }, [canvasData])
 
   const [gateLoading,   setGateLoading]   = useState(false)
