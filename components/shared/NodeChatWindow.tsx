@@ -8,6 +8,7 @@ import type { ChatMessage, ChatAttachment } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import AttachmentCard from './AttachmentCard'
+import { Paperclip } from 'lucide-react'
 
 const KEYFRAMES = `
   @keyframes chat-dot { 0%,80%,100%{opacity:.2;transform:scale(0.8)} 40%{opacity:1;transform:scale(1)} }
@@ -589,13 +590,13 @@ export default function NodeChatWindow({
                     flex: '0 0 20%', width: '100%', borderRadius: 7, border: '1px solid var(--line-2)',
                     background: pendingFile || pendingUrl ? 'color-mix(in srgb, var(--action) 14%, var(--bg-3))' : 'var(--bg-3)',
                     color: pendingFile || pendingUrl ? 'var(--action)' : 'var(--text-3)',
-                    fontSize: 13, cursor: sending ? 'not-allowed' : 'pointer',
+                    cursor: sending ? 'not-allowed' : 'pointer',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     transition: 'all 120ms',
                     opacity: sending ? 0.4 : 1,
                   }}
                 >
-                  📎
+                  <Paperclip size={15} strokeWidth={1.75} />
                 </button>
               )}
               <button
