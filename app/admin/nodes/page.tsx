@@ -165,7 +165,7 @@ function TagInput({ values, onChange, placeholder }: {
             display: 'flex', alignItems: 'center', gap: 5,
           }}>
             {v}
-            <button onClick={() => onChange(values.filter(x => x !== v))}
+            <button type="button" onClick={() => onChange(values.filter(x => x !== v))}
               style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 11, padding: 0 }}>
               ×
             </button>
@@ -180,7 +180,7 @@ function TagInput({ values, onChange, placeholder }: {
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
         />
-        <button onClick={add} style={{
+        <button type="button" onClick={add} style={{
           padding: '6px 12px', borderRadius: 6, border: '1px solid var(--line-2)',
           background: 'var(--bg-2)', color: 'var(--text-1)', cursor: 'pointer',
           fontSize: 12, fontFamily: 'var(--font-mono)',
@@ -231,7 +231,7 @@ function InputsList({ inputs, onChange }: {
                   onChange={e => update(i, 'required', e.target.checked)} />
               </div>
             </div>
-            <button onClick={() => remove(i)} style={{
+            <button type="button" onClick={() => remove(i)} style={{
               border: 'none', background: 'none', cursor: 'pointer',
               color: 'var(--text-3)', fontSize: 16, padding: '22px 0 0 0',
             }}>×</button>
@@ -259,7 +259,7 @@ function InputsList({ inputs, onChange }: {
           </div>
         </div>
       ))}
-      <button onClick={add} style={{
+      <button type="button" onClick={add} style={{
         border: '1px dashed var(--line-2)', background: 'transparent',
         borderRadius: 8, padding: '8px', cursor: 'pointer',
         color: 'var(--text-3)', fontSize: 12, fontFamily: 'var(--font-mono)',
@@ -312,7 +312,7 @@ function OutputsList({ outputs, onChange }: {
                   onChange={e => update(i, 'optional', e.target.checked)} />
               </div>
             </div>
-            <button onClick={() => remove(i)} style={{
+            <button type="button" onClick={() => remove(i)} style={{
               border: 'none', background: 'none', cursor: 'pointer',
               color: 'var(--text-3)', fontSize: 16, padding: '22px 0 0 0',
             }}>×</button>
@@ -331,7 +331,7 @@ function OutputsList({ outputs, onChange }: {
           </div>
         </div>
       ))}
-      <button onClick={add} style={{
+      <button type="button" onClick={add} style={{
         border: '1px dashed var(--line-2)', background: 'transparent',
         borderRadius: 8, padding: '8px', cursor: 'pointer',
         color: 'var(--text-3)', fontSize: 12, fontFamily: 'var(--font-mono)',
@@ -578,14 +578,14 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders }: {
       )}
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid var(--line-2)' }}>
-        <button onClick={onCancel} style={{
+        <button type="button" onClick={onCancel} style={{
           padding: '7px 16px', borderRadius: 6, border: '1px solid var(--line-2)',
           background: 'var(--bg-2)', color: 'var(--text-2)', cursor: 'pointer',
           fontSize: 12, fontFamily: 'var(--font-mono)',
         }}>
           Cancel
         </button>
-        <button onClick={handleSave} disabled={saving} style={{
+        <button type="button" onClick={handleSave} disabled={saving} style={{
           padding: '7px 16px', borderRadius: 6, border: 'none',
           background: 'var(--action)', color: 'var(--action-fg)', cursor: saving ? 'not-allowed' : 'pointer',
           fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700,
@@ -693,8 +693,11 @@ export default function AdminNodesPage() {
     const res = await adminFetch(path, { method, body: JSON.stringify(data) })
     const json = await res.json()
     if (!json.success) throw new Error(json.error)
-    setSelected(null)
-    setIsNew(false)
+    // No cerramos el form — el usuario lo cierra con Cancel cuando quiera
+    if (isNew && json.node) {
+      setSelected(json.node)
+      setIsNew(false)
+    }
     fetchNodes()
   }
 
@@ -726,10 +729,9 @@ export default function AdminNodesPage() {
 
       {/* Lista */}
       <div style={{
-        width: selected ? 340 : '100%', flexShrink: 0,
-        borderRight: selected ? '1px solid var(--line-2)' : 'none',
+        width: 340, flexShrink: 0,
+        borderRight: '1px solid var(--line-2)',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        transition: 'width 200ms',
       }}>
         {/* Toolbar */}
         <div style={{
@@ -817,25 +819,36 @@ export default function AdminNodesPage() {
         </div>
       </div>
 
-      {/* Formulario */}
-      {selected && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+      {/* Formulario / placeholder */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+        {selected ? (
+          <>
+            <div style={{
+              fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              color: 'var(--text-1)', marginBottom: 20,
+            }}>
+              {isNew ? 'New Node' : `Edit — ${(selected as ForgeNode).title}`}
+            </div>
+            <NodeForm
+              key={(selected as ForgeNode).id ?? 'new'}
+              node={selected}
+              onSave={handleSave}
+              onCancel={handleCancel}
+              workflows={workflows}
+              availableProviders={availableProviders}
+            />
+          </>
+        ) : (
           <div style={{
-            fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700,
-            color: 'var(--text-1)', marginBottom: 20,
+            height: '100%', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 12,
+            color: 'var(--text-4)',
           }}>
-            {isNew ? 'New Node' : `Edit — ${(selected as ForgeNode).title}`}
+            <div style={{ fontSize: 32, opacity: 0.3 }}>⬡</div>
+            <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>Select a node to edit</div>
           </div>
-          <NodeForm
-            key={(selected as ForgeNode).id ?? 'new'}
-            node={selected}
-            onSave={handleSave}
-            onCancel={handleCancel}
-            workflows={workflows}
-            availableProviders={availableProviders}
-          />
-        </div>
-      )}
+        )}
+      </div>
 
       {confirmId && (
         <ConfirmModal

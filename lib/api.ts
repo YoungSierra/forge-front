@@ -1268,9 +1268,17 @@ export async function sizeAudience(
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 
+export interface ChatAttachment {
+  file_name:       string
+  mime_type:       string | null
+  file_size_bytes: number | null
+  storage_url:     string
+}
+
 export interface ChatMessage {
-  role:    'user' | 'assistant'
-  content: string
+  role:         'user' | 'assistant'
+  content:      string
+  attachments?: ChatAttachment[]
 }
 
 export async function saveChatHistory(
@@ -1301,16 +1309,48 @@ export async function chatWithNode(
 // ─── Forge NodeDNA — chat con sesión persistida ───────────────
 
 export async function chatWithForgeNode(
-  projectId:   string,
-  nodeId:      string,
-  userMessage: string,
-  sessionId?:  string,
-): Promise<{ reply: string; session_id: string; doc_url?: string }> {
+  projectId:     string,
+  nodeId:        string,
+  userMessage:   string,
+  sessionId?:    string,
+  file?:         File | null,
+  attachmentUrl?: string,
+): Promise<{ reply: string; session_id: string; doc_url?: string; attachment?: ChatAttachment }> {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
-  return request<{ success: boolean; reply: string; session_id: string; doc_url?: string; meta: unknown }>(
-    `/api/projects/${projectId}/canvas/nodes/${nodeId}/chat`,
-    { method: 'POST', body: JSON.stringify({ user_message: userMessage, session_id: sessionId, member_id: memberId }) },
-  )
+
+  let body: BodyInit
+  const headers: Record<string, string> = memberId ? { 'x-member-id': memberId } : {}
+
+  if (file) {
+    const fd = new FormData()
+    fd.append('user_message', userMessage)
+    if (sessionId)  fd.append('session_id', sessionId)
+    if (memberId)   fd.append('member_id',  memberId)
+    fd.append('attachment', file)
+    body = fd
+    // Sin Content-Type — el browser lo pone con el boundary correcto
+  } else {
+    body    = JSON.stringify({ user_message: userMessage, session_id: sessionId, member_id: memberId, attachment_url: attachmentUrl || undefined })
+    headers['Content-Type'] = 'application/json'
+  }
+
+  const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/canvas/nodes/${nodeId}/chat`, {
+    method: 'POST',
+    headers,
+    body,
+  })
+
+  if (!res.ok) {
+    let message = `Request failed: ${res.status} ${res.statusText}`
+    try {
+      const errBody = await res.json()
+      if (errBody.error)   message = errBody.error
+      else if (errBody.message) message = errBody.message
+    } catch { /* ignore */ }
+    throw new Error(message)
+  }
+
+  return res.json()
 }
 
 export async function acceptNodeOutput(
@@ -1340,8 +1380,8 @@ export async function generateNodePdf(
 export async function getNodeSession(
   projectId: string,
   nodeId:    string,
-): Promise<{ session: { id: string; status: string; iteration_count: number } | null; messages: ChatMessage[] }> {
-  return request<{ success: boolean; session: { id: string; status: string; iteration_count: number } | null; messages: ChatMessage[] }>(
+): Promise<{ session: { id: string; status: string; iteration_count: number } | null; messages: ChatMessage[]; asset?: unknown }> {
+  return request<{ success: boolean; session: { id: string; status: string; iteration_count: number } | null; messages: ChatMessage[]; asset?: unknown }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/session`,
   )
 }

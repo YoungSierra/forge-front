@@ -2640,8 +2640,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           project={project}
           locked={chatNode.session?.status === 'approved'}
           initialMessages={chatMessages}
-          onSend={async (msg) => {
-            const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined)
+          onSend={async (msg, file, attachmentUrl) => {
+            const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined, file, attachmentUrl)
             if (r.doc_url) setChatDocUrl(r.doc_url)
             // Actualizar sesión en el estado local si es nueva
             if (!chatSessionId) {
@@ -2657,7 +2657,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             } else {
               setChatSessionId(r.session_id)
             }
-            return r.reply
+            return { reply: r.reply, attachment: r.attachment }
           }}
           onAccept={async (content) => {
             if (!chatSessionId) return

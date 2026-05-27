@@ -4,16 +4,17 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { chatWithNode } from '@/lib/api'
-import type { ChatMessage } from '@/lib/api'
+import type { ChatMessage, ChatAttachment } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import { MD_COMPONENTS } from '@/lib/md-components'
+import AttachmentCard from './AttachmentCard'
 
 const KEYFRAMES = `
   @keyframes chat-dot { 0%,80%,100%{opacity:.2;transform:scale(0.8)} 40%{opacity:1;transform:scale(1)} }
 `
 
 const WINDOW_W = 560
-const WINDOW_H = 680
+const WINDOW_H = 820
 
 // ─── Typing dots ──────────────────────────────────────────────────────────────
 
@@ -37,64 +38,75 @@ function TypingDots() {
 function MessageBubble({ msg, onExpand }: { msg: ChatMessage; onExpand?: (content: string) => void }) {
   const isUser = msg.role === 'user'
   return (
-    <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', gap: 8 }}>
-      {!isUser && (
-        <div style={{
-          width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
-          border: '1px solid rgba(255,138,61,0.25)',
-          background: 'rgba(255,138,61,0.12)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          marginTop: 2,
-        }}>
-          <img src="/forgy/forgyi.png" alt="Forge" style={{ width: 14, height: 14, objectFit: 'contain' }} />
-        </div>
-      )}
-      <div style={{ maxWidth: isUser ? '80%' : '96%', position: 'relative' }}>
-        <div style={{
-          padding: '9px 13px',
-          borderRadius: isUser ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
-          background: isUser
-            ? 'color-mix(in srgb, var(--action) 16%, var(--bg-2))'
-            : 'var(--bg-2)',
-          border: `1px solid ${isUser
-            ? 'color-mix(in srgb, var(--action) 30%, transparent)'
-            : 'var(--line-2)'}`,
-          fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65,
-          wordBreak: 'break-word',
-        }}>
-          {isUser ? (
-            <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
-          ) : (
-            <div style={{ fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65 }}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                {msg.content}
-              </ReactMarkdown>
-            </div>
+    <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', gap: 8, flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
+      <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', gap: 8, width: '100%' }}>
+        {!isUser && (
+          <div style={{
+            width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+            border: '1px solid rgba(255,138,61,0.25)',
+            background: 'rgba(255,138,61,0.12)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            marginTop: 2,
+          }}>
+            <img src="/forgy/forgyi.png" alt="Forge" style={{ width: 14, height: 14, objectFit: 'contain' }} />
+          </div>
+        )}
+        <div style={{ maxWidth: isUser ? '80%' : '96%', position: 'relative' }}>
+          <div style={{
+            padding: '9px 13px',
+            borderRadius: isUser ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
+            background: isUser
+              ? 'color-mix(in srgb, var(--action) 16%, var(--bg-2))'
+              : 'var(--bg-2)',
+            border: `1px solid ${isUser
+              ? 'color-mix(in srgb, var(--action) 30%, transparent)'
+              : 'var(--line-2)'}`,
+            fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65,
+            wordBreak: 'break-word',
+          }}>
+            {isUser ? (
+              <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65 }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                  {msg.content}
+                </ReactMarkdown>
+              </div>
+            )}
+          </div>
+
+          {/* Botón expandir — solo en mensajes del asistente */}
+          {!isUser && onExpand && (
+            <button
+              onClick={() => onExpand(msg.content)}
+              title="Expand response"
+              style={{
+                position: 'absolute', top: 6, right: 6,
+                width: 20, height: 20, borderRadius: 4,
+                border: '1px solid var(--line-2)',
+                background: 'var(--bg-3)',
+                color: 'var(--text-3)', fontSize: 10,
+                cursor: 'pointer', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                lineHeight: 1, padding: 0,
+                opacity: 0, transition: 'opacity 120ms',
+              }}
+              className="msg-expand-btn"
+            >
+              ⊞
+            </button>
           )}
         </div>
-
-        {/* Botón expandir — solo en mensajes del asistente */}
-        {!isUser && onExpand && (
-          <button
-            onClick={() => onExpand(msg.content)}
-            title="Expand response"
-            style={{
-              position: 'absolute', top: 6, right: 6,
-              width: 20, height: 20, borderRadius: 4,
-              border: '1px solid var(--line-2)',
-              background: 'var(--bg-3)',
-              color: 'var(--text-3)', fontSize: 10,
-              cursor: 'pointer', display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-              lineHeight: 1, padding: 0,
-              opacity: 0, transition: 'opacity 120ms',
-            }}
-            className="msg-expand-btn"
-          >
-            ⊞
-          </button>
-        )}
       </div>
+
+      {/* Attachments del mensaje (historial) */}
+      {isUser && msg.attachments && msg.attachments.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end', paddingRight: 0 }}>
+          {msg.attachments.map((att, i) => (
+            <AttachmentCard key={i} attachment={att} variant="history" />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -115,7 +127,7 @@ export interface NodeChatWindowProps {
   validateOutput?:   (data: unknown) => string | null  // null = válido, string = mensaje de error
   onClose:           () => void
   // Si se provee, reemplaza la llamada interna a chatWithNode
-  onSend?:          (userMessage: string) => Promise<string>
+  onSend?:          (userMessage: string, file?: File | null, attachmentUrl?: string) => Promise<{ reply: string; attachment?: ChatAttachment }>
   onAccept?:        (content: string) => Promise<void>
   docUrl?:          string
 }
@@ -131,6 +143,9 @@ export default function NodeChatWindow({
   const [accepting,       setAccepting]       = useState(false)
   const [error,           setError]           = useState<string | null>(null)
   const [expandedContent, setExpandedContent] = useState<string | null>(null)
+  const [pendingFile,     setPendingFile]     = useState<File | null>(null)
+  const [pendingUrl,      setPendingUrl]      = useState<string | null>(null)
+  const [dropTarget,      setDropTarget]      = useState(false)
 
   // Posición del drag — calculada tras mount para evitar problemas de SSR
   const [pos,        setPos]        = useState({ x: 0, y: 0 })
@@ -138,18 +153,10 @@ export default function NodeChatWindow({
   const [dragging,   setDragging]   = useState(false)
   const dragOrigin = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
 
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const bottomRef  = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Auto-resize del textarea de input
-  useEffect(() => {
-    const ta = inputRef.current
-    if (!ta) return
-    ta.style.height = 'auto'
-    const lineH   = 20
-    const maxRows = 8
-    ta.style.height = `${Math.min(ta.scrollHeight, lineH * maxRows)}px`
-  }, [input])
-  const inputRef  = useRef<HTMLTextAreaElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   // Posición inicial: lado derecho, centrado verticalmente
   useEffect(() => {
@@ -206,20 +213,31 @@ export default function NodeChatWindow({
   const send = async () => {
     const text = input.trim()
     if (!text || sending) return
-    const userMsg: ChatMessage = { role: 'user', content: text }
-    setMessages(prev => [...prev, userMsg])
+    const file    = pendingFile
+    const urlAtt  = pendingUrl
+    setMessages(prev => [...prev, { role: 'user', content: text }])
     setInput('')
+    setPendingFile(null)
+    setPendingUrl(null)
     setSending(true)
     setError(null)
     try {
-      let reply: string
       if (onSend) {
-        reply = await onSend(text)
+        const result = await onSend(text, file, urlAtt ?? undefined)
+        setMessages(prev => {
+          // Adjuntar info de attachment al último mensaje humano si la respuesta lo incluye
+          const updated = result.attachment
+            ? prev.map((m, i) => i === prev.length - 1 && m.role === 'user'
+                ? { ...m, attachments: [result.attachment!] }
+                : m
+              )
+            : [...prev]
+          return [...updated, { role: 'assistant', content: result.reply }]
+        })
       } else {
         const res = await chatWithNode(stepKey, messages, text, currentOutput, project.id)
-        reply = res.reply
+        setMessages(prev => [...prev, { role: 'assistant', content: res.reply }])
       }
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error contacting assistant')
     } finally {
@@ -343,12 +361,39 @@ export default function NodeChatWindow({
           </button>
         </div>
 
+        {/* Input de archivo oculto */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.json,image/*"
+          style={{ display: 'none' }}
+          onChange={e => {
+            const f = e.target.files?.[0] ?? null
+            if (f) { setPendingFile(f); setPendingUrl(null) }
+            e.target.value = ''
+          }}
+        />
+
         {/* Mensajes */}
-        <div style={{
-          flex: 1, overflowY: 'auto',
-          padding: '16px 14px',
-          display: 'flex', flexDirection: 'column', gap: 12,
-        }}>
+        <div
+          style={{
+            flex: '1 1 0', minHeight: 0, overflowY: 'auto',
+            padding: '16px 14px',
+            display: 'flex', flexDirection: 'column', gap: 12,
+            position: 'relative',
+            outline: dropTarget ? '2px dashed var(--action)' : 'none',
+            outlineOffset: -4,
+            transition: 'outline 120ms',
+          }}
+          onDragOver={e => { e.preventDefault(); setDropTarget(true) }}
+          onDragLeave={() => setDropTarget(false)}
+          onDrop={e => {
+            e.preventDefault()
+            setDropTarget(false)
+            const f = e.dataTransfer.files[0]
+            if (f) { setPendingFile(f); setPendingUrl(null) }
+          }}
+        >
           {messages.length === 0 && (
             <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 280, padding: '12px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <img src="/forgy/forgyi.png" alt="Forge" style={{ width: 36, height: 36, objectFit: 'contain', marginBottom: 10, opacity: 0.6 }} />
@@ -474,51 +519,101 @@ export default function NodeChatWindow({
           </div>
         )}
 
-        {/* Input */}
+        {/* Input — 30% de la altura de la ventana */}
         <div style={{
-          padding: '10px 12px', borderTop: '1px solid var(--line-2)',
-          display: 'flex', gap: 7, flexShrink: 0,
+          flex: '0 0 30%', minHeight: 0,
+          padding: '8px 12px 10px', borderTop: '1px solid var(--line-2)',
+          display: 'flex', flexDirection: 'column', gap: 6,
           background: 'var(--bg-2)',
+          overflowY: 'auto',
         }}>
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
-            }}
-            disabled={sending || locked}
-            placeholder={locked
-              ? 'Step is approved — read only'
-              : 'Ask or describe an adjustment… (Enter to send)'}
-            rows={1}
-            style={{
-              flex: 1, resize: 'none', overflow: 'auto',
-              background: 'var(--bg-1)', border: '1px solid var(--line-2)',
-              borderRadius: 8, padding: '8px 11px',
-              color: 'var(--text-0)', fontSize: 12, lineHeight: 1.5,
-              outline: 'none', fontFamily: 'inherit',
-              opacity: locked ? 0.4 : 1,
-              transition: 'border-color 120ms',
-              minHeight: 38,
-            }}
-            onFocus={e => { if (!locked) e.currentTarget.style.borderColor = 'var(--action)' }}
-            onBlur={e => { e.currentTarget.style.borderColor = 'var(--line-2)' }}
-          />
-          <button
-            onClick={send}
-            disabled={sending || !input.trim() || locked}
-            style={{
-              padding: '0 14px', borderRadius: 8, border: 'none', flexShrink: 0,
-              background: sending || !input.trim() || locked ? 'var(--bg-3)' : 'var(--action)',
-              color:  sending || !input.trim() || locked ? 'var(--text-4)' : 'var(--action-fg)',
-              fontSize: 16, cursor: sending || !input.trim() || locked ? 'not-allowed' : 'pointer',
-              transition: 'background 120ms',
-              alignSelf: 'stretch',
-            }}
-          >
-            →
-          </button>
+
+          {/* Attachment pendiente — visible antes de enviar */}
+          {(pendingFile || pendingUrl) && (
+            <div style={{ paddingBottom: 2 }}>
+              <AttachmentCard
+                attachment={{
+                  file_name:       pendingFile ? pendingFile.name : (pendingUrl ?? ''),
+                  mime_type:       pendingFile ? pendingFile.type || null : 'text/uri-list',
+                  file_size_bytes: pendingFile ? pendingFile.size : null,
+                  storage_url:     pendingUrl ?? '',
+                }}
+                variant="composing"
+                onRemove={() => { setPendingFile(null); setPendingUrl(null) }}
+              />
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 7, flex: '1 1 0', minHeight: 0 }}>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+              }}
+              onPaste={e => {
+                // Detectar URL pegada — convertir en attachment de URL
+                const text = e.clipboardData.getData('text').trim()
+                if (/^https?:\/\/\S+$/.test(text) && !input.trim()) {
+                  e.preventDefault()
+                  setPendingUrl(text)
+                  setPendingFile(null)
+                }
+              }}
+              disabled={sending || locked}
+              placeholder={locked
+                ? 'Step is approved — read only'
+                : 'Ask or describe an adjustment… (Enter to send, or paste a URL / drop a file)'}
+              style={{
+                flex: '1 1 0', resize: 'none', overflow: 'auto',
+                background: 'var(--bg-1)', border: '1px solid var(--line-2)',
+                borderRadius: 8, padding: '8px 11px',
+                color: 'var(--text-0)', fontSize: 12, lineHeight: 1.5,
+                outline: 'none', fontFamily: 'inherit',
+                opacity: locked ? 0.4 : 1,
+                transition: 'border-color 120ms',
+                minHeight: 0,
+              }}
+              onFocus={e => { if (!locked) e.currentTarget.style.borderColor = 'var(--action)' }}
+              onBlur={e => { e.currentTarget.style.borderColor = 'var(--line-2)' }}
+            />
+            {/* Botones derechos: clip (20%) + send (80%) apilados */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flexShrink: 0, alignSelf: 'stretch', width: 38 }}>
+              {!locked && (
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Attach file"
+                  disabled={sending}
+                  style={{
+                    flex: '0 0 20%', width: '100%', borderRadius: 7, border: '1px solid var(--line-2)',
+                    background: pendingFile || pendingUrl ? 'color-mix(in srgb, var(--action) 14%, var(--bg-3))' : 'var(--bg-3)',
+                    color: pendingFile || pendingUrl ? 'var(--action)' : 'var(--text-3)',
+                    fontSize: 13, cursor: sending ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 120ms',
+                    opacity: sending ? 0.4 : 1,
+                  }}
+                >
+                  📎
+                </button>
+              )}
+              <button
+                onClick={send}
+                disabled={sending || !input.trim() || locked}
+                style={{
+                  flex: '1 1 0', width: '100%', borderRadius: 8, border: 'none',
+                  background: sending || !input.trim() || locked ? 'var(--bg-3)' : 'var(--action)',
+                  color:  sending || !input.trim() || locked ? 'var(--text-4)' : 'var(--action-fg)',
+                  fontSize: 18, cursor: sending || !input.trim() || locked ? 'not-allowed' : 'pointer',
+                  transition: 'background 120ms',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                →
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Modelo configurado para este step */}

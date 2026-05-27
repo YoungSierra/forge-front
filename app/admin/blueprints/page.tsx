@@ -335,12 +335,12 @@ function BlueprintForm({ blueprint, allNodes, onSave, onCancel }: {
       )}
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 8, borderTop: '1px solid var(--line-2)' }}>
-        <button onClick={onCancel} style={{
+        <button type="button" onClick={onCancel} style={{
           padding: '7px 16px', borderRadius: 6, border: '1px solid var(--line-2)',
           background: 'var(--bg-2)', color: 'var(--text-2)', cursor: 'pointer',
           fontSize: 12, fontFamily: 'var(--font-mono)',
         }}>Cancel</button>
-        <button onClick={handleSave} disabled={saving} style={{
+        <button type="button" onClick={handleSave} disabled={saving} style={{
           padding: '7px 16px', borderRadius: 6, border: 'none',
           background: 'var(--action)', color: 'var(--action-fg)',
           cursor: saving ? 'not-allowed' : 'pointer',
@@ -395,8 +395,10 @@ export default function AdminBlueprintsPage() {
     const res  = await adminFetch(path, { method, body: JSON.stringify(data) })
     const json = await res.json()
     if (!json.success) throw new Error(json.error)
-    setSelected(null)
-    setIsNew(false)
+    if (isNew && json.blueprint) {
+      setSelected(json.blueprint)
+      setIsNew(false)
+    }
     fetchAll()
   }
 
@@ -407,10 +409,9 @@ export default function AdminBlueprintsPage() {
 
       {/* Lista */}
       <div style={{
-        width: selected ? 320 : '100%', flexShrink: 0,
-        borderRight: selected ? '1px solid var(--line-2)' : 'none',
+        width: 320, flexShrink: 0,
+        borderRight: '1px solid var(--line-2)',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        transition: 'width 200ms',
       }}>
         <div style={{
           padding: '12px 16px', borderBottom: '1px solid var(--line-2)',
@@ -465,21 +466,32 @@ export default function AdminBlueprintsPage() {
         </div>
       </div>
 
-      {/* Formulario */}
-      {selected && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-          <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-1)', marginBottom: 20 }}>
-            {isNew ? 'New Blueprint' : `Edit — ${(selected as ForgeBlueprint).name}`}
+      {/* Formulario / placeholder */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+        {selected ? (
+          <>
+            <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-1)', marginBottom: 20 }}>
+              {isNew ? 'New Blueprint' : `Edit — ${(selected as ForgeBlueprint).name}`}
+            </div>
+            <BlueprintForm
+              key={(selected as ForgeBlueprint).id ?? 'new'}
+              blueprint={selected}
+              allNodes={allNodes}
+              onSave={handleSave}
+              onCancel={handleCancel}
+            />
+          </>
+        ) : (
+          <div style={{
+            height: '100%', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 12,
+            color: 'var(--text-4)',
+          }}>
+            <div style={{ fontSize: 32, opacity: 0.3 }}>⬡</div>
+            <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>Select a blueprint to edit</div>
           </div>
-          <BlueprintForm
-            key={(selected as ForgeBlueprint).id ?? 'new'}
-            blueprint={selected}
-            allNodes={allNodes}
-            onSave={handleSave}
-            onCancel={handleCancel}
-          />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
