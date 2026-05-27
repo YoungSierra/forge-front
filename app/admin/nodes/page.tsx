@@ -26,16 +26,27 @@ interface NodeOutput {
   mode?:       string
 }
 
-interface NodeInputs {
-  required:    string[]
-  optional:    string[]
-  description: string
+interface NodeInput {
+  key:      string
+  label:    string
+  accepts:  string[]
+  required: boolean
 }
 
 interface NodeExecutor {
   type:         'llm' | 'comfyui' | 'hybrid'
   model?:       string | null
   workflow_id?: string | null
+}
+
+// Normaliza el formato legacy {required:[], optional:[]} al nuevo [{key, label, accepts, required}]
+function normalizeInputs(raw: unknown): NodeInput[] {
+  if (Array.isArray(raw)) return raw as NodeInput[]
+  const legacy = raw as { required?: string[]; optional?: string[] } | null
+  return [
+    ...(legacy?.required ?? []).map(key => ({ key, label: key.replace(/_/g, ' '), accepts: ['text'], required: true  })),
+    ...(legacy?.optional ?? []).map(key => ({ key, label: key.replace(/_/g, ' '), accepts: ['text'], required: false })),
+  ]
 }
 
 interface ForgeNode {
@@ -46,7 +57,7 @@ interface ForgeNode {
   status:         string
   parent_id:      string | null
   purpose:        string
-  inputs:         NodeInputs
+  inputs:         NodeInput[]
   outputs:        NodeOutput[]
   constraints:    string
   tools:          string[]
@@ -179,6 +190,86 @@ function TagInput({ values, onChange, placeholder }: {
   )
 }
 
+// ─── Componente InputsList ────────────────────────────────────
+
+const ACCEPTS_OPTIONS = ['text', 'image', 'document', 'audio', 'model_3d', 'artifact_bundle']
+
+function InputsList({ inputs, onChange }: {
+  inputs:   NodeInput[]
+  onChange: (v: NodeInput[]) => void
+}) {
+  const update = (i: number, field: keyof NodeInput, val: string | boolean | string[]) => {
+    onChange(inputs.map((inp, idx) => idx === i ? { ...inp, [field]: val } : inp))
+  }
+  const add    = () => onChange([...inputs, { key: '', label: '', accepts: ['text'], required: false }])
+  const remove = (i: number) => onChange(inputs.filter((_, idx) => idx !== i))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {inputs.map((inp, i) => (
+        <div key={i} style={{
+          background: 'var(--bg-0)', border: '1px solid var(--line-2)',
+          borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <div style={{ flex: 1 }}>
+              {label('key')}
+              <input style={inputSx} value={inp.key}
+                onChange={e => update(i, 'key', e.target.value)}
+                placeholder="concept_brief" />
+            </div>
+            <div style={{ flex: 1 }}>
+              {label('label')}
+              <input style={inputSx} value={inp.label}
+                onChange={e => update(i, 'label', e.target.value)}
+                placeholder="Concept Brief" />
+            </div>
+            <div style={{ width: 80 }}>
+              {label('required')}
+              <div style={{ height: 32, display: 'flex', alignItems: 'center' }}>
+                <input type="checkbox" checked={!!inp.required}
+                  onChange={e => update(i, 'required', e.target.checked)} />
+              </div>
+            </div>
+            <button onClick={() => remove(i)} style={{
+              border: 'none', background: 'none', cursor: 'pointer',
+              color: 'var(--text-3)', fontSize: 16, padding: '22px 0 0 0',
+            }}>×</button>
+          </div>
+          <div>
+            {label('accepts (types)')}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {ACCEPTS_OPTIONS.map(opt => {
+                const active = inp.accepts.includes(opt)
+                return (
+                  <button key={opt} type="button"
+                    onClick={() => update(i, 'accepts', active ? inp.accepts.filter(a => a !== opt) : [...inp.accepts, opt])}
+                    style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', padding: '3px 8px',
+                      borderRadius: 4, cursor: 'pointer',
+                      background: active ? 'color-mix(in srgb, var(--action) 15%, var(--bg-2))' : 'var(--bg-2)',
+                      border: `1px solid ${active ? 'var(--action)' : 'var(--line-2)'}`,
+                      color: active ? 'var(--action)' : 'var(--text-3)',
+                    }}>
+                    {opt}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      ))}
+      <button onClick={add} style={{
+        border: '1px dashed var(--line-2)', background: 'transparent',
+        borderRadius: 8, padding: '8px', cursor: 'pointer',
+        color: 'var(--text-3)', fontSize: 12, fontFamily: 'var(--font-mono)',
+      }}>
+        + Add input slot
+      </button>
+    </div>
+  )
+}
+
 // ─── Componente OutputsList ───────────────────────────────────
 
 function OutputsList({ outputs, onChange }: {
@@ -295,7 +386,7 @@ function CollapsibleSection({ title, summary, children }: {
 
 const EMPTY_NODE: Partial<ForgeNode> = {
   node_key: '', title: '', phase: 'ideation', status: 'active',
-  purpose: '', inputs: { required: [], optional: [], description: '' },
+  purpose: '', inputs: [],
   outputs: [], constraints: '', tools: [], skills: [], default_prompt: '',
   executor: null,
 }
@@ -307,15 +398,12 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders }: {
   workflows:          ComfyUIWorkflow[]
   availableProviders: Record<string, boolean>
 }) {
-  const [form, setForm] = useState<Partial<ForgeNode>>(node)
+  const [form, setForm] = useState<Partial<ForgeNode>>({ ...node, inputs: normalizeInputs(node.inputs) })
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState('')
 
   const set = (key: keyof ForgeNode, val: unknown) =>
     setForm(f => ({ ...f, [key]: val }))
-
-  const setInputField = (key: keyof NodeInputs, val: unknown) =>
-    setForm(f => ({ ...f, inputs: { ...(f.inputs as NodeInputs), [key]: val } }))
 
   const handleSave = async () => {
     if (!form.node_key || !form.title || !form.phase) {
@@ -372,16 +460,14 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders }: {
         {
           key: 'inputs',
           title: 'Inputs',
-          summary: [
-            ...(((form.inputs as NodeInputs)?.required || []).map((r: string) => r)),
-            ...(((form.inputs as NodeInputs)?.optional || []).map((o: string) => `${o}?`)),
-          ].join(', ') || '—',
+          summary: ((form.inputs as NodeInput[]) || [])
+            .map((inp: NodeInput) => inp.required ? inp.key : `${inp.key}?`)
+            .join(', ') || '—',
           content: (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div>{label('required')}<TagInput values={(form.inputs as NodeInputs)?.required || []} onChange={v => setInputField('required', v)} placeholder="concept_seed" /></div>
-              <div>{label('optional')}<TagInput values={(form.inputs as NodeInputs)?.optional || []} onChange={v => setInputField('optional', v)} placeholder="target_platform" /></div>
-              <div>{label('description')}<textarea style={{ ...textareaSx, minHeight: 48 }} value={(form.inputs as NodeInputs)?.description || ''} onChange={e => setInputField('description', e.target.value)} placeholder="What this node expects to consume." /></div>
-            </div>
+            <InputsList
+              inputs={(form.inputs as NodeInput[]) || []}
+              onChange={v => set('inputs', v)}
+            />
           ),
         },
         {

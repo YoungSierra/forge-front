@@ -256,6 +256,38 @@ export async function removeProjectMember(project_id: string, member_id: string)
 }
 
 // Assets
+export interface UnifiedAssetVersion {
+  id: string
+  storage_url: string | null
+  version_number: number
+  is_current: boolean
+  model_used: string | null
+  created_at: string
+}
+
+export interface UnifiedAsset {
+  id: string
+  source: 'forge' | 'legacy'
+  name: string
+  node_key: string | null
+  node_title: string | null
+  phase: string | null
+  format: 'image' | 'document' | 'markdown' | 'audio' | 'model_3d' | 'code' | 'other'
+  status: string
+  storage_url: string | null
+  content: string | null
+  created_at: string
+  versions: UnifiedAssetVersion[]
+}
+
+export async function getProjectAssets(projectId?: string): Promise<UnifiedAsset[]> {
+  const qs = projectId ? `?project_id=${projectId}` : ''
+  const data = await request<{ success: boolean; assets: UnifiedAsset[] }>(
+    `/api/assets/project-assets${qs}`,
+  )
+  return data.assets || []
+}
+
 export async function getAssets(filters?: { project_id?: string; step_key?: string }) {
   const params = new URLSearchParams()
   if (filters?.project_id) params.set('project_id', filters.project_id)

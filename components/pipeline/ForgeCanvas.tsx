@@ -55,7 +55,7 @@ interface CanvasNode {
     title: string
     phase: string
     purpose: string
-    inputs: { required?: string[]; optional?: string[]; description?: string } | null
+    inputs: Array<{ key: string; label: string; accepts: string[]; required: boolean }> | { required?: string[]; optional?: string[]; description?: string } | null
     outputs: { name: string; format: string; description?: string; optional?: boolean }[]
     tools: string[]
     skills: string[]
@@ -600,12 +600,14 @@ function ProjectLibraryPanel({ projectId }: { projectId: string }) {
 
 // ─── NodeLibrarySidebar ───────────────────────────────────────────────────────
 
-function NodeLibrarySidebar({ projectId, canvasNodeIds, onAdded, collapsed, onCollapsedChange }: {
+function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded, collapsed, onCollapsedChange, onFocusNode }: {
   projectId: string
   canvasNodeIds: Set<string>
+  approvedNodeIds: Set<string>
   onAdded: () => void
   collapsed: boolean
   onCollapsedChange: (v: boolean) => void
+  onFocusNode?: (forgeNodeId: string) => void
 }) {
   const [catalog,   setCatalog]   = useState<CatalogNode[]>([])
   const [loading,   setLoading]   = useState(true)
@@ -807,8 +809,9 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, onAdded, collapsed, onCo
                 {phase}
               </div>
               {nodes.map(n => {
-                const inCanvas = canvasNodeIds.has(n.id)
-                const isAdding = adding === n.id
+                const inCanvas  = canvasNodeIds.has(n.id)
+                const approved  = approvedNodeIds.has(n.id)
+                const isAdding  = adding === n.id
                 return (
                   <div
                     key={n.id}
@@ -817,18 +820,25 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, onAdded, collapsed, onCo
                       e.dataTransfer.setData('forge/node-id', n.id)
                       e.dataTransfer.effectAllowed = 'copy'
                     }}
+                    onClick={() => { if (inCanvas) onFocusNode?.(n.id) }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 7,
                       padding: '7px 10px 7px 12px',
                       borderBottom: '1px solid var(--line-2)',
-                      opacity: inCanvas ? 0.5 : 1,
+                      opacity: inCanvas ? 0.65 : 1,
                       transition: 'background 80ms',
                       background: 'transparent',
-                      cursor: inCanvas ? 'default' : 'grab',
+                      cursor: inCanvas ? 'pointer' : 'grab',
                     }}
-                    onMouseEnter={e => { if (!inCanvas) e.currentTarget.style.background = 'var(--bg-2)' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-2)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                   >
+                    {/* Indicador de aprobación */}
+                    <span style={{
+                      fontSize: 9, flexShrink: 0, width: 10, textAlign: 'center',
+                      color: approved ? '#34D399' : 'transparent',
+                      lineHeight: 1,
+                    }}>✓</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {n.node_key}
@@ -845,8 +855,8 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, onAdded, collapsed, onCo
                         flexShrink: 0, width: 20, height: 20, borderRadius: 4,
                         border: '1px solid var(--line-2)', background: 'transparent',
                         cursor: inCanvas || isAdding ? 'default' : 'pointer',
-                        color: inCanvas ? '#34D399' : 'var(--text-3)',
-                        fontSize: inCanvas ? 10 : 14, lineHeight: 1,
+                        color: inCanvas ? 'var(--action)' : 'var(--text-3)',
+                        fontSize: 11, lineHeight: 1,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         transition: 'border-color 100ms, color 100ms',
                         padding: 0,
@@ -859,10 +869,10 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, onAdded, collapsed, onCo
                       }}
                       onMouseLeave={e => {
                         e.currentTarget.style.borderColor = 'var(--line-2)'
-                        e.currentTarget.style.color = inCanvas ? '#34D399' : 'var(--text-3)'
+                        e.currentTarget.style.color = inCanvas ? 'var(--action)' : 'var(--text-3)'
                       }}
                     >
-                      {inCanvas ? '✓' : isAdding ? '⟳' : '+'}
+                      {inCanvas ? '◉' : isAdding ? '⟳' : '○'}
                     </button>
                   </div>
                 )
@@ -1035,7 +1045,7 @@ const TextInputCard = React.memo(function TextInputCard({ data }: { data: TextIn
         }}
       >
         <Handle type="source" position={Position.Right}
-          style={{ width: 10, height: 10, borderRadius: '50%', background: TEXT_NODE_CLR, border: '2px solid var(--bg-0)', right: -5, cursor: 'crosshair' }}
+          style={{ width: 10, height: 10, borderRadius: '50%', background: TEXT_NODE_CLR, border: '2px solid var(--bg-0)', right: -5, top: 10, cursor: 'crosshair' }}
         />
         <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: `color-mix(in srgb, ${TEXT_NODE_CLR} 70%, var(--text-1))` }}>T</span>
       </div>
@@ -1052,7 +1062,7 @@ const TextInputCard = React.memo(function TextInputCard({ data }: { data: TextIn
       boxShadow: '0 2px 10px rgba(0,0,0,0.22)',
     }}>
       <Handle type="source" position={Position.Right}
-        style={{ width: 10, height: 10, borderRadius: '50%', background: TEXT_NODE_CLR, border: '2px solid var(--bg-0)', right: -5, cursor: 'crosshair' }}
+        style={{ width: 10, height: 10, borderRadius: '50%', background: TEXT_NODE_CLR, border: '2px solid var(--bg-0)', right: -5, top: 40, cursor: 'crosshair' }}
       />
 
       {/* Franja de arrastre */}
@@ -1270,12 +1280,14 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
 
         {/* Body — ComfyUI style: handles por slot */}
         {(() => {
-          const reqInputs = node.inputs?.required ?? []
-          const optInputs = node.inputs?.optional ?? []
-          const allInputs = [
-            ...reqInputs.map(n => ({ name: n, optional: false })),
-            ...optInputs.map(n => ({ name: n, optional: true })),
-          ]
+          // Soporta nuevo formato array [{key,required}] y legacy {required:[], optional:[]}
+          const rawInputs = node.inputs
+          const allInputs: Array<{ name: string; optional: boolean }> = Array.isArray(rawInputs)
+            ? rawInputs.map(inp => ({ name: inp.key, optional: !inp.required }))
+            : [
+                ...((rawInputs as { required?: string[] } | null)?.required ?? []).map(n => ({ name: n, optional: false })),
+                ...((rawInputs as { optional?: string[] } | null)?.optional ?? []).map(n => ({ name: n, optional: true })),
+              ]
           const allOutputs = node.outputs ?? []
           const hasIO = allInputs.length > 0 || allOutputs.length > 0
 
@@ -1296,7 +1308,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                         <Handle
                           type="target"
                           position={Position.Left}
-                          id={`in-${i}`}
+                          id={`in-${inp.name}`}
                           style={{
                             ...hBase, left: -6,
                             background: inp.optional ? 'var(--bg-2)' : phaseColor,
@@ -1338,7 +1350,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                         <Handle
                           type="source"
                           position={Position.Right}
-                          id={`out-${i}`}
+                          id={`out-${out.name}`}
                           style={{
                             ...hBase, right: -6,
                             background: out.optional ? 'var(--bg-2)' : phaseColor,
@@ -1728,8 +1740,10 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
                                   : (cn.node?.title ?? '—')
                     const slotLabel = (() => {
                       if (!sourceHandle?.startsWith('out-')) return null
-                      const idx = parseInt(sourceHandle.replace('out-', ''), 10)
-                      const out = (cn.node?.outputs as { name: string; format: string }[] | undefined)?.[idx]
+                      const handleVal = sourceHandle.slice(4) // "out-concept_brief" → "concept_brief"
+                      const outputs = cn.node?.outputs as { name: string; format: string }[] | undefined
+                      const out = outputs?.find(o => o.name === handleVal)
+                        ?? outputs?.[parseInt(handleVal, 10)]
                       return out?.name ?? null
                     })()
                     const sub     = isAsset ? (cn.asset?.asset_type ?? '')
@@ -2106,6 +2120,12 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     [canvasData],
   )
 
+  const approvedNodeIds = useMemo(
+    () => new Set((canvasData?.nodes ?? []).filter(cn => cn.node_type === 'forge_node' && cn.session?.status === 'approved').map(cn => cn.node!.id)),
+    [canvasData],
+  )
+
+
   // Nodos bloqueados: secuencial — si el nodo i-1 no está aprobado, todos los siguientes están locked
   const lockedNodeIds = useMemo(() => {
     if (!canvasData) return new Set<string>()
@@ -2316,8 +2336,18 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     }
   }, [canvasData, buildNodes, setNodes, setEdges, persistEdges])
 
-  const { zoomIn, zoomOut, fitView, getViewport, setViewport, screenToFlowPosition, getNodes } = useReactFlow()
+  const { zoomIn, zoomOut, fitView, getViewport, setViewport, screenToFlowPosition, getNodes, setCenter, getNode } = useReactFlow()
   const { zoom } = useViewport()
+
+  const handleFocusNode = useCallback((forgeNodeId: string) => {
+    const cn = canvasData?.nodes.find(n => n.node?.id === forgeNodeId)
+    if (!cn) return
+    const rfNode = getNode(cn.project_node_id)
+    if (!rfNode) return
+    const x = rfNode.position.x + ((rfNode.measured?.width  ?? 240) / 2)
+    const y = rfNode.position.y + ((rfNode.measured?.height ?? 120) / 2)
+    setCenter(x, y, { zoom: 1.1, duration: 500 })
+  }, [canvasData, getNode, setCenter])
 
   // Aplicar viewport una sola vez cuando el canvas y el layout estén listos
   const viewportInitRef = useRef(false)
@@ -2552,9 +2582,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       <NodeLibrarySidebar
         projectId={project.id}
         canvasNodeIds={canvasNodeIds}
+        approvedNodeIds={approvedNodeIds}
         onAdded={() => loadCanvas(true)}
         collapsed={sidebarCollapsed}
         onCollapsedChange={setSidebarCollapsed}
+        onFocusNode={handleFocusNode}
       />
 
       {/* Área principal: blueprint bar + canvas */}

@@ -1,11 +1,16 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { getAssets, getProjects, assetUrl } from '@/lib/api'
-import type { AssetWithVersions, AssetVersion, Project } from '@/lib/types'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { getProjectAssets, getProjects, assetUrl } from '@/lib/api'
+import type { UnifiedAsset, UnifiedAssetVersion } from '@/lib/api'
+import type { Project } from '@/lib/types'
 import ModelViewer from '@/components/shared/ModelViewer'
+import { MD_COMPONENTS } from '@/lib/md-components'
 
-const CATEGORY_LABEL: Record<string, string> = {
+// Mapeo de node_key → etiqueta legible
+const NODE_KEY_LABEL: Record<string, string> = {
   gdd: 'GDD', sprites: 'Sprites', characters: 'Characters', charaters: 'Characters',
   levels: 'Levels', backgrounds: 'Backgrounds', concept_art: 'Concept Art',
   icons: 'Icons', hud: 'HUD', splash_art: 'Splash Art', marketing: 'Marketing',
@@ -19,7 +24,8 @@ const CATEGORY_LABEL: Record<string, string> = {
   image_reference: 'Image Reference',
 }
 
-const CATEGORY_COLOR: Record<string, string> = {
+// Color por node_key (legacy) o por format (forge)
+const NODE_KEY_COLOR: Record<string, string> = {
   gdd: 'var(--cat-design)', sprites: 'var(--cat-asset)', characters: 'var(--cat-asset)',
   charaters: 'var(--cat-asset)', levels: 'var(--cat-level)', backgrounds: 'var(--cat-level)',
   concept_art: 'var(--cat-design)', icons: 'var(--cat-asset)', hud: 'var(--cat-code)',
@@ -34,14 +40,53 @@ const CATEGORY_COLOR: Record<string, string> = {
   image_reference: 'var(--cat-asset)',
 }
 
+const FORMAT_COLOR: Record<string, string> = {
+  image:    'var(--cat-asset)',
+  document: 'var(--cat-design)',
+  markdown: 'var(--cat-design)',
+  audio:    'var(--cat-audio)',
+  model_3d: 'var(--cat-asset)',
+  code:     'var(--cat-code)',
+  other:    'var(--text-3)',
+}
+
+const FORMAT_LABEL: Record<string, string> = {
+  image: 'Image', document: 'Document', markdown: 'Document',
+  audio: 'Audio', model_3d: '3D Model', code: 'Code', other: 'Other',
+}
+
 const STATUS_COLOR: Record<string, string> = {
   approved: 'var(--state-success)', pending: 'var(--state-warning)',
   rejected: 'var(--state-error)', invalidated: 'var(--text-3)',
 }
 
+function assetColor(a: UnifiedAsset) {
+  if (a.source === 'legacy' && a.node_key && NODE_KEY_COLOR[a.node_key]) return NODE_KEY_COLOR[a.node_key]
+  return FORMAT_COLOR[a.format] ?? 'var(--text-3)'
+}
+
+function assetCategoryKey(a: UnifiedAsset): string {
+  if (a.source === 'legacy' && a.node_key) return a.node_key
+  return a.format ?? 'other'
+}
+
+function assetCategoryLabel(a: UnifiedAsset): string {
+  if (a.source === 'legacy' && a.node_key) return NODE_KEY_LABEL[a.node_key] ?? a.node_key
+  return FORMAT_LABEL[a.format] ?? a.format
+}
+
+function currentVersion(a: UnifiedAsset): UnifiedAssetVersion | undefined {
+  return a.versions?.find(v => v.is_current) ?? a.versions?.[0]
+}
+
+function effectiveUrl(a: UnifiedAsset): string {
+  const verUrl = currentVersion(a)?.storage_url
+  const raw = verUrl || a.storage_url || ''
+  return raw ? assetUrl(raw) : ''
+}
+
 function isImage(url: string) {
   if (!url) return false
-  if (url.startsWith('audio://')) return false
   const ext = url.split('?')[0].split('.').pop()?.toLowerCase()
   return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(ext ?? '')
 }
@@ -52,19 +97,29 @@ function isGlb(url: string) {
   return ext === 'glb' || ext === 'gltf'
 }
 
-function currentVersion(asset: AssetWithVersions): AssetVersion | undefined {
-  return asset.asset_versions?.find(v => v.is_current) ?? asset.asset_versions?.[0]
+function isPdf(url: string) {
+  if (!url) return false
+  const ext = url.split('?')[0].split('.').pop()?.toLowerCase()
+  return ext === 'pdf' || ext === 'docx' || ext === 'doc'
+}
+
+function thumbnailIcon(a: UnifiedAsset) {
+  if (a.format === 'audio') return '♪'
+  if (a.format === 'code') return '</>'
+  if (a.format === 'model_3d') return '⬡'
+  if (a.format === 'document' || a.format === 'markdown') return '◈'
+  return '◈'
 }
 
 
-function AssetCard({ asset, onClick }: { asset: AssetWithVersions; onClick: () => void }) {
-  const ver = currentVersion(asset)
-  const url = ver?.storage_url ? assetUrl(ver.storage_url) : ''
-  const hasImage = isImage(url)
-  const has3D    = isGlb(url)
-  const catColor = CATEGORY_COLOR[asset.step_key] ?? 'var(--text-3)'
-  const catLabel = CATEGORY_LABEL[asset.step_key] ?? asset.step_key
-  const hasVersions = (asset.asset_versions?.length ?? 0) > 1
+function AssetCard({ asset, onClick }: { asset: UnifiedAsset; onClick: () => void }) {
+  const url        = effectiveUrl(asset)
+  const hasImage   = isImage(url) || asset.format === 'image'
+  const has3D      = isGlb(url) || asset.format === 'model_3d'
+  const catColor   = assetColor(asset)
+  const catLabel   = assetCategoryLabel(asset)
+  const hasVersions = (asset.versions?.length ?? 0) > 1
+  const ver        = currentVersion(asset)
 
   return (
     <div
@@ -84,7 +139,7 @@ function AssetCard({ asset, onClick }: { asset: AssetWithVersions; onClick: () =
     >
       {/* Thumbnail */}
       <div style={{ width: '100%', aspectRatio: '16/9', background: 'var(--bg-3)', position: 'relative', overflow: 'hidden' }}>
-        {hasImage ? (
+        {hasImage && url ? (
           <img
             src={url}
             alt={asset.name}
@@ -92,7 +147,6 @@ function AssetCard({ asset, onClick }: { asset: AssetWithVersions; onClick: () =
             onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
           />
         ) : has3D ? (
-          // Placeholder con ícono de cubo 3D y label de categoría
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6,
             background: `color-mix(in oklch, ${catColor} 6%, var(--bg-3))` }}>
             <div style={{ fontSize: 26, opacity: 0.7, animation: 'rotate3d 4s linear infinite', transformStyle: 'preserve-3d' }}>⬡</div>
@@ -102,9 +156,7 @@ function AssetCard({ asset, onClick }: { asset: AssetWithVersions; onClick: () =
           </div>
         ) : (
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: 22, opacity: 0.3 }}>
-              {asset.step_key === 'audio' || asset.step_key === 'sfx' ? '♪' : asset.step_key === 'code' ? '</>' : '◈'}
-            </div>
+            <div style={{ fontSize: 22, opacity: 0.3 }}>{thumbnailIcon(asset)}</div>
             <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', textTransform: 'uppercase' }}>
               {catLabel}
             </div>
@@ -116,7 +168,16 @@ function AssetCard({ asset, onClick }: { asset: AssetWithVersions; onClick: () =
             background: 'rgba(0,0,0,0.72)', borderRadius: 4, padding: '2px 6px',
             fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.9)',
           }}>
-            v{ver?.version_number ?? 1} / {asset.asset_versions.length}
+            v{ver?.version_number ?? 1} / {asset.versions.length}
+          </div>
+        )}
+        {asset.source === 'forge' && (
+          <div style={{
+            position: 'absolute', top: 6, left: 6,
+            background: 'color-mix(in oklch, var(--action) 20%, rgba(0,0,0,0.7))', borderRadius: 4, padding: '2px 6px',
+            fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--action)', letterSpacing: '0.06em',
+          }}>
+            FORGE
           </div>
         )}
       </div>
@@ -137,28 +198,25 @@ function AssetCard({ asset, onClick }: { asset: AssetWithVersions; onClick: () =
           </span>
           <span style={{
             fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 7px', borderRadius: 99,
-            color: STATUS_COLOR[asset.review_status] ?? 'var(--text-3)',
+            color: STATUS_COLOR[asset.status] ?? 'var(--text-3)',
           }}>
-            {asset.review_status}
+            {asset.status}
           </span>
         </div>
-        {asset.projects?.name && (
-          <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 6, fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {asset.projects.name}
-          </div>
-        )}
       </div>
     </div>
   )
 }
 
-function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () => void }) {
-  const [viewingVersion, setViewingVersion] = useState<AssetVersion | undefined>(currentVersion(asset))
-  const url = viewingVersion?.storage_url ? assetUrl(viewingVersion.storage_url) : ''
-  const hasImage = isImage(url)
-  const has3D    = isGlb(url)
-  const catColor = CATEGORY_COLOR[asset.step_key] ?? 'var(--text-3)'
-  const sortedVersions = [...(asset.asset_versions ?? [])].sort((a, b) => b.version_number - a.version_number)
+function Lightbox({ asset, onClose }: { asset: UnifiedAsset; onClose: () => void }) {
+  const [viewingVersion, setViewingVersion] = useState<UnifiedAssetVersion | undefined>(currentVersion(asset))
+  const verUrl   = viewingVersion?.storage_url
+  const url      = verUrl ? assetUrl(verUrl) : effectiveUrl(asset)
+  const hasImage = isImage(url) || asset.format === 'image'
+  const has3D    = isGlb(url) || asset.format === 'model_3d'
+  const hasDoc   = isPdf(url) || asset.format === 'document' || asset.format === 'markdown'
+  const catColor = assetColor(asset)
+  const sortedVersions = [...(asset.versions ?? [])].sort((a, b) => b.version_number - a.version_number)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
@@ -179,29 +237,59 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
         background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12,
         display: 'flex', maxWidth: 1100, width: '100%', maxHeight: '90vh', overflow: 'hidden',
       }}>
-        {/* Panel de preview: imagen, modelo 3D, o placeholder genérico */}
-        <div style={{ flex: 1, background: 'var(--bg-0)', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400, position: 'relative' }}>
-          {hasImage ? (
+        {/* Panel de preview */}
+        <div style={{ flex: 1, background: 'var(--bg-0)', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400, position: 'relative', overflow: 'hidden' }}>
+          {hasImage && url ? (
             <img
               src={url}
               alt={asset.name}
               style={{ maxWidth: '100%', maxHeight: '80vh', objectFit: 'contain' }}
             />
           ) : has3D ? (
-            // Viewer interactivo para GLB — drag para rotar, scroll para zoom
             <ModelViewer url={url} style={{ width: '100%', height: '100%', minHeight: 400 }} />
+          ) : asset.content ? (
+            // Markdown / documento de texto — render completo con scroll
+            <div style={{ width: '100%', height: '100%', overflowY: 'auto', padding: '28px 32px', fontSize: 12, color: 'var(--text-1)', lineHeight: 1.7, alignSelf: 'flex-start' }}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                {asset.content}
+              </ReactMarkdown>
+            </div>
+          ) : hasDoc && url ? (
+            // PDF / DOCX con URL — iframe para PDFs, fallback descarga para otros
+            url.endsWith('.pdf') ? (
+              <iframe
+                src={url}
+                style={{ width: '100%', height: '100%', minHeight: 400, border: 'none' }}
+                title={asset.name}
+              />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, opacity: 0.7 }}>
+                <div style={{ fontSize: 48 }}>◈</div>
+                <a href={url} target="_blank" rel="noreferrer"
+                  style={{ background: 'var(--action)', color: '#0a0a0c', borderRadius: 6, padding: '8px 18px', fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600, textDecoration: 'none' }}>
+                  ↓ Download file
+                </a>
+              </div>
+            )
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, opacity: 0.4 }}>
-              <div style={{ fontSize: 48 }}>
-                {asset.step_key === 'audio' || asset.step_key === 'sfx' ? '♪' : asset.step_key === 'code' ? '</>' : '◈'}
-              </div>
+              <div style={{ fontSize: 48 }}>{thumbnailIcon(asset)}</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)' }}>No preview available</div>
-              {url && (
-                <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--cat-code)', fontFamily: 'var(--font-mono)' }}>
-                  Open file ↗
-                </a>
-              )}
             </div>
+          )}
+          {/* Botón download flotante para docs con URL */}
+          {hasDoc && url && !url.endsWith('.pdf') && asset.content && (
+            <a
+              href={url} target="_blank" rel="noreferrer"
+              style={{
+                position: 'absolute', bottom: 16, right: 16,
+                background: 'var(--action)', color: '#0a0a0c', borderRadius: 6,
+                padding: '6px 14px', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                textDecoration: 'none',
+              }}
+            >
+              ↓ Download
+            </a>
           )}
         </div>
 
@@ -217,7 +305,7 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
                 border: `1px solid color-mix(in oklch, ${catColor} 30%, transparent)`,
                 color: catColor, textTransform: 'uppercase', letterSpacing: '0.06em',
               }}>
-                {CATEGORY_LABEL[asset.step_key] ?? asset.step_key}
+                {assetCategoryLabel(asset)}
               </span>
             </div>
             <button
@@ -230,31 +318,38 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
 
           {/* Metadata */}
           <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {asset.projects?.name && (
-              <div>
-                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Project</div>
-                <div style={{ fontSize: 11, color: 'var(--text-1)' }}>{asset.projects.name}</div>
-              </div>
-            )}
             <div>
               <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Status</div>
-              <div style={{ fontSize: 11, color: STATUS_COLOR[asset.review_status] ?? 'var(--text-3)' }}>{asset.review_status}</div>
+              <div style={{ fontSize: 11, color: STATUS_COLOR[asset.status] ?? 'var(--text-3)' }}>{asset.status}</div>
             </div>
+            {asset.node_title && (
+              <div>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Node</div>
+                <div style={{ fontSize: 11, color: 'var(--text-1)' }}>{asset.node_title}</div>
+              </div>
+            )}
+            {asset.phase && (
+              <div>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Phase</div>
+                <div style={{ fontSize: 11, color: 'var(--text-2)' }}>{asset.phase}</div>
+              </div>
+            )}
             {viewingVersion?.model_used && (
               <div>
                 <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Model</div>
                 <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>{viewingVersion.model_used}</div>
               </div>
             )}
-            {viewingVersion?.created_at && (
+            {asset.created_at && (
               <div>
-                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Generated</div>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Created</div>
                 <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
-                  {new Date(viewingVersion.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                  {new Date(asset.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
                 </div>
               </div>
             )}
           </div>
+
 
           {/* Version history */}
           {sortedVersions.length > 0 && (
@@ -308,16 +403,14 @@ function Lightbox({ asset, onClose }: { asset: AssetWithVersions; onClose: () =>
   )
 }
 
-// Categories are derived from actual data, not a static list
-
 export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: string }) {
-  const [allAssets, setAllAssets] = useState<AssetWithVersions[]>([])
+  const [allAssets, setAllAssets] = useState<UnifiedAsset[]>([])
   const [projects, setProjects]   = useState<Project[]>([])
   const [loading, setLoading]     = useState(true)
   const [projectId, setProjectId] = useState<string>(defaultProjectId ?? '')
-  const [stepKey, setStepKey]     = useState<string>('')
+  const [categoryKey, setCategoryKey] = useState<string>('')
   const [page, setPage]           = useState(0)
-  const [selected, setSelected]   = useState<AssetWithVersions | null>(null)
+  const [selected, setSelected]   = useState<UnifiedAsset | null>(null)
   const [pageSize, setPageSize]   = useState(12)
 
   useEffect(() => {
@@ -327,30 +420,22 @@ export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: 
   const reload = useCallback(() => {
     setLoading(true)
     setPage(0)
-    getAssets({ project_id: projectId || undefined })
+    getProjectAssets(projectId || undefined)
       .then(setAllAssets)
       .catch(() => setAllAssets([]))
       .finally(() => setLoading(false))
   }, [projectId])
 
   useEffect(() => { reload() }, [reload])
+  useEffect(() => { setPage(0) }, [categoryKey, pageSize])
 
-  useEffect(() => { setPage(0) }, [stepKey, pageSize])
-
-  const TYPE_TO_STEP: Record<string, string> = {
-    sprite: 'sprites', background: 'backgrounds', audio: 'audio', music: 'audio',
-    code: 'code', ui_screen: 'uiux', hud: 'hud', icon: 'icons',
-    concept_art: 'concept_art', splash_art: 'splash_art', marketing: 'marketing',
-  }
-  const resolveCategory = (a: AssetWithVersions) => a.step_key || TYPE_TO_STEP[a.type ?? ''] || ''
-  const assets     = stepKey ? allAssets.filter(a => resolveCategory(a) === stepKey) : allAssets
+  const assets     = categoryKey ? allAssets.filter(a => assetCategoryKey(a) === categoryKey) : allAssets
   const totalPages = Math.ceil(assets.length / pageSize)
   const pageAssets = assets.slice(page * pageSize, (page + 1) * pageSize)
 
-  // Counts always from full unfiltered set
   const countByCategory: Record<string, number> = {}
   allAssets.forEach(a => {
-    const cat = resolveCategory(a)
+    const cat = assetCategoryKey(a)
     if (cat) countByCategory[cat] = (countByCategory[cat] ?? 0) + 1
   })
 
@@ -384,14 +469,14 @@ export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: 
           Type
         </div>
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {[['', 'All'] as [string, string], ...Object.keys(countByCategory).sort().map(k => [k, CATEGORY_LABEL[k] ?? k] as [string, string])].map(([key, label]) => {
-            const active = stepKey === key
+          {[['', 'All'] as [string, string], ...Object.keys(countByCategory).sort().map(k => [k, NODE_KEY_LABEL[k] ?? FORMAT_LABEL[k] ?? k] as [string, string])].map(([key, label]) => {
+            const active = categoryKey === key
             const count  = key === '' ? allAssets.length : (countByCategory[key] ?? 0)
-            const color  = key ? (CATEGORY_COLOR[key] ?? 'var(--text-2)') : 'var(--text-2)'
+            const color  = key ? (NODE_KEY_COLOR[key] ?? FORMAT_COLOR[key] ?? 'var(--text-2)') : 'var(--text-2)'
             return (
               <button
                 key={key}
-                onClick={() => setStepKey(key)}
+                onClick={() => setCategoryKey(key)}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   padding: '7px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
@@ -422,18 +507,18 @@ export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: 
             {loading ? '…' : `${assets.length} asset${assets.length !== 1 ? 's' : ''}`}
           </span>
           <button
-            onClick={reload}
-            disabled={loading}
-            title="Reload assets"
-            style={{
-              background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6,
-              padding: '4px 9px', fontSize: 12, color: loading ? 'var(--text-3)' : 'var(--text-1)',
-              cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)',
-              display: 'flex', alignItems: 'center', gap: 5, opacity: loading ? 0.5 : 1,
-            }}
-          >
-            <span style={loading ? { display: 'inline-block', animation: 'spin 0.8s linear infinite' } : undefined}>⟳</span>
-          </button>
+              onClick={reload}
+              disabled={loading}
+              title="Reload assets"
+              style={{
+                background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6,
+                padding: '4px 9px', fontSize: 12, color: loading ? 'var(--text-3)' : 'var(--text-1)',
+                cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)',
+                display: 'flex', alignItems: 'center', gap: 5, opacity: loading ? 0.5 : 1,
+              }}
+            >
+              <span style={loading ? { display: 'inline-block', animation: 'spin 0.8s linear infinite' } : undefined}>⟳</span>
+            </button>
           <select
             value={pageSize}
             onChange={e => setPageSize(Number(e.target.value))}
@@ -470,47 +555,47 @@ export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: 
           )}
         </div>
 
-        {/* Pagination — always at the bottom, outside scroll */}
+        {/* Pagination */}
         {totalPages > 1 && (
           <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 16, borderTop: '1px solid var(--line-2)', marginTop: 12 }}>
-                <button
-                  onClick={() => setPage(p => Math.max(0, p - 1))}
-                  disabled={page === 0}
-                  style={{
-                    background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6,
-                    padding: '5px 12px', fontSize: 11, color: page === 0 ? 'var(--text-3)' : 'var(--text-1)',
-                    cursor: page === 0 ? 'default' : 'pointer', fontFamily: 'var(--font-mono)',
-                  }}
-                >
-                  ←
-                </button>
-                {Array.from({ length: totalPages }).map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setPage(i)}
-                    style={{
-                      background: i === page ? 'var(--action)' : 'var(--bg-2)',
-                      border: '1px solid var(--line-2)', borderRadius: 6,
-                      padding: '5px 10px', fontSize: 11,
-                      color: i === page ? '#0a0a0c' : 'var(--text-2)',
-                      cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: i === page ? 600 : 400,
-                      minWidth: 32,
-                    }}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
-                  disabled={page === totalPages - 1}
-                  style={{
-                    background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6,
-                    padding: '5px 12px', fontSize: 11, color: page === totalPages - 1 ? 'var(--text-3)' : 'var(--text-1)',
-                    cursor: page === totalPages - 1 ? 'default' : 'pointer', fontFamily: 'var(--font-mono)',
-                  }}
-                >
-                  →
-                </button>
+            <button
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={page === 0}
+              style={{
+                background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6,
+                padding: '5px 12px', fontSize: 11, color: page === 0 ? 'var(--text-3)' : 'var(--text-1)',
+                cursor: page === 0 ? 'default' : 'pointer', fontFamily: 'var(--font-mono)',
+              }}
+            >
+              ←
+            </button>
+            {Array.from({ length: totalPages }).map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setPage(i)}
+                style={{
+                  background: i === page ? 'var(--action)' : 'var(--bg-2)',
+                  border: '1px solid var(--line-2)', borderRadius: 6,
+                  padding: '5px 10px', fontSize: 11,
+                  color: i === page ? '#0a0a0c' : 'var(--text-2)',
+                  cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: i === page ? 600 : 400,
+                  minWidth: 32,
+                }}
+              >
+                {i + 1}
+              </button>
+            ))}
+            <button
+              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={page === totalPages - 1}
+              style={{
+                background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6,
+                padding: '5px 12px', fontSize: 11, color: page === totalPages - 1 ? 'var(--text-3)' : 'var(--text-1)',
+                cursor: page === totalPages - 1 ? 'default' : 'pointer', fontFamily: 'var(--font-mono)',
+              }}
+            >
+              →
+            </button>
           </div>
         )}
       </div>
