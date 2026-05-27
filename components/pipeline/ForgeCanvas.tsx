@@ -2034,11 +2034,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [savedLayout, setSavedLayout] = useState(() => loadLayout(project.id))
 
   // Posiciones pendientes de nodos recién dropeados (project_node_id → position)
-  const pendingPositionsRef    = useRef<Record<string, { x: number; y: number }>>({})
-  // Flag: el siguiente canvasData reload debe auto-generar edges de blueprint
-  const blueprintJustLoadedRef = useRef(false)
+  const pendingPositionsRef = useRef<Record<string, { x: number; y: number }>>({})
   // Flag: el layout de DB ya se aplicó en este montaje — no repetir en reloads silenciosos
-  const dbLayoutAppliedRef     = useRef(false)
+  const dbLayoutAppliedRef  = useRef(false)
 
   const persistEdges = useCallback((edgeList: Edge[]) => {
     // Deduplicar por source+handle+target antes de enviar
@@ -2108,10 +2106,6 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   }, [project.id])
 
   useEffect(() => {
-    // Sin layout guardado = primera visita al canvas → auto-generar edges del blueprint
-    if (!savedLayout?.nodes?.length) {
-      blueprintJustLoadedRef.current = true
-    }
     loadCanvas()
   }, [loadCanvas])
 
@@ -2172,8 +2166,6 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         method: 'POST',
         body: JSON.stringify({ decision, blueprint_id: canvasData.active_blueprint.id, member_id: memberId }),
       })
-      // Activar auto-generación de edges para los nodos del nuevo blueprint
-      blueprintJustLoadedRef.current = true
       await loadCanvas(true)
     } catch (e) {
       console.error('[gate] decision failed', e)
@@ -2287,9 +2279,6 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     pendingPositionsRef.current = {}
     const validIds = new Set(newNodes.map(n => n.id))
 
-    const addBlueprintEdges = blueprintJustLoadedRef.current
-    blueprintJustLoadedRef.current = false
-
     // Reconstruir edges desde DB, filtrando los que apunten a nodos eliminados
     const dbEdges: Edge[] = (canvasData.edges ?? [])
       .filter(e => validIds.has(e.source) && validIds.has(e.target))
@@ -2304,36 +2293,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         data:         { color: '#6b7280', active: false },
       }))
 
-    if (!addBlueprintEdges) {
-      setEdges(dbEdges)
-    } else {
-      // Auto-conectar nodos del blueprint en secuencia por order_index
-      const bpNodes = [...canvasData.nodes]
-        .filter(cn => cn.blueprint_id)
-        .sort((a, b) => a.order_index - b.order_index)
-
-      const existingIds = new Set(dbEdges.map(e => e.id))
-      const autoEdges: Edge[] = bpNodes.slice(0, -1)
-        .flatMap((cn, i) => {
-          const id = `e-${cn.project_node_id}-${bpNodes[i + 1].project_node_id}`
-          if (existingIds.has(id)) return []
-          return [{
-            id,
-            source:       cn.project_node_id,
-            target:       bpNodes[i + 1].project_node_id,
-            sourceHandle: undefined,
-            targetHandle: undefined,
-            type:         'forgeEdge' as const,
-            deletable:    true,
-            data:         { color: '#6b7280', active: false },
-          } as Edge]
-        })
-
-      const allEdges = [...dbEdges, ...autoEdges]
-      setEdges(allEdges)
-      // Persistir auto-edges en DB
-      if (autoEdges.length > 0) persistEdges(allEdges)
-    }
+    // El backend corre auto-wiring al cargar blueprints — los edges ya vienen en dbEdges
+    setEdges(dbEdges)
   }, [canvasData, buildNodes, setNodes, setEdges, persistEdges])
 
   const { zoomIn, zoomOut, fitView, getViewport, setViewport, screenToFlowPosition, getNodes, setCenter, getNode } = useReactFlow()
@@ -2594,7 +2555,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         <BlueprintBar
           activeBlueprint={canvasData?.active_blueprint ?? null}
           projectId={project.id}
-          onLoaded={() => { blueprintJustLoadedRef.current = true; loadCanvas(true) }}
+          onLoaded={() => loadCanvas(true)}
         />
 
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
