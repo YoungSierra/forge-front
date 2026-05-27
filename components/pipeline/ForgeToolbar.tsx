@@ -23,6 +23,8 @@ interface Props {
   onRunPipeline?: () => void
   runProgress?: { done: number; total: number }
   nodes?: Node[]
+  approvedCount?: number
+  totalCount?: number
 }
 
 /* Avatar individual — usa inicial si no hay imagen */
@@ -113,7 +115,7 @@ function MembersButton({ project, currentMemberId }: { project: Project; current
   )
 }
 
-export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, runProgress, nodes = [] }: Props) {
+export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, runProgress, nodes = [], approvedCount: approvedCountProp, totalCount: totalCountProp }: Props) {
   const { user } = useAuth()
   const { theme, toggle: toggleTheme } = useTheme()
   const [currentMemberId,       setCurrentMemberId]       = useState<string | null>(null)
@@ -130,8 +132,8 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
     const d = n.data as unknown as ForgeNodeData
     return !d.comingSoon
   })
-  const approvedCount = approvable.filter(n => (n.data as unknown as ForgeNodeData).approved).length
-  const totalCount    = approvable.length
+  const approvedCount = approvedCountProp ?? approvable.filter(n => (n.data as unknown as ForgeNodeData).approved).length
+  const totalCount    = totalCountProp    ?? approvable.length
   const idleCount     = approvable.filter(n => (n.data as unknown as ForgeNodeData).status === 'idle').length
   const hasProject    = !!project.id
 

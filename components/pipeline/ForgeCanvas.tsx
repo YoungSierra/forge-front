@@ -2527,17 +2527,28 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
   if (loading) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
-        <style>{SPIN_KF}</style>
-        <img src="/forgy/forgyi.png" alt="Forge" width={28} height={28} style={{ objectFit: 'contain', animation: 'canvas-spin 2s linear infinite' }} />
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-          Loading canvas…
-        </span>
-      </div>
+      <>
+        <ForgeToolbar project={project} phase="idle" onRefresh={onRefresh} approvedCount={0} totalCount={0} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+          <style>{SPIN_KF}</style>
+          <img src="/forgy/forgyi.png" alt="Forge" width={28} height={28} style={{ objectFit: 'contain', animation: 'canvas-spin 2s linear infinite' }} />
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            Loading canvas…
+          </span>
+        </div>
+      </>
     )
   }
 
   return (
+    <>
+    <ForgeToolbar
+      project={project}
+      phase="idle"
+      onRefresh={onRefresh}
+      approvedCount={approvedNodeIds.size}
+      totalCount={canvasNodeIds.size}
+    />
     <div style={{ flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       {/* Sidebar izquierdo — catálogo de nodos */}
       <NodeLibrarySidebar
@@ -2829,6 +2840,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         </div>
       )}
     </div>
+    </>
   )
 }
 
@@ -2837,7 +2849,6 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 export default function ForgeCanvas({ project, onRefresh }: { project: Project; onRefresh: () => void }) {
   return (
     <div style={{ height: '100vh', background: 'var(--bg-0)', display: 'flex', flexDirection: 'column' }}>
-      <ForgeToolbar project={project} phase="idle" onRefresh={onRefresh} />
       <ReactFlowProvider>
         <ForgeCanvasInner project={project} onRefresh={onRefresh} />
       </ReactFlowProvider>

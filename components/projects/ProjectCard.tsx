@@ -41,8 +41,9 @@ export default function ProjectCard({ project }: { project: Project }) {
   const [localNodeStats, setLocalNodeStats] = useState<{ approved: number; total: number } | null>(null)
 
   useEffect(() => {
-    if (project.approved_job_count != null) return
-    if (project.node_total_count != null) return
+    if (project.node_approved_count != null) return
+    if (project.approved_job_count  != null) return
+    if (project.node_total_count    != null) return
     const layout = loadLayout(project.id)
     if (!layout?.nodes?.length) return
     const approvable = layout.nodes.filter(n => {
@@ -54,11 +55,10 @@ export default function ProjectCard({ project }: { project: Project }) {
       total:    approvable.length,
       approved: approvable.filter(n => !!(n.data as Record<string, unknown>).approved).length,
     })
-  }, [project.id, project.approved_job_count, project.node_total_count])
+  }, [project.id, project.node_approved_count, project.approved_job_count, project.node_total_count])
 
-  const displayApproved = project.approved_job_count ?? localNodeStats?.approved ?? wizApproved
-  // Dots visuales: fijos en 6 como referencia genérica
-  const dotCount    = 6
+  const displayApproved = project.node_approved_count ?? project.approved_job_count ?? localNodeStats?.approved ?? wizApproved
+  const dotCount    = project.node_total_count ?? 6
   const dotApproved = Math.min(displayApproved, dotCount)
 
   return (
