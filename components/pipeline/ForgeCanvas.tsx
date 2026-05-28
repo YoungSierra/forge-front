@@ -104,10 +104,11 @@ interface CatalogNode {
 }
 
 interface ForgeNodeCardData extends Record<string, unknown> {
-  canvasNode: CanvasNode
-  onClick:    () => void
-  locked:     boolean
-  projectId:  string
+  canvasNode:      CanvasNode
+  onClick:         () => void
+  locked:          boolean
+  projectId:       string
+  onImagesUpdate?: (imgs: Record<string, OutputImageItem[]>) => void
 }
 
 interface AssetNodeCardData extends Record<string, unknown> {
@@ -1181,7 +1182,7 @@ function extractSection(content: string, sectionName: string, otherKeys: string[
 // ─── ForgeNodeCard ────────────────────────────────────────────────────────────
 
 const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeNodeCardData }) {
-  const { canvasNode, onClick, locked, projectId } = data
+  const { canvasNode, onClick, locked, projectId, onImagesUpdate } = data
   const { node, session } = canvasNode
   if (!node) return null
   const status      = session?.status ?? null
@@ -1569,7 +1570,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                         setGeneratingImgKey(key)
                         try {
                           const r = await generateItemImage(projectId, node.id, session.id, outDef.name, idx, textOverride ?? itemText)
-                          setLocalOutputImages(r.output_images as Record<string, OutputImageItem[]>)
+                          const imgs = r.output_images as Record<string, OutputImageItem[]>
+                          setLocalOutputImages(imgs)
+                          onImagesUpdate?.(imgs)
                         } catch (e) {
                           console.error('[image-gen]', e)
                         } finally {
@@ -2335,6 +2338,18 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             },
             locked:    lockedNodeIds.has(cn.project_node_id),
             projectId: project.id,
+            onImagesUpdate: (imgs: Record<string, OutputImageItem[]>) => {
+              // Sincronizar chat modal cuando se genera imagen desde el output modal
+              setChatOutputImages(imgs)
+              setCanvasData(prev => prev ? {
+                ...prev,
+                nodes: prev.nodes.map(n =>
+                  n.project_node_id === cn.project_node_id && n.session
+                    ? { ...n, session: { ...n.session, output_images: imgs } }
+                    : n
+                ),
+              } : null)
+            },
           } as ForgeNodeCardData,
         }
       })
