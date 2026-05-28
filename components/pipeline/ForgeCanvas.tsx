@@ -13,10 +13,11 @@ import {
 import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
-import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf } from '@/lib/api'
+import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage } from '@/lib/api'
 import type { ChatMessage } from '@/lib/api'
 import type { Project } from '@/lib/types'
-import NodeChatWindow from '@/components/shared/NodeChatWindow'
+import NodeChatWindow, { parseOutputItems, buildImageGenComponents } from '@/components/shared/NodeChatWindow'
+import type { ImageOutputDef, InlineImageItem } from '@/components/shared/NodeChatWindow'
 import AssetCardDeck, { invalidateAssetDeckCache } from './AssetCardDeck'
 import ForgeToolbar from './ForgeToolbar'
 import ReactMarkdown from 'react-markdown'
@@ -24,6 +25,8 @@ import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+interface OutputImageItem { index: number; text: string; image_url: string | null }
 
 interface ForgeSession {
   id: string
@@ -33,6 +36,7 @@ interface ForgeSession {
   started_at: string | null
   completed_at: string | null
   output_asset_id: string | null
+  output_images: Record<string, OutputImageItem[]> | null
   output_asset: {
     id: string
     name: string
@@ -56,7 +60,7 @@ interface CanvasNode {
     phase: string
     purpose: string
     inputs: Array<{ key: string; label: string; accepts: string[]; required: boolean }> | { required?: string[]; optional?: string[]; description?: string } | null
-    outputs: { name: string; format: string; description?: string; optional?: boolean }[]
+    outputs: { name: string; format: string; description?: string; optional?: boolean; image_gen?: boolean; image_gen_model?: string }[]
     tools: string[]
     skills: string[]
     executor: { type: string; model?: string; workflow_id?: string } | null
@@ -1156,6 +1160,24 @@ const TextInputCard = React.memo(function TextInputCard({ data }: { data: TextIn
   )
 })
 
+// ─── Utilidad: extrae una sección del markdown por nombre de output ───────────
+
+function extractSection(content: string, sectionName: string, otherKeys: string[] = []): string | null {
+  const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                             .replace(/_/g, '[_\\s]')  // "concept_list" también matchea "concept list"
+  const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
+  const match   = startRx.exec(content)
+  if (!match) return null
+  const after = content.slice(match.index + match[0].length)
+  // nextRx dinámico: solo cortar en otras claves conocidas, nunca en headings arbitrarios
+  const otherEscaped = otherKeys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]'))
+  const nextRx = otherEscaped.length > 0
+    ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\s*$`, 'im')
+    : null
+  const next = nextRx ? nextRx.exec(after) : null
+  return (next ? after.slice(0, next.index) : after).trim() || null
+}
+
 // ─── ForgeNodeCard ────────────────────────────────────────────────────────────
 
 const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeNodeCardData }) {
@@ -1180,6 +1202,17 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const [outputOpen, setOutputOpen] = useState(false)
   const [generatedPdfUrl, setGeneratedPdfUrl] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
+  const [localOutputImages, setLocalOutputImages] = useState<Record<string, OutputImageItem[]>>(
+    (session?.output_images as Record<string, OutputImageItem[]>) ?? {}
+  )
+  // Sincronizar cuando se genera desde el modal de expansión (chat)
+  useEffect(() => {
+    if (session?.output_images) {
+      setLocalOutputImages(session.output_images as Record<string, OutputImageItem[]>)
+    }
+  }, [session?.output_images])
+  const [generatingImgKey, setGeneratingImgKey] = useState<string | null>(null)
+  const [zoomUrl, setZoomUrl] = useState<string | null>(null)
   // Resolución del PDF URL: del asset (ya guardado) o generado on-demand en esta sesión
   const effectivePdfUrl = session?.output_asset?.storage_url || generatedPdfUrl
 
@@ -1506,20 +1539,79 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 style={{ border: 'none', background: 'var(--bg-2)', cursor: 'pointer', color: 'var(--text-2)', fontSize: 13, padding: '4px 8px', borderRadius: 6, flexShrink: 0, fontFamily: 'var(--font-mono)' }}
               >✕</button>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', fontSize: 12, color: 'var(--text-1)', lineHeight: 1.7 }}>
-              {session.output_asset.content ? (
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                  {session.output_asset.content}
-                </ReactMarkdown>
-              ) : session.output_asset.storage_url ? (
-                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
-                  This asset is stored as a file. Use the Open button above to view it.
+            {(() => {
+              // Construir imageItems para botones inline en el output modal
+              const modalImageItems: InlineImageItem[] = []
+              if (session.output_asset.content) {
+                const imageGenDefs = (node.outputs ?? []).filter(o => o.image_gen && o.image_gen_model)
+                let fullContentUsed = false
+                for (const outDef of imageGenDefs) {
+                  const otherKeys = imageGenDefs.filter(d => d.name !== outDef.name).map(d => d.name)
+                  const foundSection = extractSection(session.output_asset.content, outDef.name, otherKeys)
+                  if (!foundSection && fullContentUsed) continue
+                  const section = foundSection || session.output_asset.content
+                  if (!foundSection) fullContentUsed = true
+                  const items = parseOutputItems(section, outDef.format)
+                  const savedItems = localOutputImages[outDef.name] ?? []
+                  for (let idx = 0; idx < items.length; idx++) {
+                    const itemText = items[idx]
+                    const saved    = savedItems.find(s => s.index === idx)
+                    const key      = `${outDef.name}:${idx}`
+                    modalImageItems.push({
+                      itemKey:      key,
+                      index:        idx,
+                      text:         itemText,
+                      imageUrl:     saved?.image_url ?? null,
+                      isGenerating: generatingImgKey === key,
+                      onZoom:       url => setZoomUrl(url),
+                      onGenerate:   async (textOverride?: string) => {
+                        if (!session?.id) return
+                        setGeneratingImgKey(key)
+                        try {
+                          const r = await generateItemImage(projectId, node.id, session.id, outDef.name, idx, textOverride ?? itemText)
+                          setLocalOutputImages(r.output_images as Record<string, OutputImageItem[]>)
+                        } catch (e) {
+                          console.error('[image-gen]', e)
+                        } finally {
+                          setGeneratingImgKey(null)
+                        }
+                      },
+                    })
+                  }
+                }
+              }
+              const mdComponents = modalImageItems.length > 0
+                ? buildImageGenComponents(modalImageItems)
+                : MD_COMPONENTS
+
+              return (
+                <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', fontSize: 12, color: 'var(--text-1)', lineHeight: 1.7 }}>
+                  {session.output_asset.content ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                      {session.output_asset.content}
+                    </ReactMarkdown>
+                  ) : session.output_asset.storage_url ? (
+                    <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
+                      This asset is stored as a file. Use the Open button above to view it.
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>No preview available.</div>
+                  )}
                 </div>
-              ) : (
-                <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>No preview available.</div>
-              )}
-            </div>
+              )
+            })()}
           </div>
+
+          {/* Zoom overlay */}
+          {zoomUrl && (
+            <div
+              onClick={() => setZoomUrl(null)}
+              style={{ position: 'fixed', inset: 0, zIndex: 10002, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32, cursor: 'zoom-out' }}
+            >
+              <img src={zoomUrl} alt="Generated" onClick={e => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 10, boxShadow: '0 24px 80px rgba(0,0,0,0.7)', cursor: 'default' }} />
+              <button onClick={() => setZoomUrl(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14, padding: '4px 10px', cursor: 'pointer' }}>✕</button>
+            </div>
+          )}
         </>,
         document.body
       )}
@@ -2022,6 +2114,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [chatMessages,      setChatMessages]      = useState<ChatMessage[]>([])
   const [chatLoading,       setChatLoading]       = useState(false)
   const [chatDocUrl,        setChatDocUrl]        = useState<string | null>(null)
+  const [chatOutputImages,  setChatOutputImages]  = useState<Record<string, OutputImageItem[]>>({})
   const [collapsedAssets,   setCollapsedAssets]   = useState<Set<string>>(new Set())
 
   // Expone ancho del sidebar como CSS var para que FeedbackWidget calcule su posición
@@ -2519,9 +2612,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       const { session, messages } = await getNodeSession(project.id, node.node!.id)
       setChatSessionId(session?.id ?? null)
       setChatMessages(messages)
+      setChatOutputImages((session?.output_images as Record<string, OutputImageItem[]>) ?? {})
     } catch {
       setChatSessionId(null)
       setChatMessages([])
+      setChatOutputImages({})
     } finally {
       setChatLoading(false)
     }
@@ -2664,7 +2759,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
                 ...prev,
                 nodes: prev.nodes.map(n =>
                   n.node?.id === chatForgeNode.id
-                    ? { ...n, session: { id: r.session_id, node_id: chatForgeNode.id, status: 'active' as const, iteration_count: 1, started_at: new Date().toISOString(), completed_at: null, output_asset_id: null, output_asset: null } }
+                    ? { ...n, session: { id: r.session_id, node_id: chatForgeNode.id, status: 'active' as const, iteration_count: 1, started_at: new Date().toISOString(), completed_at: null, output_asset_id: null, output_images: null, output_asset: null } }
                     : n
                 ),
               } : null)
@@ -2681,11 +2776,37 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             setChatMessages([])
             setChatSessionId(null)
             setChatDocUrl(null)
+            setChatOutputImages({})
             // Recargar canvas para obtener output_asset actualizado
             loadCanvas(true)
           }}
           docUrl={chatDocUrl ?? undefined}
-          onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); setChatDocUrl(null) }}
+          imageGenOutputs={(() => {
+            const defs: ImageOutputDef[] = []
+            for (const out of (chatForgeNode.outputs ?? [])) {
+              if (out.image_gen && out.image_gen_model) {
+                defs.push({ outputKey: out.name, format: out.format, imageGenModel: out.image_gen_model })
+              }
+            }
+            return defs.length > 0 ? defs : undefined
+          })()}
+          outputImages={chatOutputImages}
+          onGenerateItemImage={chatSessionId ? async (outputKey, itemIndex, itemText) => {
+            const r = await generateItemImage(project.id, chatForgeNode.id, chatSessionId, outputKey, itemIndex, itemText)
+            const imgs = r.output_images as Record<string, OutputImageItem[]>
+            setChatOutputImages(imgs)
+            // Sincronizar output modal: actualizar output_images en la sesión del nodo en canvas
+            setCanvasData(prev => prev ? {
+              ...prev,
+              nodes: prev.nodes.map(n =>
+                n.node?.id === chatForgeNode.id && n.session
+                  ? { ...n, session: { ...n.session, output_images: imgs } }
+                  : n
+              ),
+            } : null)
+            return r
+          } : undefined}
+          onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); setChatDocUrl(null); setChatOutputImages({}) }}
         />
         )
       })()}

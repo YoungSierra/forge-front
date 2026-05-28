@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { chatWithNode } from '@/lib/api'
@@ -10,8 +10,56 @@ import { MD_COMPONENTS } from '@/lib/md-components'
 import AttachmentCard from './AttachmentCard'
 import { Paperclip } from 'lucide-react'
 
+// ─── Utilidad — parsear items de un output para image gen ────────────────────
+
+export function parseOutputItems(content: string, format: string): string[] {
+  if (format === 'json') {
+    try {
+      const parsed = JSON.parse(content)
+      if (Array.isArray(parsed)) return parsed.map(String).filter(s => s.trim().length > 0)
+    } catch { /* continúa */ }
+  }
+  // Bullet list: "- item", "* item", "• item"
+  const bulletRx   = /^[ \t]*[-*•][ \t]+(.+)$/gm
+  // Numbered list: "1. item", "1) item"
+  const numberedRx = /^[ \t]*\d+[.)]\s+(.+)$/gm
+  // Labeled: "Variation 1: title", "Option 2: title", "Concept 3: title"
+  const labeledRx  = /^[A-Za-z]+\s+\d+[:.]\s+(.+)$/gm
+  // Markdown heading con número: "## 1. title", "### Variation 1: title", "### **Variation 1:** title"
+  const headingRx  = /^#{1,4}\s+(?:\*{0,2})(?:[A-Za-z]+\s+)?\d+[:.)]?\s+(.+)$/gm
+
+  const bullets  = [...content.matchAll(bulletRx)].map(m => m[1].trim())
+  if (bullets.length > 0) return bullets
+
+  const numbered = [...content.matchAll(numberedRx)].map(m => m[1].trim())
+  if (numbered.length > 0) return numbered
+
+  const labeled  = [...content.matchAll(labeledRx)].map(m => m[1].trim())
+  if (labeled.length > 0) return labeled
+
+  // Heading con número + descripción subsiguiente (captura bloque completo)
+  // Cada variación = "### Variation N: título\n\ndescripción..."
+  const richBlocks: string[] = []
+  const richRx = /^#{1,4}[ \t]+([^\n]+(?:\n(?!#{1,4}[ \t])[^\n]*)*)/gm
+  for (const m of content.matchAll(richRx)) {
+    const block = m[1].trim()
+    // Solo incluir bloques que empiecen con "Palabra N:" o "**Palabra N:**" — son ítems de variación
+    if (/^(?:\*{0,2})(?:[A-Za-z]+[ \t]+)?\d+[:.]\s?/.test(block)) {
+      richBlocks.push(block.slice(0, 700))   // máx 700 chars para no saturar el prompt
+    }
+  }
+  if (richBlocks.length > 0) return richBlocks
+
+  const headings = [...content.matchAll(headingRx)].map(m => m[1].trim())
+  if (headings.length > 0) return headings
+
+  // Fallback: líneas no vacías (máx 20)
+  return content.split('\n').map(l => l.trim()).filter(l => l.length > 5).slice(0, 20)
+}
+
 const KEYFRAMES = `
   @keyframes chat-dot { 0%,80%,100%{opacity:.2;transform:scale(0.8)} 40%{opacity:1;transform:scale(1)} }
+  @keyframes img-gen-pulse { 0%,100%{opacity:.35} 50%{opacity:1} }
 `
 
 const WINDOW_W = 560
@@ -34,9 +82,127 @@ function TypingDots() {
   )
 }
 
+// ─── Tipos para image gen inline ─────────────────────────────────────────────
+
+export interface InlineImageItem {
+  itemKey:      string   // "outputKey:index" — único entre todos los outputs
+  index:        number
+  text:         string
+  imageUrl:     string | null
+  isGenerating: boolean
+  onGenerate:   (textOverride?: string) => void  // textOverride reemplaza item.text como prompt
+  onZoom:       (url: string) => void
+}
+
+// Botón inline que aparece pegado al texto del ítem
+function InlineGenButton({ item }: { item: InlineImageItem }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 6, verticalAlign: 'middle' }}>
+      {item.imageUrl && (
+        <img
+          src={item.imageUrl}
+          onClick={e => { e.stopPropagation(); item.onZoom(item.imageUrl!) }}
+          title="Click to view full image"
+          style={{ width: 22, height: 22, borderRadius: 3, objectFit: 'cover', cursor: 'zoom-in', border: '1px solid var(--line-2)', flexShrink: 0 }}
+        />
+      )}
+      <button
+        disabled={item.isGenerating}
+        onClick={e => { e.stopPropagation(); item.onGenerate() }}
+        title={item.isGenerating ? 'Generating image…' : item.imageUrl ? 'Regenerate image' : 'Generate image for this item'}
+        style={{
+          fontSize: 9, padding: '1px 5px', borderRadius: 3, lineHeight: 1.4,
+          border: '1px solid color-mix(in srgb, var(--action) 40%, transparent)',
+          background: item.isGenerating
+            ? 'color-mix(in srgb, var(--action) 14%, var(--bg-2))'
+            : 'color-mix(in srgb, var(--action) 8%, var(--bg-2))',
+          color: 'var(--action)', cursor: item.isGenerating ? 'not-allowed' : 'pointer',
+          fontFamily: 'var(--font-mono)', flexShrink: 0,
+          animation: item.isGenerating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
+        }}
+      >
+        {item.isGenerating ? 'Processing…' : item.imageUrl ? '↺' : '✦'}
+      </button>
+    </span>
+  )
+}
+
+// Extrae texto plano recursivamente de React children (más fiable que el AST hast)
+function extractChildrenText(children: React.ReactNode): string {
+  if (children === null || children === undefined) return ''
+  if (typeof children === 'string') return children
+  if (typeof children === 'number') return String(children)
+  if (Array.isArray(children)) return children.map(extractChildrenText).join(' ')
+  if (React.isValidElement(children)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cp = (children as any).props as { children?: React.ReactNode }
+    return extractChildrenText(cp?.children)
+  }
+  return ''
+}
+
+// Construye components de ReactMarkdown que inyectan InlineGenButton en los ítems correspondientes
+export function buildImageGenComponents(imageItems: InlineImageItem[]) {
+  // Mapa de número de variación → item (más robusto que índice de array)
+  // Soporta "Variation 1: title", "**Variation 1:** title", etc.
+  const byNumber = new Map<number, InlineImageItem>()
+  for (const item of imageItems) {
+    const m = /(?:^|\*{1,2})(?:[A-Za-z]+[ \t]+)?(\d+)[:.]/i.exec(item.text.trim())
+    if (m && !byNumber.has(parseInt(m[1], 10))) {
+      byNumber.set(parseInt(m[1], 10), item)
+    }
+  }
+
+  // Busca "Palabra N:" en el texto del heading y devuelve el item del Map
+  function findItemByNumber(text: string): InlineImageItem | undefined {
+    const m = /(?:^|\s)([A-Za-z]+)\s+(\d+)\s*[:.]/i.exec(text.trim())
+    if (!m) return undefined
+    return byNumber.get(parseInt(m[2], 10))
+  }
+
+  // Inyecta botón si el texto del elemento coincide con un item
+  const wrapAll = (Tag: string, children: React.ReactNode, props: Record<string, unknown>) => {
+    const text = extractChildrenText(children)
+    const item = findItemByNumber(text)
+    if (item) {
+      return React.createElement(Tag, props, children, React.createElement(InlineGenButton, { key: item.itemKey, item }))
+    }
+    return React.createElement(Tag, props, children)
+  }
+
+  // Para <p>/<li>: solo inyectar si el patrón está al inicio del texto
+  // (evita falsos positivos como "Silent Hill 2." en textos de descripción)
+  const wrapStrict = (Tag: string, children: React.ReactNode, props: Record<string, unknown>) => {
+    const text = extractChildrenText(children)
+    const atStart = /^(?:[A-Za-z_]+[ \t]*[\r\n]+)?[A-Za-z]+\s+\d+[ \t]*[:.]/i.test(text)
+    if (!atStart) return React.createElement(Tag, props, children)
+    const item = findItemByNumber(text)
+    if (item) {
+      return React.createElement(Tag, props, children, React.createElement(InlineGenButton, { key: item.itemKey, item }))
+    }
+    return React.createElement(Tag, props, children)
+  }
+
+  // node es un objeto hast de react-markdown — no debe pasarse al DOM
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  return {
+    ...MD_COMPONENTS,
+    h1: ({ children, node: _n, ...p }: any) => wrapAll('h1', children, p),
+    h2: ({ children, node: _n, ...p }: any) => wrapAll('h2', children, p),
+    h3: ({ children, node: _n, ...p }: any) => wrapAll('h3', children, p),
+    h4: ({ children, node: _n, ...p }: any) => wrapAll('h4', children, p),
+    p:  ({ children, node: _n, ...p }: any) => wrapStrict('p',  children, p),
+    li: ({ children, node: _n, ...p }: any) => wrapStrict('li', children, p),
+  }
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+}
+
 // ─── Burbuja ──────────────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, onExpand }: { msg: ChatMessage; onExpand?: (content: string) => void }) {
+function MessageBubble({ msg, onExpand }: {
+  msg:       ChatMessage
+  onExpand?: () => void
+}) {
   const isUser = msg.role === 'user'
   return (
     <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', gap: 8, flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
@@ -79,7 +245,7 @@ function MessageBubble({ msg, onExpand }: { msg: ChatMessage; onExpand?: (conten
           {/* Botón expandir — solo en mensajes del asistente */}
           {!isUser && onExpand && (
             <button
-              onClick={() => onExpand(msg.content)}
+              onClick={onExpand}
               title="Expand response"
               style={{
                 position: 'absolute', top: 6, right: 6,
@@ -115,6 +281,14 @@ function MessageBubble({ msg, onExpand }: { msg: ChatMessage; onExpand?: (conten
 
 // ─── NodeChatWindow ───────────────────────────────────────────────────────────
 
+export interface ImageOutputDef {
+  outputKey:      string
+  format:         string
+  imageGenModel:  string  // "provider:model" — ej: comfyui:concept_ref, openai:dall-e-3
+}
+
+export interface OutputImageItem { index: number; text: string; image_url: string | null }
+
 export interface NodeChatWindowProps {
   stepKey:          string
   stepLabel:        string
@@ -131,11 +305,16 @@ export interface NodeChatWindowProps {
   onSend?:          (userMessage: string, file?: File | null, attachmentUrl?: string) => Promise<{ reply: string; attachment?: ChatAttachment }>
   onAccept?:        (content: string) => Promise<void>
   docUrl?:          string
+  // Image gen por item
+  imageGenOutputs?:    ImageOutputDef[]
+  outputImages?:       Record<string, OutputImageItem[]>
+  onGenerateItemImage?: (outputKey: string, itemIndex: number, itemText: string) => Promise<{ image_url: string; output_images: Record<string, OutputImageItem[]> }>
 }
 
 export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
   initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, docUrl,
+  imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
 }: NodeChatWindowProps) {
   const [messages,        setMessages]        = useState<ChatMessage[]>(initialMessages ?? [])
   const [input,           setInput]           = useState('')
@@ -143,10 +322,13 @@ export default function NodeChatWindow({
   const [applying,        setApplying]        = useState(false)
   const [accepting,       setAccepting]       = useState(false)
   const [error,           setError]           = useState<string | null>(null)
-  const [expandedContent, setExpandedContent] = useState<string | null>(null)
+  const [expandedContent, setExpandedContent] = useState<{ content: string; imageItems?: InlineImageItem[] } | null>(null)
   const [pendingFile,     setPendingFile]     = useState<File | null>(null)
   const [pendingUrl,      setPendingUrl]      = useState<string | null>(null)
   const [dropTarget,      setDropTarget]      = useState(false)
+  const [outputImages,    setOutputImages]    = useState<Record<string, OutputImageItem[]>>(outputImagesProp ?? {})
+  const [generatingImg,   setGeneratingImg]   = useState<string | null>(null)  // "outputKey:index"
+  const [zoomImageUrl,    setZoomImageUrl]    = useState<string | null>(null)
 
   // Posición del drag — calculada tras mount para evitar problemas de SSR
   const [pos,        setPos]        = useState({ x: 0, y: 0 })
@@ -409,9 +591,84 @@ export default function NodeChatWindow({
             </div>
           )}
 
-          {messages.map((msg, i) => (
-            <MessageBubble key={i} msg={msg} onExpand={msg.role === 'assistant' ? setExpandedContent : undefined} />
-          ))}
+          {messages.map((msg, i) => {
+            if (msg.role !== 'assistant') {
+              return <MessageBubble key={i} msg={msg} />
+            }
+
+            // Para mensajes del asistente: construir imageItems para el modal expandido
+            const buildItems = (): InlineImageItem[] | undefined => {
+              if (!imageGenOutputs || imageGenOutputs.length === 0 || !onGenerateItemImage) return undefined
+              const items: InlineImageItem[] = []
+              let fullMsgUsed = false  // evita agregar ítems duplicados cuando múltiples outputs usan el msg completo
+
+              for (const def of imageGenOutputs) {
+                const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                             .replace(/_/g, '[_\\s]')  // "concept_list" también matchea "concept list"
+                const startRx     = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
+                const sectionMatch = startRx.exec(msg.content)
+
+                // Sin header de sección y el mensaje completo ya fue usado por otro output: saltear
+                if (!sectionMatch && fullMsgUsed) continue
+
+                // nextRx dinámico: solo cortar en otras claves conocidas, nunca en headings arbitrarios
+                const otherEscaped = imageGenOutputs
+                  .filter(d => d.outputKey !== def.outputKey)
+                  .map(d => d.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]'))
+                const nextRx = otherEscaped.length > 0
+                  ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\s*$`, 'im')
+                  : null
+
+                const section = sectionMatch
+                  ? (() => {
+                      const after = msg.content.slice(sectionMatch.index + sectionMatch[0].length)
+                      const next  = nextRx ? nextRx.exec(after) : null
+                      const s = (next ? after.slice(0, next.index) : after).trim()
+                      return s || msg.content  // sección vacía → fallback a mensaje completo
+                    })()
+                  : msg.content
+
+                if (!sectionMatch) fullMsgUsed = true  // marcar para evitar duplicar
+
+                const parsed = parseOutputItems(section, def.format)
+
+                const savedList = outputImages[def.outputKey] ?? []
+                for (let idx = 0; idx < parsed.length; idx++) {
+                  const itemText = parsed[idx]
+                  const saved    = savedList.find(s => s.index === idx)
+                  const key      = `${def.outputKey}:${idx}`
+                  items.push({
+                    itemKey:      key,
+                    index:        idx,
+                    text:         itemText,
+                    imageUrl:     saved?.image_url ?? null,
+                    isGenerating: generatingImg === key,
+                    onZoom:       url => setZoomImageUrl(url),
+                    onGenerate:   async (textOverride?: string) => {
+                      setGeneratingImg(key)
+                      try {
+                        const r = await onGenerateItemImage(def.outputKey, idx, textOverride ?? itemText)
+                        setOutputImages(r.output_images)
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : 'Image generation failed')
+                      } finally {
+                        setGeneratingImg(null)
+                      }
+                    },
+                  })
+                }
+              }
+              return items.length > 0 ? items : undefined
+            }
+
+            return (
+              <MessageBubble
+                key={i}
+                msg={msg}
+                onExpand={() => setExpandedContent({ content: msg.content, imageItems: buildItems() })}
+              />
+            )
+          })}
 
           {sending && (
             <div style={{ display: 'flex', gap: 8 }}>
@@ -674,12 +931,54 @@ export default function NodeChatWindow({
             {/* Contenido */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
               <div style={{ fontSize: 13, color: 'var(--text-0)', lineHeight: 1.7 }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                  {expandedContent}
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={
+                    expandedContent.imageItems && expandedContent.imageItems.length > 0
+                      ? buildImageGenComponents(expandedContent.imageItems)
+                      : MD_COMPONENTS
+                  }
+                >
+                  {expandedContent.content}
                 </ReactMarkdown>
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Zoom overlay de imagen generada */}
+      {zoomImageUrl && (
+        <div
+          onClick={() => setZoomImageUrl(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 300,
+            background: 'rgba(0,0,0,0.82)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 32, cursor: 'zoom-out',
+          }}
+        >
+          <img
+            src={zoomImageUrl}
+            alt="Generated"
+            onClick={e => e.stopPropagation()}
+            style={{
+              maxWidth: '90vw', maxHeight: '85vh',
+              borderRadius: 10, boxShadow: '0 24px 80px rgba(0,0,0,0.7)',
+              cursor: 'default',
+            }}
+          />
+          <button
+            onClick={() => setZoomImageUrl(null)}
+            style={{
+              position: 'absolute', top: 20, right: 20,
+              background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 6, color: '#fff', fontSize: 14, padding: '4px 10px',
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
         </div>
       )}
     </>

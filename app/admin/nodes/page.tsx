@@ -19,11 +19,13 @@ function adminFetch(path: string, options?: RequestInit) {
 // ─── Tipos ────────────────────────────────────────────────────
 
 interface NodeOutput {
-  name:        string
-  format:      string
-  description: string
-  optional?:   boolean
-  mode?:       string
+  name:            string
+  format:          string
+  description:     string
+  optional?:       boolean
+  mode?:           string
+  image_gen?:      boolean
+  image_gen_model?: string  // formato "provider:model" — ej: comfyui:concept_ref, openai:dall-e-3
 }
 
 interface NodeInput {
@@ -78,6 +80,7 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   together:   ['meta-llama/Llama-3-70b-chat-hf', 'mistralai/Mixtral-8x7B-Instruct-v0.1'],
   openrouter: ['meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-r1', 'anthropic/claude-3.5-sonnet'],
   minimax:    ['MiniMax-M2.7', 'MiniMax-Text-01', 'abab6.5s-chat'],
+  mimo:       ['xiaomi/mimo-v2.5-pro', 'xiaomi/mimo-v2.5'],
 }
 
 const PHASE_COLOR: Record<string, string> = {
@@ -270,13 +273,72 @@ function InputsList({ inputs, onChange }: {
   )
 }
 
+// ─── ImageGenSelector ─────────────────────────────────────────
+
+const IMAGE_GEN_MODELS: Record<string, string[]> = {
+  openai: ['dall-e-3', 'gpt-image-1'],
+}
+
+function ImageGenSelector({ value, onChange, workflows }: {
+  value:     string | undefined
+  onChange:  (v: string | undefined) => void
+  workflows: ComfyUIWorkflow[]
+}) {
+  const [provider, modelOrWf] = value ? value.split(':') : ['', '']
+
+  function set(p: string, m: string) { onChange(p && m ? `${p}:${m}` : undefined) }
+
+  const providers = ['comfyui', ...Object.keys(IMAGE_GEN_MODELS)]
+
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ flex: 1 }}>
+        {label('provider')}
+        <select style={{ ...inputSx, cursor: 'pointer' }} value={provider || ''}
+          onChange={e => {
+            const p = e.target.value
+            const defaultModel = p === 'comfyui'
+              ? (workflows[0]?.name || '')
+              : (IMAGE_GEN_MODELS[p]?.[0] || '')
+            set(p, defaultModel)
+          }}>
+          <option value="">— select —</option>
+          {providers.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </div>
+      {provider === 'comfyui' && (
+        <div style={{ flex: 2 }}>
+          {label('comfyui workflow')}
+          <select style={{ ...inputSx, cursor: 'pointer' }} value={modelOrWf || ''}
+            onChange={e => set('comfyui', e.target.value)}>
+            <option value="">— not assigned —</option>
+            {workflows.filter(w => w.is_active).map(w => (
+              <option key={w.id} value={w.name}>{w.name}{w.description ? ` — ${w.description}` : ''}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      {provider && provider !== 'comfyui' && IMAGE_GEN_MODELS[provider] && (
+        <div style={{ flex: 2 }}>
+          {label('model')}
+          <select style={{ ...inputSx, cursor: 'pointer' }} value={modelOrWf || ''}
+            onChange={e => set(provider, e.target.value)}>
+            {IMAGE_GEN_MODELS[provider].map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Componente OutputsList ───────────────────────────────────
 
-function OutputsList({ outputs, onChange }: {
-  outputs: NodeOutput[]
-  onChange: (v: NodeOutput[]) => void
+function OutputsList({ outputs, onChange, workflows }: {
+  outputs:   NodeOutput[]
+  onChange:  (v: NodeOutput[]) => void
+  workflows: ComfyUIWorkflow[]
 }) {
-  const update = (i: number, field: keyof NodeOutput, val: string | boolean) => {
+  const update = (i: number, field: keyof NodeOutput, val: string | boolean | undefined) => {
     const next = outputs.map((o, idx) => idx === i ? { ...o, [field]: val } : o)
     onChange(next)
   }
@@ -329,6 +391,22 @@ function OutputsList({ outputs, onChange }: {
                 placeholder="concept | ideation | broad_prompt | seed_prompt" />
             </div>
           </div>
+
+          {/* ── Image gen ─────────────────────────────────────── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, borderTop: '1px solid var(--line-2)' }}>
+            <input type="checkbox" id={`ig-${i}`} checked={!!out.image_gen}
+              onChange={e => update(i, 'image_gen', e.target.checked)} />
+            <label htmlFor={`ig-${i}`} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', cursor: 'pointer' }}>
+              Image gen per item
+            </label>
+          </div>
+          {out.image_gen && (
+            <ImageGenSelector
+              value={out.image_gen_model}
+              onChange={v => update(i, 'image_gen_model', v)}
+              workflows={workflows}
+            />
+          )}
         </div>
       ))}
       <button type="button" onClick={add} style={{
@@ -474,7 +552,7 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders }: {
           key: 'outputs',
           title: 'Outputs',
           summary: ((form.outputs as NodeOutput[]) || []).map((o: NodeOutput) => o.name).join(', ') || '—',
-          content: <OutputsList outputs={(form.outputs as NodeOutput[]) || []} onChange={v => set('outputs', v)} />,
+          content: <OutputsList outputs={(form.outputs as NodeOutput[]) || []} onChange={v => set('outputs', v)} workflows={workflows} />,
         },
         {
           key: 'constraints',

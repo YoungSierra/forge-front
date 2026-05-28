@@ -1377,11 +1377,25 @@ export async function generateNodePdf(
   )
 }
 
+export async function generateItemImage(
+  projectId:  string,
+  nodeId:     string,
+  sessionId:  string,
+  outputKey:  string,
+  itemIndex:  number,
+  itemText:   string,
+): Promise<{ image_url: string; output_images: Record<string, { index: number; text: string; image_url: string | null }[]> }> {
+  return request<{ success: boolean; image_url: string; output_images: Record<string, { index: number; text: string; image_url: string | null }[]> }>(
+    `/api/projects/${projectId}/canvas/nodes/${nodeId}/sessions/${sessionId}/generate-item-image`,
+    { method: 'POST', body: JSON.stringify({ output_key: outputKey, item_index: itemIndex, item_text: itemText }) },
+  )
+}
+
 export async function getNodeSession(
   projectId: string,
   nodeId:    string,
-): Promise<{ session: { id: string; status: string; iteration_count: number } | null; messages: ChatMessage[]; asset?: unknown }> {
-  return request<{ success: boolean; session: { id: string; status: string; iteration_count: number } | null; messages: ChatMessage[]; asset?: unknown }>(
+): Promise<{ session: { id: string; status: string; iteration_count: number; output_images?: Record<string, { index: number; text: string; image_url: string | null }[]> | null } | null; messages: ChatMessage[]; asset?: unknown }> {
+  return request<{ success: boolean; session: { id: string; status: string; iteration_count: number; output_images?: Record<string, { index: number; text: string; image_url: string | null }[]> | null } | null; messages: ChatMessage[]; asset?: unknown }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/session`,
   )
 }
