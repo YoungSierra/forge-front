@@ -117,13 +117,26 @@ export default function AssetCardDeck({
         }
 
         const { format, content, storage_url, name } = data.asset
-        let cards: DeckCard[] = []
+        let textCards: DeckCard[] = []
 
-        if (content && ['markdown', 'markdown_table', 'structured', 'single_sentence'].includes(format)) {
-          cards = splitMarkdown(content)
-        } else if (storage_url) {
-          cards = [{ kind: 'image', label: name ?? 'Asset', url: storage_url }]
+        if (content && ['markdown', 'markdown_table', 'structured', 'single_sentence', 'docx', 'pptx'].includes(format)) {
+          textCards = splitMarkdown(content)
+        } else if (storage_url && format === 'png') {
+          // Solo crear ImageCard si realmente es una imagen
+          textCards = [{ kind: 'image', label: name ?? 'Asset', url: storage_url }]
         }
+        // docx/pptx con storage_url no tienen preview — se omiten
+
+        // Imágenes PNG primero para que aparezcan en el abanico antes que las secciones de texto
+        const imageCards: DeckCard[] = (data.image_assets ?? [])
+          .filter((img: { storage_url?: string }) => img.storage_url)
+          .map((img: { name?: string; storage_url: string }) => ({
+            kind:  'image' as const,
+            label: img.name ?? 'Image',
+            url:   img.storage_url,
+          }))
+
+        const cards = [...imageCards, ...textCards]
 
         if (!cancelled) {
           CACHE.set(key, cards)

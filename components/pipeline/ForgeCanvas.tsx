@@ -1455,6 +1455,33 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 </div>
               )}
 
+              {/* Imágenes generadas sin text asset — nodos de solo PNG */}
+              {(() => {
+                const hasImgs = Object.values(localOutputImages).some(arr => arr.some(i => i.image_url))
+                if (!hasImgs) return null
+                const total = Object.values(localOutputImages).reduce((s, a) => s + a.filter(i => i.image_url).length, 0)
+                return (
+                  <div style={{ padding: '5px 8px', borderBottom: '1px solid var(--line-2)' }} onClick={e => e.stopPropagation()}>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      background: 'color-mix(in srgb, #818CF8 9%, var(--bg-2))',
+                      border: '1px solid color-mix(in srgb, #818CF8 22%, var(--line-2))',
+                      borderRadius: 5, padding: '4px 7px',
+                    }}>
+                      <span style={{ fontSize: 10, color: '#818CF8', flexShrink: 0 }}>🖼</span>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-1)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {total} image{total !== 1 ? 's' : ''} generated
+                      </span>
+                      <button
+                        onClick={() => setOutputOpen(true)}
+                        title="View images"
+                        style={{ border: 'none', background: 'none', color: '#818CF8', cursor: 'pointer', fontSize: 12, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}
+                      >👁</button>
+                    </div>
+                  </div>
+                )
+              })()}
+
               {/* Footer: phase + status / lock */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '5px 10px' }}>
                 <span style={{
@@ -1495,7 +1522,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
       )}
 
       {/* Modal de output — portal para escapar el contexto de ReactFlow */}
-      {outputOpen && session?.output_asset && typeof document !== 'undefined' && createPortal(
+      {outputOpen && typeof document !== 'undefined' && (session?.output_asset || Object.values(localOutputImages).some(a => a.some(i => i.image_url))) && createPortal(
         <>
           <div
             onClick={() => setOutputOpen(false)}
@@ -1513,35 +1540,74 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
           >
             <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--line-2)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 14, flexShrink: 0 }}>
-                {effectivePdfUrl ? '📄' : '📝'}
+                {session?.output_asset ? (effectivePdfUrl ? '📄' : '📝') : '🖼'}
               </span>
               <span style={{ flex: 1, fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {session.output_asset.name}
+                {session?.output_asset ? session.output_asset.name : `${node.title} — Image Outputs`}
               </span>
-              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', padding: '2px 6px', borderRadius: 3, flexShrink: 0 }}>
-                {session.output_asset.format}
-              </span>
-              {effectivePdfUrl ? (
-                <a
-                  href={effectivePdfUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', textDecoration: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0 }}
-                >↓ PDF</a>
-              ) : session.output_asset.content ? (
-                <button
-                  onClick={handleGeneratePdf}
-                  disabled={pdfLoading}
-                  style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', background: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0, cursor: pdfLoading ? 'default' : 'pointer', opacity: pdfLoading ? 0.6 : 1 }}
-                >{pdfLoading ? '…' : '↓ PDF'}</button>
-              ) : null}
+              {session?.output_asset && (
+                <>
+                  <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', padding: '2px 6px', borderRadius: 3, flexShrink: 0 }}>
+                    {session.output_asset.format}
+                  </span>
+                  {effectivePdfUrl ? (
+                    <a
+                      href={effectivePdfUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', textDecoration: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0 }}
+                    >↓ PDF</a>
+                  ) : session.output_asset.content ? (
+                    <button
+                      onClick={handleGeneratePdf}
+                      disabled={pdfLoading}
+                      style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', background: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0, cursor: pdfLoading ? 'default' : 'pointer', opacity: pdfLoading ? 0.6 : 1 }}
+                    >{pdfLoading ? '…' : '↓ PDF'}</button>
+                  ) : null}
+                </>
+              )}
               <button
                 onClick={() => setOutputOpen(false)}
                 style={{ border: 'none', background: 'var(--bg-2)', cursor: 'pointer', color: 'var(--text-2)', fontSize: 13, padding: '4px 8px', borderRadius: 6, flexShrink: 0, fontFamily: 'var(--font-mono)' }}
               >✕</button>
             </div>
             {(() => {
-              // Construir imageItems para botones inline en el output modal
+              // Vista de solo imágenes cuando no hay text asset
+              if (!session?.output_asset) {
+                const imgOutputs = (node.outputs ?? []).filter(o => o.image_gen)
+                return (
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px' }}>
+                    {imgOutputs.map(outDef => {
+                      const imgs = (localOutputImages[outDef.name] ?? []).filter(i => i.image_url)
+                      return (
+                        <div key={outDef.name} style={{ marginBottom: 28 }}>
+                          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 10, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                            {outDef.name}
+                          </div>
+                          {imgs.length === 0 ? (
+                            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>No image generated yet.</div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                              {imgs.map(item => (
+                                <div key={item.index} style={{ position: 'relative' }}>
+                                  <img
+                                    src={item.image_url!}
+                                    alt={outDef.name}
+                                    onClick={() => setZoomUrl(item.image_url!)}
+                                    style={{ width: 200, height: 200, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              }
+
+              // Vista normal con markdown + botones de imagen inline
               const modalImageItems: InlineImageItem[] = []
               if (session.output_asset.content) {
                 const imageGenDefs = (node.outputs ?? []).filter(o => o.image_gen && o.image_gen_model)
@@ -1587,6 +1653,11 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 ? buildImageGenComponents(modalImageItems)
                 : MD_COMPONENTS
 
+              // Outputs PNG con imágenes guardadas — se muestran como grid debajo del texto
+              const pngOutputsWithImages = (node.outputs ?? [])
+                .filter(o => (o.format === 'png' || o.format === 'image') && o.image_gen)
+                .filter(o => (localOutputImages[o.name] ?? []).some(i => i.image_url))
+
               return (
                 <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', fontSize: 12, color: 'var(--text-1)', lineHeight: 1.7 }}>
                   {session.output_asset.content ? (
@@ -1599,6 +1670,33 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                     </div>
                   ) : (
                     <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>No preview available.</div>
+                  )}
+
+                  {/* Grid de imágenes PNG al final del contenido */}
+                  {pngOutputsWithImages.length > 0 && (
+                    <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--line-2)' }}>
+                      {pngOutputsWithImages.map(outDef => {
+                        const imgs = (localOutputImages[outDef.name] ?? []).filter(i => i.image_url)
+                        return (
+                          <div key={outDef.name} style={{ marginBottom: 20 }}>
+                            <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 10, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                              {outDef.name}
+                            </div>
+                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                              {imgs.map(item => (
+                                <img
+                                  key={item.index}
+                                  src={item.image_url!}
+                                  alt={outDef.name}
+                                  onClick={() => setZoomUrl(item.image_url!)}
+                                  style={{ width: 190, height: 190, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
                 </div>
               )

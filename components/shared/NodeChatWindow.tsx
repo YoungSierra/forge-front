@@ -13,6 +13,9 @@ import { Paperclip } from 'lucide-react'
 // ─── Utilidad — parsear items de un output para image gen ────────────────────
 
 export function parseOutputItems(content: string, format: string): string[] {
+  // Outputs de imagen: el contenido completo es el prompt — una sola imagen por output
+  if (format === 'png' || format === 'image') return [content.trim().slice(0, 700)]
+
   if (format === 'json') {
     try {
       const parsed = JSON.parse(content)
@@ -124,6 +127,67 @@ function InlineGenButton({ item }: { item: InlineImageItem }) {
         {item.isGenerating ? 'Processing…' : item.imageUrl ? '↺' : '✦'}
       </button>
     </span>
+  )
+}
+
+// Grid de thumbnails de imágenes generadas — se muestra inline en el chat bajo el último mensaje
+function ImageThumbnailRow({ items }: { items?: InlineImageItem[] }) {
+  if (!items || items.length === 0) return null
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0 4px 34px' }}>
+      {items.map(item => (
+        <div key={item.itemKey} style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 116 }}>
+          <div
+            onClick={() => item.imageUrl && item.onZoom(item.imageUrl)}
+            style={{
+              width: 116, height: 116,
+              borderRadius: 7,
+              border: '1px solid var(--line-2)',
+              background: 'var(--bg-2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              overflow: 'hidden',
+              cursor: item.imageUrl ? 'zoom-in' : 'default',
+              position: 'relative',
+              flexShrink: 0,
+            }}
+          >
+            {item.imageUrl ? (
+              <img src={item.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <span style={{
+                fontSize: 9, color: 'var(--text-3)', textAlign: 'center', padding: '0 8px',
+                animation: item.isGenerating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
+              }}>
+                {item.isGenerating ? 'Generating…' : '–'}
+              </span>
+            )}
+            {item.imageUrl && (
+              <button
+                onClick={e => { e.stopPropagation(); item.onGenerate() }}
+                title="Regenerate"
+                disabled={item.isGenerating}
+                style={{
+                  position: 'absolute', bottom: 4, right: 4,
+                  fontSize: 9, padding: '1px 5px', borderRadius: 3, lineHeight: 1.4,
+                  border: '1px solid color-mix(in srgb, var(--action) 40%, transparent)',
+                  background: 'color-mix(in srgb, var(--bg-1) 80%, transparent)',
+                  color: 'var(--action)', cursor: item.isGenerating ? 'not-allowed' : 'pointer',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >↺</button>
+            )}
+          </div>
+          {/* Label del ítem — primera línea del texto, sin markdown */}
+          <span style={{
+            fontSize: 9, color: 'var(--text-3)', lineHeight: 1.35,
+            overflow: 'hidden', display: '-webkit-box',
+            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const,
+          }}>
+            {item.text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').split('\n')[0].slice(0, 70)}
+          </span>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -327,7 +391,7 @@ export default function NodeChatWindow({
   const [pendingUrl,      setPendingUrl]      = useState<string | null>(null)
   const [dropTarget,      setDropTarget]      = useState(false)
   const [outputImages,    setOutputImages]    = useState<Record<string, OutputImageItem[]>>(outputImagesProp ?? {})
-  const [generatingImg,   setGeneratingImg]   = useState<string | null>(null)  // "outputKey:index"
+  const [generatingImgKeys, setGeneratingImgKeys] = useState<Set<string>>(new Set())  // set de "outputKey:index" en progreso
   const [zoomImageUrl,    setZoomImageUrl]    = useState<string | null>(null)
 
   // Posición del drag — calculada tras mount para evitar problemas de SSR
@@ -391,6 +455,62 @@ export default function NodeChatWindow({
     window.addEventListener('mouseup',   onMouseUp)
   }
 
+  // ── Auto-generación de imágenes al recibir respuesta del asistente ──────────
+
+  const triggerAutoImageGen = (content: string) => {
+    if (!imageGenOutputs?.length || !onGenerateItemImage) return
+    let fullMsgUsed = false
+    const autoItems: Array<{ outputKey: string; idx: number; text: string; key: string }> = []
+
+    // Fix 2: detectar si al menos un output tiene sección en este mensaje
+    const anySectionFound = imageGenOutputs.some(def => {
+      const esc = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]')
+      return new RegExp(`^(?:#{1,4}\\s+)?${esc}\\s*$`, 'im').test(content)
+    })
+
+    for (const def of imageGenOutputs) {
+      const isPng = def.format === 'png' || def.format === 'image'
+      const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]')
+      const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
+      const sectionMatch = startRx.exec(content)
+
+      if (!sectionMatch && fullMsgUsed && !isPng) continue
+      // Fix 2: PNG sin sección cuando otros SÍ tienen sección → no usar fallback al contenido completo
+      if (!sectionMatch && isPng && anySectionFound) continue
+
+      const otherEscaped = imageGenOutputs
+        .filter(d => d.outputKey !== def.outputKey)
+        .map(d => d.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]'))
+      const nextRx = otherEscaped.length > 0
+        ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\s*$`, 'im')
+        : null
+      const section = sectionMatch
+        ? (() => {
+            const after = content.slice(sectionMatch.index + sectionMatch[0].length)
+            const next  = nextRx ? nextRx.exec(after) : null
+            const s = (next ? after.slice(0, next.index) : after).trim()
+            return s || content
+          })()
+        : content
+      if (!sectionMatch && !isPng) fullMsgUsed = true
+
+      parseOutputItems(section, def.format).forEach((text, idx) => {
+        // Fix 1: no regenerar si ya existe imagen para este ítem
+        const alreadySaved = (outputImages[def.outputKey] ?? []).some(s => s.index === idx && s.image_url)
+        if (alreadySaved) return
+        autoItems.push({ outputKey: def.outputKey, idx, text, key: `${def.outputKey}:${idx}` })
+      })
+    }
+    if (!autoItems.length) return
+    setGeneratingImgKeys(new Set(autoItems.map(i => i.key)))
+    for (const { outputKey, idx, text, key } of autoItems) {
+      onGenerateItemImage(outputKey, idx, text)
+        .then(r => setOutputImages(r.output_images))
+        .catch(e => console.error('[auto-image-gen]', outputKey, idx, e))
+        .finally(() => setGeneratingImgKeys(prev => { const n = new Set(prev); n.delete(key); return n }))
+    }
+  }
+
   // ── Chat ──────────────────────────────────────────────────────────────────
 
   const send = async () => {
@@ -417,9 +537,11 @@ export default function NodeChatWindow({
             : [...prev]
           return [...updated, { role: 'assistant', content: result.reply }]
         })
+        triggerAutoImageGen(result.reply)
       } else {
         const res = await chatWithNode(stepKey, messages, text, currentOutput, project.id)
         setMessages(prev => [...prev, { role: 'assistant', content: res.reply }])
+        triggerAutoImageGen(res.reply)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error contacting assistant')
@@ -596,6 +718,9 @@ export default function NodeChatWindow({
               return <MessageBubble key={i} msg={msg} />
             }
 
+            // Solo el último mensaje del asistente muestra el grid de imágenes
+            const isLastAssistant = messages.slice(i + 1).every(m => m.role !== 'assistant')
+
             // Para mensajes del asistente: construir imageItems para el modal expandido
             const buildItems = (): InlineImageItem[] | undefined => {
               if (!imageGenOutputs || imageGenOutputs.length === 0 || !onGenerateItemImage) return undefined
@@ -603,13 +728,14 @@ export default function NodeChatWindow({
               let fullMsgUsed = false  // evita agregar ítems duplicados cuando múltiples outputs usan el msg completo
 
               for (const def of imageGenOutputs) {
+                const isPng = def.format === 'png' || def.format === 'image'
                 const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
                                              .replace(/_/g, '[_\\s]')  // "concept_list" también matchea "concept list"
                 const startRx     = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
                 const sectionMatch = startRx.exec(msg.content)
 
-                // Sin header de sección y el mensaje completo ya fue usado por otro output: saltear
-                if (!sectionMatch && fullMsgUsed) continue
+                // PNG outputs nunca se saltan: cada output imagen genera su propia imagen independientemente
+                if (!sectionMatch && fullMsgUsed && !isPng) continue
 
                 // nextRx dinámico: solo cortar en otras claves conocidas, nunca en headings arbitrarios
                 const otherEscaped = imageGenOutputs
@@ -628,7 +754,8 @@ export default function NodeChatWindow({
                     })()
                   : msg.content
 
-                if (!sectionMatch) fullMsgUsed = true  // marcar para evitar duplicar
+                // Solo marcar fullMsgUsed para outputs no-imagen
+                if (!sectionMatch && !isPng) fullMsgUsed = true
 
                 const parsed = parseOutputItems(section, def.format)
 
@@ -642,17 +769,17 @@ export default function NodeChatWindow({
                     index:        idx,
                     text:         itemText,
                     imageUrl:     saved?.image_url ?? null,
-                    isGenerating: generatingImg === key,
+                    isGenerating: generatingImgKeys.has(key),
                     onZoom:       url => setZoomImageUrl(url),
                     onGenerate:   async (textOverride?: string) => {
-                      setGeneratingImg(key)
+                      setGeneratingImgKeys(prev => new Set(prev).add(key))
                       try {
                         const r = await onGenerateItemImage(def.outputKey, idx, textOverride ?? itemText)
                         setOutputImages(r.output_images)
                       } catch (e) {
                         setError(e instanceof Error ? e.message : 'Image generation failed')
                       } finally {
-                        setGeneratingImg(null)
+                        setGeneratingImgKeys(prev => { const n = new Set(prev); n.delete(key); return n })
                       }
                     },
                   })
@@ -661,12 +788,17 @@ export default function NodeChatWindow({
               return items.length > 0 ? items : undefined
             }
 
+            // Computar items una vez: se usa para el grid inline y para el expand modal
+            const imageItems = isLastAssistant ? buildItems() : undefined
+
             return (
-              <MessageBubble
-                key={i}
-                msg={msg}
-                onExpand={() => setExpandedContent({ content: msg.content, imageItems: buildItems() })}
-              />
+              <React.Fragment key={i}>
+                <MessageBubble
+                  msg={msg}
+                  onExpand={() => setExpandedContent({ content: msg.content, imageItems: imageItems ?? buildItems() })}
+                />
+                {isLastAssistant && <ImageThumbnailRow items={imageItems} />}
+              </React.Fragment>
             )
           })}
 
