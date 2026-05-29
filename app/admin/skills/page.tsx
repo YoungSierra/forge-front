@@ -65,15 +65,15 @@ export default function SkillsPage() {
           Skills
         </div>
         <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)', lineHeight: 1.6 }}>
-          Cada skill es un <code style={{ background: 'var(--bg-2)', padding: '1px 4px', borderRadius: 3 }}>.md</code> en R2
-          que se inyecta en el sistema prompt de los nodos que lo referencian.
-          La lista se genera automáticamente desde los nodos del DNA.
+          Each skill is a <code style={{ background: 'var(--bg-2)', padding: '1px 4px', borderRadius: 3 }}>.md</code> file in R2
+          injected into the system prompt of nodes that reference it.
+          Manage skills here and assign them to nodes via the NMS.
         </div>
       </div>
 
       {skills.length === 0 ? (
         <div style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--text-3)', padding: '32px 0' }}>
-          No hay skills registrados en ningún nodo del DNA.
+          No skills registered yet.
         </div>
       ) : (
         <div style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 6, overflow: 'hidden' }}>
