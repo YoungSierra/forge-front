@@ -1457,7 +1457,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               {(() => {
                 const hasImgs = Object.values(localOutputImages).some(arr => arr.some(i => i.variations?.length > 0))
                 if (!hasImgs) return null
-                const total = Object.values(localOutputImages).reduce((s, a) => s + a.filter(i => i.variations?.length > 0).length, 0)
+                const total = Object.values(localOutputImages).reduce((s, a) => s + a.reduce((n, i) => n + (i.variations?.length ?? 0), 0), 0)
                 return (
                   <div style={{ padding: '5px 8px', borderBottom: '1px solid var(--line-2)' }} onClick={e => e.stopPropagation()}>
                     <div style={{
