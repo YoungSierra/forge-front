@@ -172,14 +172,14 @@ function CostChip({ projectId }: { projectId: string }) {
     return () => clearInterval(id)
   }, [fetchChip])
 
-  // Cerrar al hacer click fuera
+  // Cerrar al hacer click fuera — capture:true para que ReactFlow no lo bloquee
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as globalThis.Node)) setOpen(false)
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('pointerdown', handler, { capture: true })
+    return () => document.removeEventListener('pointerdown', handler, { capture: true })
   }, [open])
 
   const totalCost = summary?.total_cost ?? 0
