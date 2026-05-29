@@ -1556,7 +1556,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       target="_blank"
                       rel="noreferrer"
                       style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', textDecoration: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0 }}
-                    >↓ PDF</a>
+                    >↓ {session.output_asset.format === 'pptx' ? 'PPTX' : 'PDF'}</a>
                   ) : session.output_asset.content ? (
                     <button
                       onClick={handleGeneratePdf}
@@ -2215,6 +2215,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [chatMessages,      setChatMessages]      = useState<ChatMessage[]>([])
   const [chatLoading,       setChatLoading]       = useState(false)
   const [chatDocUrl,        setChatDocUrl]        = useState<string | null>(null)
+  const [chatDocFormat,     setChatDocFormat]     = useState<string | null>(null)
   const [chatOutputImages,  setChatOutputImages]  = useState<Record<string, OutputImageItem[]>>({})
   const [collapsedAssets,   setCollapsedAssets]   = useState<Set<string>>(new Set())
 
@@ -2864,7 +2865,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           initialMessages={chatMessages}
           onSend={async (msg, file, attachmentUrl) => {
             const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined, file, attachmentUrl)
-            if (r.doc_url) setChatDocUrl(r.doc_url)
+            if (r.doc_url) { setChatDocUrl(r.doc_url); setChatDocFormat(r.doc_format ?? null) }
             // Actualizar sesión en el estado local si es nueva
             if (!chatSessionId) {
               setChatSessionId(r.session_id)
@@ -2883,17 +2884,19 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           }}
           onAccept={async (content) => {
             if (!chatSessionId) return
-            await acceptNodeOutput(project.id, chatForgeNode.id, chatSessionId, content, chatDocUrl ?? undefined)
+            await acceptNodeOutput(project.id, chatForgeNode.id, chatSessionId, content, chatDocUrl ?? undefined, chatDocFormat ?? undefined)
             invalidateAssetDeckCache(project.id, chatForgeNode.id)
             setChatNode(null)
             setChatMessages([])
             setChatSessionId(null)
             setChatDocUrl(null)
+            setChatDocFormat(null)
             setChatOutputImages({})
             // Recargar canvas para obtener output_asset actualizado
             loadCanvas(true)
           }}
           docUrl={chatDocUrl ?? undefined}
+          docFormat={chatDocFormat ?? undefined}
           imageGenOutputs={(() => {
             const defs: ImageOutputDef[] = []
             for (const out of (chatForgeNode.outputs ?? [])) {
@@ -2919,7 +2922,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             } : null)
             return r
           } : undefined}
-          onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); setChatDocUrl(null); setChatOutputImages({}) }}
+          onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); setChatDocUrl(null); setChatDocFormat(null); setChatOutputImages({}) }}
         />
         )
       })()}

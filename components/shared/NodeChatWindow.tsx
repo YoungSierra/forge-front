@@ -369,6 +369,7 @@ export interface NodeChatWindowProps {
   onSend?:          (userMessage: string, file?: File | null, attachmentUrl?: string) => Promise<{ reply: string; attachment?: ChatAttachment }>
   onAccept?:        (content: string) => Promise<void>
   docUrl?:          string
+  docFormat?:       string
   // Image gen por item
   imageGenOutputs?:    ImageOutputDef[]
   outputImages?:       Record<string, OutputImageItem[]>
@@ -377,7 +378,7 @@ export interface NodeChatWindowProps {
 
 export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
-  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, docUrl,
+  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, docUrl, docFormat,
   imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
 }: NodeChatWindowProps) {
   const [messages,        setMessages]        = useState<ChatMessage[]>(initialMessages ?? [])
@@ -386,7 +387,7 @@ export default function NodeChatWindow({
   const [applying,        setApplying]        = useState(false)
   const [accepting,       setAccepting]       = useState(false)
   const [error,           setError]           = useState<string | null>(null)
-  const [expandedContent, setExpandedContent] = useState<{ content: string; imageItems?: InlineImageItem[] } | null>(null)
+  const [expandedContent, setExpandedContent] = useState<{ content: string; imageItems?: InlineImageItem[]; pngImages?: Record<string, OutputImageItem[]> } | null>(null)
   const [pendingFile,     setPendingFile]     = useState<File | null>(null)
   const [pendingUrl,      setPendingUrl]      = useState<string | null>(null)
   const [dropTarget,      setDropTarget]      = useState(false)
@@ -795,7 +796,7 @@ export default function NodeChatWindow({
               <React.Fragment key={i}>
                 <MessageBubble
                   msg={msg}
-                  onExpand={() => setExpandedContent({ content: msg.content, imageItems: imageItems ?? buildItems() })}
+                  onExpand={() => setExpandedContent({ content: msg.content, imageItems: imageItems ?? buildItems(), pngImages: outputImages })}
                 />
                 {isLastAssistant && <ImageThumbnailRow items={imageItems} />}
               </React.Fragment>
@@ -851,7 +852,7 @@ export default function NodeChatWindow({
                 letterSpacing: '.04em', transition: 'all 120ms',
               }}
             >
-              ↓ Download PDF
+              ↓ Download {docFormat === 'pptx' ? 'PPTX' : 'PDF'}
             </a>
           </div>
         )}
@@ -1046,15 +1047,31 @@ export default function NodeChatWindow({
             {/* Header */}
             <div style={{
               padding: '12px 16px', borderBottom: '1px solid var(--line-2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              display: 'flex', alignItems: 'center', gap: 10,
               flexShrink: 0, background: 'var(--bg-2)',
             }}>
-              <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.08em' }}>
+              <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.08em', flex: 1 }}>
                 {stepLabel}
               </span>
+              {docUrl && (
+                <a
+                  href={docUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={e => e.stopPropagation()}
+                  style={{
+                    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    color: '#F59E0B', textDecoration: 'none',
+                    padding: '3px 10px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)',
+                    borderRadius: 4, letterSpacing: '.04em', flexShrink: 0,
+                  }}
+                >
+                  ↓ {docFormat === 'pptx' ? 'PPTX' : 'PDF'}
+                </a>
+              )}
               <button
                 onClick={() => setExpandedContent(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 16, lineHeight: 1, padding: '2px 6px' }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 16, lineHeight: 1, padding: '2px 6px', flexShrink: 0 }}
               >
                 ✕
               </button>
@@ -1074,6 +1091,36 @@ export default function NodeChatWindow({
                   {expandedContent.content}
                 </ReactMarkdown>
               </div>
+
+              {/* Grid de imágenes PNG al final del modal expandido */}
+              {expandedContent.pngImages && (imageGenOutputs ?? []).some(o =>
+                (expandedContent.pngImages![o.outputKey] ?? []).some(i => i.image_url)
+              ) && (
+                <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--line-2)' }}>
+                  {(imageGenOutputs ?? []).map(outDef => {
+                    const imgs = (expandedContent.pngImages![outDef.outputKey] ?? []).filter(i => i.image_url)
+                    if (!imgs.length) return null
+                    return (
+                      <div key={outDef.outputKey} style={{ marginBottom: 20 }}>
+                        <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 10, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                          {outDef.outputKey}
+                        </div>
+                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                          {imgs.map(item => (
+                            <img
+                              key={item.index}
+                              src={item.image_url!}
+                              alt={outDef.outputKey}
+                              onClick={() => setZoomImageUrl(item.image_url!)}
+                              style={{ width: 190, height: 190, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>

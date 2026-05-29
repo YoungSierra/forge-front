@@ -35,6 +35,9 @@ function fanParams(index: number, total: number): { rot: number; tx: number } {
 }
 
 // Divide markdown por secciones ## — cada sección = una carta
+// Secciones wrapper de output format que se omiten si están vacías
+const OUTPUT_WRAPPER_RE = /^(investor_deck|output|result|response|deck)$/i
+
 function splitMarkdown(content: string): TextCard[] {
   const parts = content.split(/^(?=##\s)/m).filter(s => s.trim())
   const cards: TextCard[] = []
@@ -49,6 +52,8 @@ function splitMarkdown(content: string): TextCard[] {
     const lines = parts[i].trim().split('\n')
     const title = lines[0].replace(/^##\s+/, '').trim()
     const body  = lines.slice(1).join('\n').trim()
+    // Omitir secciones wrapper vacías (investor_deck, output, etc.)
+    if (title && OUTPUT_WRAPPER_RE.test(title) && !body) continue
     if (title) cards.push({ kind: 'text', title, body })
   }
 
