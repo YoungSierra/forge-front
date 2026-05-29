@@ -419,7 +419,7 @@ export default function AdminBlueprintsPage() {
           background: 'var(--bg-1)',
         }}>
           <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-1)', flex: 1 }}>
-            Blueprints
+            Blueprint Management System
           </span>
           <button onClick={handleNew} style={{
             padding: '6px 12px', borderRadius: 6, border: 'none',

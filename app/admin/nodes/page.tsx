@@ -880,7 +880,7 @@ export default function AdminNodesPage() {
           background: 'var(--bg-1)',
         }}>
           <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-1)', flex: 1 }}>
-            Node Library
+            Node Management System
           </span>
           <select
             value={phaseFilter}
