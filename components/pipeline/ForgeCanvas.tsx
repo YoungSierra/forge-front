@@ -14,9 +14,9 @@ import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
 import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage } from '@/lib/api'
-import type { ChatMessage } from '@/lib/api'
+import type { ChatMessage, OutputImageItem, OutputImagesMap } from '@/lib/api'
 import type { Project } from '@/lib/types'
-import NodeChatWindow, { parseOutputItems, buildImageGenComponents } from '@/components/shared/NodeChatWindow'
+import NodeChatWindow, { parseOutputItems, buildImageGenComponents, ImageThumbnailRow } from '@/components/shared/NodeChatWindow'
 import type { ImageOutputDef, InlineImageItem } from '@/components/shared/NodeChatWindow'
 import AssetCardDeck, { invalidateAssetDeckCache } from './AssetCardDeck'
 import ForgeToolbar from './ForgeToolbar'
@@ -26,8 +26,6 @@ import { MD_COMPONENTS } from '@/lib/md-components'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface OutputImageItem { index: number; text: string; image_url: string | null }
-
 interface ForgeSession {
   id: string
   node_id: string
@@ -36,7 +34,7 @@ interface ForgeSession {
   started_at: string | null
   completed_at: string | null
   output_asset_id: string | null
-  output_images: Record<string, OutputImageItem[]> | null
+  output_images: OutputImagesMap | null
   output_asset: {
     id: string
     name: string
@@ -108,7 +106,7 @@ interface ForgeNodeCardData extends Record<string, unknown> {
   onClick:         () => void
   locked:          boolean
   projectId:       string
-  onImagesUpdate?: (imgs: Record<string, OutputImageItem[]>) => void
+  onImagesUpdate?: (imgs: OutputImagesMap) => void
 }
 
 interface AssetNodeCardData extends Record<string, unknown> {
@@ -1203,13 +1201,13 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const [outputOpen, setOutputOpen] = useState(false)
   const [generatedPdfUrl, setGeneratedPdfUrl] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
-  const [localOutputImages, setLocalOutputImages] = useState<Record<string, OutputImageItem[]>>(
-    (session?.output_images as Record<string, OutputImageItem[]>) ?? {}
+  const [localOutputImages, setLocalOutputImages] = useState<OutputImagesMap>(
+    (session?.output_images as OutputImagesMap) ?? {}
   )
   // Sincronizar cuando se genera desde el modal de expansión (chat)
   useEffect(() => {
     if (session?.output_images) {
-      setLocalOutputImages(session.output_images as Record<string, OutputImageItem[]>)
+      setLocalOutputImages(session.output_images as OutputImagesMap)
     }
   }, [session?.output_images])
   const [generatingImgKey, setGeneratingImgKey] = useState<string | null>(null)
@@ -1457,9 +1455,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
 
               {/* Imágenes generadas sin text asset — nodos de solo PNG */}
               {(() => {
-                const hasImgs = Object.values(localOutputImages).some(arr => arr.some(i => i.image_url))
+                const hasImgs = Object.values(localOutputImages).some(arr => arr.some(i => i.variations?.length > 0))
                 if (!hasImgs) return null
-                const total = Object.values(localOutputImages).reduce((s, a) => s + a.filter(i => i.image_url).length, 0)
+                const total = Object.values(localOutputImages).reduce((s, a) => s + a.filter(i => i.variations?.length > 0).length, 0)
                 return (
                   <div style={{ padding: '5px 8px', borderBottom: '1px solid var(--line-2)' }} onClick={e => e.stopPropagation()}>
                     <div style={{
@@ -1522,7 +1520,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
       )}
 
       {/* Modal de output — portal para escapar el contexto de ReactFlow */}
-      {outputOpen && typeof document !== 'undefined' && (session?.output_asset || Object.values(localOutputImages).some(a => a.some(i => i.image_url))) && createPortal(
+      {outputOpen && typeof document !== 'undefined' && (session?.output_asset || Object.values(localOutputImages).some(a => a.some(i => i.variations?.length > 0))) && createPortal(
         <>
           <div
             onClick={() => setOutputOpen(false)}
@@ -1578,7 +1576,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 return (
                   <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px' }}>
                     {imgOutputs.map(outDef => {
-                      const imgs = (localOutputImages[outDef.name] ?? []).filter(i => i.image_url)
+                      const imgs = (localOutputImages[outDef.name] ?? []).filter(i => i.variations?.length > 0)
                       return (
                         <div key={outDef.name} style={{ marginBottom: 28 }}>
                           <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 10, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
@@ -1589,14 +1587,16 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                           ) : (
                             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                               {imgs.map(item => (
-                                <div key={item.index} style={{ position: 'relative' }}>
-                                  <img
-                                    src={item.image_url!}
-                                    alt={outDef.name}
-                                    onClick={() => setZoomUrl(item.image_url!)}
-                                    style={{ width: 200, height: 200, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
-                                  />
-                                </div>
+                                item.variations.map((v, vi) => (
+                                  <div key={`${item.index}-${vi}`} style={{ position: 'relative' }}>
+                                    <img
+                                      src={v.url}
+                                      alt={outDef.name}
+                                      onClick={() => setZoomUrl(v.url)}
+                                      style={{ width: 200, height: 200, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
+                                    />
+                                  </div>
+                                ))
                               ))}
                             </div>
                           )}
@@ -1621,22 +1621,24 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                   const items = parseOutputItems(section, outDef.format)
                   const savedItems = localOutputImages[outDef.name] ?? []
                   for (let idx = 0; idx < items.length; idx++) {
-                    const itemText = items[idx]
-                    const saved    = savedItems.find(s => s.index === idx)
-                    const key      = `${outDef.name}:${idx}`
+                    const itemText   = items[idx]
+                    const saved      = savedItems.find(s => s.index === idx)
+                    const variations = saved?.variations ?? []
+                    const key        = `${outDef.name}:${idx}`
                     modalImageItems.push({
-                      itemKey:      key,
-                      index:        idx,
-                      text:         itemText,
-                      imageUrl:     saved?.image_url ?? null,
-                      isGenerating: generatingImgKey === key,
-                      onZoom:       url => setZoomUrl(url),
-                      onGenerate:   async (textOverride?: string) => {
+                      itemKey:       key,
+                      index:         idx,
+                      text:          itemText,
+                      imageUrl:      variations.at(-1)?.url ?? null,
+                      allVariations: variations,
+                      isGenerating:  generatingImgKey === key,
+                      onZoom:        url => setZoomUrl(url),
+                      onGenerate:    async (condition?: string) => {
                         if (!session?.id) return
                         setGeneratingImgKey(key)
                         try {
-                          const r = await generateItemImage(projectId, node.id, session.id, outDef.name, idx, textOverride ?? itemText)
-                          const imgs = r.output_images as Record<string, OutputImageItem[]>
+                          const r = await generateItemImage(projectId, node.id, session.id, outDef.name, idx, itemText, condition)
+                          const imgs = r.output_images
                           setLocalOutputImages(imgs)
                           onImagesUpdate?.(imgs)
                         } catch (e) {
@@ -1656,7 +1658,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               // Outputs PNG con imágenes guardadas — se muestran como grid debajo del texto
               const pngOutputsWithImages = (node.outputs ?? [])
                 .filter(o => (o.format === 'png' || o.format === 'image') && o.image_gen)
-                .filter(o => (localOutputImages[o.name] ?? []).some(i => i.image_url))
+                .filter(o => (localOutputImages[o.name] ?? []).some(i => i.variations?.length > 0))
 
               return (
                 <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', fontSize: 12, color: 'var(--text-1)', lineHeight: 1.7 }}>
@@ -1676,22 +1678,22 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                   {pngOutputsWithImages.length > 0 && (
                     <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--line-2)' }}>
                       {pngOutputsWithImages.map(outDef => {
-                        const imgs = (localOutputImages[outDef.name] ?? []).filter(i => i.image_url)
+                        const imgs = (localOutputImages[outDef.name] ?? []).filter(i => i.variations?.length > 0)
                         return (
                           <div key={outDef.name} style={{ marginBottom: 20 }}>
                             <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 10, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                               {outDef.name}
                             </div>
                             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                              {imgs.map(item => (
+                              {imgs.flatMap(item => item.variations.map((v, vi) => (
                                 <img
-                                  key={item.index}
-                                  src={item.image_url!}
+                                  key={`${item.index}-${vi}`}
+                                  src={v.url}
                                   alt={outDef.name}
-                                  onClick={() => setZoomUrl(item.image_url!)}
+                                  onClick={() => setZoomUrl(v.url)}
                                   style={{ width: 190, height: 190, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
                                 />
-                              ))}
+                              )))}
                             </div>
                           </div>
                         )
@@ -2216,7 +2218,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [chatLoading,       setChatLoading]       = useState(false)
   const [chatDocUrl,        setChatDocUrl]        = useState<string | null>(null)
   const [chatDocFormat,     setChatDocFormat]     = useState<string | null>(null)
-  const [chatOutputImages,  setChatOutputImages]  = useState<Record<string, OutputImageItem[]>>({})
+  const [chatOutputImages,  setChatOutputImages]  = useState<OutputImagesMap>({})
   const [collapsedAssets,   setCollapsedAssets]   = useState<Set<string>>(new Set())
 
   // Expone ancho del sidebar como CSS var para que FeedbackWidget calcule su posición
@@ -2437,7 +2439,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             },
             locked:    lockedNodeIds.has(cn.project_node_id),
             projectId: project.id,
-            onImagesUpdate: (imgs: Record<string, OutputImageItem[]>) => {
+            onImagesUpdate: (imgs: OutputImagesMap) => {
               // Sincronizar chat modal cuando se genera imagen desde el output modal
               setChatOutputImages(imgs)
               setCanvasData(prev => prev ? {
@@ -2726,7 +2728,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       const { session, messages } = await getNodeSession(project.id, node.node!.id)
       setChatSessionId(session?.id ?? null)
       setChatMessages(messages)
-      setChatOutputImages((session?.output_images as Record<string, OutputImageItem[]>) ?? {})
+      setChatOutputImages((session?.output_images as OutputImagesMap) ?? {})
     } catch {
       setChatSessionId(null)
       setChatMessages([])
@@ -2907,9 +2909,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             return defs.length > 0 ? defs : undefined
           })()}
           outputImages={chatOutputImages}
-          onGenerateItemImage={chatSessionId ? async (outputKey, itemIndex, itemText) => {
-            const r = await generateItemImage(project.id, chatForgeNode.id, chatSessionId, outputKey, itemIndex, itemText)
-            const imgs = r.output_images as Record<string, OutputImageItem[]>
+          onGenerateItemImage={chatSessionId ? async (outputKey, itemIndex, itemText, condition) => {
+            const r = await generateItemImage(project.id, chatForgeNode.id, chatSessionId, outputKey, itemIndex, itemText, condition)
+            const imgs = r.output_images
             setChatOutputImages(imgs)
             // Sincronizar output modal: actualizar output_images en la sesión del nodo en canvas
             setCanvasData(prev => prev ? {

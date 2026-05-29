@@ -1,10 +1,11 @@
 'use client'
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { chatWithNode } from '@/lib/api'
-import type { ChatMessage, ChatAttachment } from '@/lib/api'
+import type { ChatMessage, ChatAttachment, OutputImageItem, OutputImagesMap } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import AttachmentCard from './AttachmentCard'
@@ -91,102 +92,254 @@ export interface InlineImageItem {
   itemKey:      string   // "outputKey:index" — único entre todos los outputs
   index:        number
   text:         string
-  imageUrl:     string | null
+  imageUrl:     string | null                // última variación generada (null si ninguna)
+  allVariations: { url: string; condition?: string | null }[]
   isGenerating: boolean
-  onGenerate:   (textOverride?: string) => void  // textOverride reemplaza item.text como prompt
+  onGenerate:   (condition?: string) => void
   onZoom:       (url: string) => void
 }
 
-// Botón inline que aparece pegado al texto del ítem
-function InlineGenButton({ item }: { item: InlineImageItem }) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 6, verticalAlign: 'middle' }}>
-      {item.imageUrl && (
-        <img
-          src={item.imageUrl}
-          onClick={e => { e.stopPropagation(); item.onZoom(item.imageUrl!) }}
-          title="Click to view full image"
-          style={{ width: 22, height: 22, borderRadius: 3, objectFit: 'cover', cursor: 'zoom-in', border: '1px solid var(--line-2)', flexShrink: 0 }}
-        />
-      )}
-      <button
-        disabled={item.isGenerating}
-        onClick={e => { e.stopPropagation(); item.onGenerate() }}
-        title={item.isGenerating ? 'Generating image…' : item.imageUrl ? 'Regenerate image' : 'Generate image for this item'}
+// Panel modal para generar una nueva variación con condiciones del usuario
+function VariationPanel({ item, onClose }: { item: InlineImageItem; onClose: () => void }) {
+  const [condition, setCondition] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => { textareaRef.current?.focus() }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    try {
+      await item.onGenerate(condition.trim() || undefined)
+      onClose()
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 20000,
+        background: 'rgba(0,0,0,0.72)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
         style={{
-          fontSize: 9, padding: '1px 5px', borderRadius: 3, lineHeight: 1.4,
-          border: '1px solid color-mix(in srgb, var(--action) 40%, transparent)',
-          background: item.isGenerating
-            ? 'color-mix(in srgb, var(--action) 14%, var(--bg-2))'
-            : 'color-mix(in srgb, var(--action) 8%, var(--bg-2))',
-          color: 'var(--action)', cursor: item.isGenerating ? 'not-allowed' : 'pointer',
-          fontFamily: 'var(--font-mono)', flexShrink: 0,
-          animation: item.isGenerating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
+          width: 480, background: 'var(--bg-1)',
+          border: '1px solid var(--line-2)', borderRadius: 12,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}
       >
-        {item.isGenerating ? 'Processing…' : item.imageUrl ? '↺' : '✦'}
-      </button>
-    </span>
+        {/* Header */}
+        <div style={{
+          padding: '12px 16px', borderBottom: '1px solid var(--line-2)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--text-0)', letterSpacing: '0.05em' }}>
+            GENERATE VARIATION
+          </span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 14, lineHeight: 1 }}>✕</button>
+        </div>
+
+        {/* Imagen actual de referencia + galería de variaciones */}
+        {item.allVariations.length > 0 && (
+          <div style={{ padding: '12px 16px 0', display: 'flex', gap: 8, overflowX: 'auto' }}>
+            {item.allVariations.map((v, i) => (
+              <div key={i} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <img
+                  src={v.url}
+                  alt={`Variation ${i + 1}`}
+                  onClick={() => item.onZoom(v.url)}
+                  style={{ width: 90, height: 90, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--line-2)', cursor: 'zoom-in', display: 'block' }}
+                />
+                {v.condition && (
+                  <span style={{ fontSize: 8, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.condition}>
+                    {v.condition}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Concepto de referencia */}
+        <div style={{ padding: '12px 16px 0' }}>
+          <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 4 }}>CONCEPT</div>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, background: 'var(--bg-2)', borderRadius: 6, padding: '8px 10px', border: '1px solid var(--line-2)' }}>
+            {item.text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').split('\n')[0]}
+          </div>
+        </div>
+
+        {/* Input de condiciones */}
+        <div style={{ padding: '12px 16px' }}>
+          <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 4 }}>VARIATION INSTRUCTIONS <span style={{ color: 'var(--text-4)' }}>(optional)</span></div>
+          <textarea
+            ref={textareaRef}
+            value={condition}
+            onChange={e => setCondition(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleGenerate() }}
+            placeholder="Describe what to change — style, mood, color palette, composition…"
+            rows={3}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+              borderRadius: 6, padding: '8px 10px',
+              fontSize: 12, color: 'var(--text-0)', lineHeight: 1.5,
+              resize: 'none', fontFamily: 'inherit', outline: 'none',
+            }}
+          />
+          <div style={{ fontSize: 9, color: 'var(--text-4)', marginTop: 4, fontFamily: 'var(--font-mono)' }}>⌘↵ to generate</div>
+        </div>
+
+        {/* Botones */}
+        <div style={{ padding: '0 16px 14px', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ fontSize: 11, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-2)', cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            style={{
+              fontSize: 11, padding: '6px 16px', borderRadius: 6,
+              border: '1px solid color-mix(in srgb, var(--action) 50%, transparent)',
+              background: generating ? 'color-mix(in srgb, var(--action) 18%, var(--bg-2))' : 'color-mix(in srgb, var(--action) 12%, var(--bg-2))',
+              color: 'var(--action)', cursor: generating ? 'not-allowed' : 'pointer', fontWeight: 600,
+              animation: generating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
+            }}
+          >
+            {generating ? 'Generating…' : 'Generate variation'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
-// Grid de thumbnails de imágenes generadas — se muestra inline en el chat bajo el último mensaje
-function ImageThumbnailRow({ items }: { items?: InlineImageItem[] }) {
-  if (!items || items.length === 0) return null
+// Botón inline pegado al texto del ítem
+function InlineGenButton({ item }: { item: InlineImageItem }) {
+  const [showPanel, setShowPanel] = useState(false)
+
+  return (
+    <>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 6, verticalAlign: 'middle' }}>
+        {item.allVariations.map((v, i) => (
+          <img
+            key={i}
+            src={v.url}
+            onClick={e => { e.stopPropagation(); item.onZoom(v.url) }}
+            title={v.condition ?? 'Click to view'}
+            style={{ width: 22, height: 22, borderRadius: 3, objectFit: 'cover', cursor: 'zoom-in', border: '1px solid var(--line-2)', flexShrink: 0 }}
+          />
+        ))}
+        <button
+          disabled={item.isGenerating}
+          onClick={e => {
+            e.stopPropagation()
+            if (item.imageUrl) { setShowPanel(true) } else { item.onGenerate() }
+          }}
+          title={item.isGenerating ? 'Generating image…' : item.imageUrl ? 'Generate a new variation' : 'Generate image for this item'}
+          style={{
+            fontSize: 9, padding: '1px 5px', borderRadius: 3, lineHeight: 1.4,
+            border: '1px solid color-mix(in srgb, var(--action) 40%, transparent)',
+            background: item.isGenerating
+              ? 'color-mix(in srgb, var(--action) 14%, var(--bg-2))'
+              : 'color-mix(in srgb, var(--action) 8%, var(--bg-2))',
+            color: 'var(--action)', cursor: item.isGenerating ? 'not-allowed' : 'pointer',
+            fontFamily: 'var(--font-mono)', flexShrink: 0,
+            animation: item.isGenerating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
+          }}
+        >
+          {item.isGenerating ? 'Processing…' : item.imageUrl ? '↺' : '✦'}
+        </button>
+      </span>
+      {showPanel && <VariationPanel item={item} onClose={() => setShowPanel(false)} />}
+    </>
+  )
+}
+
+// Tarjeta individual — muestra todas las variaciones como thumbnails separados
+function ThumbnailCard({ item }: { item: InlineImageItem }) {
+  const [showPanel, setShowPanel] = useState(false)
+  const S = 80
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end' }}>
+        {/* Una thumbnail por variación */}
+        {item.allVariations.map((v, i) => (
+          <div
+            key={i}
+            style={{ width: S, height: S, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--line-2)', flexShrink: 0 }}
+          >
+            <img
+              src={v.url} alt=""
+              onClick={() => item.onZoom(v.url)}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
+            />
+          </div>
+        ))}
+
+        {/* Placeholder cuando no hay variaciones */}
+        {item.allVariations.length === 0 && (
+          <div style={{
+            width: S, height: S, borderRadius: 6, border: '1px solid var(--line-2)',
+            background: 'var(--bg-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>
+            <span style={{
+              fontSize: 9, color: 'var(--text-3)', textAlign: 'center',
+              animation: item.isGenerating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
+            }}>
+              {item.isGenerating ? 'Generating…' : '–'}
+            </span>
+          </div>
+        )}
+
+        {/* Botón ↺ a la derecha del último thumbnail */}
+        {item.imageUrl && (
+          <button
+            onClick={e => { e.stopPropagation(); setShowPanel(true) }}
+            title="Generate a new variation"
+            style={{
+              fontSize: 9, padding: '2px 6px', borderRadius: 5, lineHeight: 1.6,
+              border: '1px solid color-mix(in srgb, var(--action) 40%, transparent)',
+              background: 'color-mix(in srgb, var(--bg-1) 80%, transparent)',
+              color: 'var(--action)', cursor: 'pointer', fontFamily: 'var(--font-mono)', flexShrink: 0,
+            }}
+          >↺</button>
+        )}
+      </div>
+      <span style={{
+        fontSize: 9, color: 'var(--text-3)', lineHeight: 1.35,
+        overflow: 'hidden', display: '-webkit-box',
+        WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const,
+        maxWidth: Math.max(item.allVariations.length, 1) * (S + 4),
+      }}>
+        {item.text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').split('\n')[0].slice(0, 70)}
+      </span>
+      {showPanel && <VariationPanel item={item} onClose={() => setShowPanel(false)} />}
+    </div>
+  )
+}
+
+// Grid de thumbnails — muestra todas las variaciones de cada ítem
+export function ImageThumbnailRow({ items }: { items?: InlineImageItem[] }) {
+  const visible = items?.filter(item => item.imageUrl !== null || item.isGenerating) ?? []
+  if (visible.length === 0) return null
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0 4px 34px' }}>
-      {items.map(item => (
-        <div key={item.itemKey} style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 116 }}>
-          <div
-            onClick={() => item.imageUrl && item.onZoom(item.imageUrl)}
-            style={{
-              width: 116, height: 116,
-              borderRadius: 7,
-              border: '1px solid var(--line-2)',
-              background: 'var(--bg-2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              overflow: 'hidden',
-              cursor: item.imageUrl ? 'zoom-in' : 'default',
-              position: 'relative',
-              flexShrink: 0,
-            }}
-          >
-            {item.imageUrl ? (
-              <img src={item.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              <span style={{
-                fontSize: 9, color: 'var(--text-3)', textAlign: 'center', padding: '0 8px',
-                animation: item.isGenerating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
-              }}>
-                {item.isGenerating ? 'Generating…' : '–'}
-              </span>
-            )}
-            {item.imageUrl && (
-              <button
-                onClick={e => { e.stopPropagation(); item.onGenerate() }}
-                title="Regenerate"
-                disabled={item.isGenerating}
-                style={{
-                  position: 'absolute', bottom: 4, right: 4,
-                  fontSize: 9, padding: '1px 5px', borderRadius: 3, lineHeight: 1.4,
-                  border: '1px solid color-mix(in srgb, var(--action) 40%, transparent)',
-                  background: 'color-mix(in srgb, var(--bg-1) 80%, transparent)',
-                  color: 'var(--action)', cursor: item.isGenerating ? 'not-allowed' : 'pointer',
-                  fontFamily: 'var(--font-mono)',
-                }}
-              >↺</button>
-            )}
-          </div>
-          {/* Label del ítem — primera línea del texto, sin markdown */}
-          <span style={{
-            fontSize: 9, color: 'var(--text-3)', lineHeight: 1.35,
-            overflow: 'hidden', display: '-webkit-box',
-            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const,
-          }}>
-            {item.text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').split('\n')[0].slice(0, 70)}
-          </span>
-        </div>
-      ))}
+      {visible.map(item => <ThumbnailCard key={item.itemKey} item={item} />)}
     </div>
   )
 }
@@ -207,8 +360,15 @@ function extractChildrenText(children: React.ReactNode): string {
 
 // Construye components de ReactMarkdown que inyectan InlineGenButton en los ítems correspondientes
 export function buildImageGenComponents(imageItems: InlineImageItem[]) {
-  // Mapa de número de variación → item (más robusto que índice de array)
-  // Soporta "Variation 1: title", "**Variation 1:** title", etc.
+  // Keys de outputs que tienen image gen — solo se inyectan botones dentro de esas secciones
+  const imageGenKeys = new Set(imageItems.map(item => item.itemKey.split(':')[0]))
+
+  // Flag mutable: true solo cuando el render está dentro de una sección image-gen (## outputKey)
+  // Se actualiza al renderizar cada h2 — React renderiza el árbol depth-first, por lo que
+  // el h2 se procesa antes que sus li/p hermanos, haciendo este patrón seguro
+  let inImageGenSection = false
+
+  // Mapa de número de variación → item — soporta "Variation 1:", "**Variation 1:**", etc.
   const byNumber = new Map<number, InlineImageItem>()
   for (const item of imageItems) {
     const m = /(?:^|\*{1,2})(?:[A-Za-z]+[ \t]+)?(\d+)[:.]/i.exec(item.text.trim())
@@ -217,30 +377,45 @@ export function buildImageGenComponents(imageItems: InlineImageItem[]) {
     }
   }
 
-  // Busca "Palabra N:" en el texto del heading y devuelve el item del Map
+  // Normaliza texto para comparación robusta: strip markdown inline, colapsa espacios, lowercase, 60 chars
+  function normKey(text: string): string {
+    return text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 60)
+  }
+
+  // Mapa de texto normalizado → item — fallback para ítems nombrados sin número
+  const byText = new Map<string, InlineImageItem>()
+  for (const item of imageItems) {
+    const key = normKey(item.text)
+    if (key && !byText.has(key)) byText.set(key, item)
+  }
+
   function findItemByNumber(text: string): InlineImageItem | undefined {
     const m = /(?:^|\s)([A-Za-z]+)\s+(\d+)\s*[:.]/i.exec(text.trim())
     if (!m) return undefined
     return byNumber.get(parseInt(m[2], 10))
   }
 
-  // Inyecta botón si el texto del elemento coincide con un item
-  const wrapAll = (Tag: string, children: React.ReactNode, props: Record<string, unknown>) => {
+  function findItemByText(text: string): InlineImageItem | undefined {
+    return byText.get(normKey(text))
+  }
+
+  // Inyecta botón en headings de nivel 3/4 dentro de secciones image-gen
+  const wrapInner = (Tag: string, children: React.ReactNode, props: Record<string, unknown>) => {
+    if (!inImageGenSection) return React.createElement(Tag, props, children)
     const text = extractChildrenText(children)
-    const item = findItemByNumber(text)
+    const item = findItemByNumber(text) ?? findItemByText(text)
     if (item) {
       return React.createElement(Tag, props, children, React.createElement(InlineGenButton, { key: item.itemKey, item }))
     }
     return React.createElement(Tag, props, children)
   }
 
-  // Para <p>/<li>: solo inyectar si el patrón está al inicio del texto
-  // (evita falsos positivos como "Silent Hill 2." en textos de descripción)
+  // Inyecta botón en li/p solo si estamos dentro de una sección image-gen
   const wrapStrict = (Tag: string, children: React.ReactNode, props: Record<string, unknown>) => {
+    if (!inImageGenSection) return React.createElement(Tag, props, children)
     const text = extractChildrenText(children)
     const atStart = /^(?:[A-Za-z_]+[ \t]*[\r\n]+)?[A-Za-z]+\s+\d+[ \t]*[:.]/i.test(text)
-    if (!atStart) return React.createElement(Tag, props, children)
-    const item = findItemByNumber(text)
+    const item = (atStart ? findItemByNumber(text) : undefined) ?? findItemByText(text)
     if (item) {
       return React.createElement(Tag, props, children, React.createElement(InlineGenButton, { key: item.itemKey, item }))
     }
@@ -251,10 +426,15 @@ export function buildImageGenComponents(imageItems: InlineImageItem[]) {
   /* eslint-disable @typescript-eslint/no-explicit-any */
   return {
     ...MD_COMPONENTS,
-    h1: ({ children, node: _n, ...p }: any) => wrapAll('h1', children, p),
-    h2: ({ children, node: _n, ...p }: any) => wrapAll('h2', children, p),
-    h3: ({ children, node: _n, ...p }: any) => wrapAll('h3', children, p),
-    h4: ({ children, node: _n, ...p }: any) => wrapAll('h4', children, p),
+    // h2 es el heading de sección — actualiza el flag y nunca inyecta botón
+    h2: ({ children, node: _n, ...p }: any) => {
+      const key = extractChildrenText(children).trim().toLowerCase().replace(/[\s-]+/g, '_')
+      inImageGenSection = imageGenKeys.has(key) || [...imageGenKeys].some(k => key.includes(k) || k.includes(key))
+      return React.createElement('h2', p, children)
+    },
+    h1: ({ children, node: _n, ...p }: any) => wrapInner('h1', children, p),
+    h3: ({ children, node: _n, ...p }: any) => wrapInner('h3', children, p),
+    h4: ({ children, node: _n, ...p }: any) => wrapInner('h4', children, p),
     p:  ({ children, node: _n, ...p }: any) => wrapStrict('p',  children, p),
     li: ({ children, node: _n, ...p }: any) => wrapStrict('li', children, p),
   }
@@ -351,8 +531,6 @@ export interface ImageOutputDef {
   imageGenModel:  string  // "provider:model" — ej: comfyui:concept_ref, openai:dall-e-3
 }
 
-export interface OutputImageItem { index: number; text: string; image_url: string | null }
-
 export interface NodeChatWindowProps {
   stepKey:          string
   stepLabel:        string
@@ -371,9 +549,9 @@ export interface NodeChatWindowProps {
   docUrl?:          string
   docFormat?:       string
   // Image gen por item
-  imageGenOutputs?:    ImageOutputDef[]
-  outputImages?:       Record<string, OutputImageItem[]>
-  onGenerateItemImage?: (outputKey: string, itemIndex: number, itemText: string) => Promise<{ image_url: string; output_images: Record<string, OutputImageItem[]> }>
+  imageGenOutputs?:     ImageOutputDef[]
+  outputImages?:        OutputImagesMap
+  onGenerateItemImage?: (outputKey: string, itemIndex: number, itemText: string, condition?: string) => Promise<{ image_url: string; output_images: OutputImagesMap }>
 }
 
 export default function NodeChatWindow({
@@ -387,11 +565,11 @@ export default function NodeChatWindow({
   const [applying,        setApplying]        = useState(false)
   const [accepting,       setAccepting]       = useState(false)
   const [error,           setError]           = useState<string | null>(null)
-  const [expandedContent, setExpandedContent] = useState<{ content: string; imageItems?: InlineImageItem[]; pngImages?: Record<string, OutputImageItem[]> } | null>(null)
+  const [expandedContent, setExpandedContent] = useState<{ content: string; imageItems?: InlineImageItem[]; pngImages?: OutputImagesMap } | null>(null)
   const [pendingFile,     setPendingFile]     = useState<File | null>(null)
   const [pendingUrl,      setPendingUrl]      = useState<string | null>(null)
   const [dropTarget,      setDropTarget]      = useState(false)
-  const [outputImages,    setOutputImages]    = useState<Record<string, OutputImageItem[]>>(outputImagesProp ?? {})
+  const [outputImages,    setOutputImages]    = useState<OutputImagesMap>(outputImagesProp ?? {})
   const [generatingImgKeys, setGeneratingImgKeys] = useState<Set<string>>(new Set())  // set de "outputKey:index" en progreso
   const [zoomImageUrl,    setZoomImageUrl]    = useState<string | null>(null)
 
@@ -471,6 +649,8 @@ export default function NodeChatWindow({
 
     for (const def of imageGenOutputs) {
       const isPng = def.format === 'png' || def.format === 'image'
+      // Auto-gen solo para outputs PNG/image — otros formatos usan botón on-demand
+      if (!isPng) continue
       const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]')
       const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
       const sectionMatch = startRx.exec(content)
@@ -497,7 +677,7 @@ export default function NodeChatWindow({
 
       parseOutputItems(section, def.format).forEach((text, idx) => {
         // Fix 1: no regenerar si ya existe imagen para este ítem
-        const alreadySaved = (outputImages[def.outputKey] ?? []).some(s => s.index === idx && s.image_url)
+        const alreadySaved = (outputImages[def.outputKey] ?? []).some(s => s.index === idx && s.variations?.length > 0)
         if (alreadySaved) return
         autoItems.push({ outputKey: def.outputKey, idx, text, key: `${def.outputKey}:${idx}` })
       })
@@ -585,6 +765,60 @@ export default function NodeChatWindow({
     } finally {
       setApplying(false)
     }
+  }
+
+  // Construye InlineImageItem[] desde cualquier contenido usando el estado actual de outputImages
+  const buildItemsFromContent = (content: string): InlineImageItem[] | undefined => {
+    if (!imageGenOutputs?.length || !onGenerateItemImage) return undefined
+    const items: InlineImageItem[] = []
+    let fullMsgUsed = false
+    for (const def of imageGenOutputs) {
+      const isPng = def.format === 'png' || def.format === 'image'
+      const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]')
+      const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
+      const sectionMatch = startRx.exec(content)
+      if (!sectionMatch && fullMsgUsed && !isPng) continue
+      const otherEscaped = imageGenOutputs.filter(d => d.outputKey !== def.outputKey)
+        .map(d => d.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]'))
+      const nextRx = otherEscaped.length > 0
+        ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\s*$`, 'im') : null
+      const section = sectionMatch
+        ? (() => {
+            const after = content.slice(sectionMatch.index + sectionMatch[0].length)
+            const next = nextRx ? nextRx.exec(after) : null
+            const s = (next ? after.slice(0, next.index) : after).trim()
+            return s || content
+          })()
+        : content
+      if (!sectionMatch && !isPng) fullMsgUsed = true
+      const parsed = parseOutputItems(section, def.format)
+      const savedList = outputImages[def.outputKey] ?? []
+      for (let idx = 0; idx < parsed.length; idx++) {
+        const itemText = parsed[idx]
+        const saved = savedList.find(s => s.index === idx)
+        const variations = saved?.variations ?? []
+        const key = `${def.outputKey}:${idx}`
+        items.push({
+          itemKey: key, index: idx, text: itemText,
+          imageUrl: variations.at(-1)?.url ?? null,
+          allVariations: variations,
+          isGenerating: generatingImgKeys.has(key),
+          onZoom: url => setZoomImageUrl(url),
+          onGenerate: async (condition?: string) => {
+            setGeneratingImgKeys(prev => new Set(prev).add(key))
+            try {
+              const r = await onGenerateItemImage(def.outputKey, idx, itemText, condition)
+              setOutputImages(r.output_images)
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Image generation failed')
+            } finally {
+              setGeneratingImgKeys(prev => { const n = new Set(prev); n.delete(key); return n })
+            }
+          },
+        })
+      }
+    }
+    return items.length > 0 ? items : undefined
   }
 
   if (!positioned) return null
@@ -762,20 +996,22 @@ export default function NodeChatWindow({
 
                 const savedList = outputImages[def.outputKey] ?? []
                 for (let idx = 0; idx < parsed.length; idx++) {
-                  const itemText = parsed[idx]
-                  const saved    = savedList.find(s => s.index === idx)
-                  const key      = `${def.outputKey}:${idx}`
+                  const itemText   = parsed[idx]
+                  const saved      = savedList.find(s => s.index === idx)
+                  const variations = saved?.variations ?? []
+                  const key        = `${def.outputKey}:${idx}`
                   items.push({
                     itemKey:      key,
                     index:        idx,
                     text:         itemText,
-                    imageUrl:     saved?.image_url ?? null,
+                    imageUrl:     variations.at(-1)?.url ?? null,
+                    allVariations: variations,
                     isGenerating: generatingImgKeys.has(key),
                     onZoom:       url => setZoomImageUrl(url),
-                    onGenerate:   async (textOverride?: string) => {
+                    onGenerate:   async (condition?: string) => {
                       setGeneratingImgKeys(prev => new Set(prev).add(key))
                       try {
-                        const r = await onGenerateItemImage(def.outputKey, idx, textOverride ?? itemText)
+                        const r = await onGenerateItemImage(def.outputKey, idx, itemText, condition)
                         setOutputImages(r.output_images)
                       } catch (e) {
                         setError(e instanceof Error ? e.message : 'Image generation failed')
@@ -1078,50 +1314,24 @@ export default function NodeChatWindow({
             </div>
 
             {/* Contenido */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
-              <div style={{ fontSize: 13, color: 'var(--text-0)', lineHeight: 1.7 }}>
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={
-                    expandedContent.imageItems && expandedContent.imageItems.length > 0
-                      ? buildImageGenComponents(expandedContent.imageItems)
-                      : MD_COMPONENTS
-                  }
-                >
-                  {expandedContent.content}
-                </ReactMarkdown>
-              </div>
+            {(() => {
+              // Items siempre frescos desde el estado actual de outputImages
+              const expandedItems = buildItemsFromContent(expandedContent.content)
+              const hasThumbs = expandedItems?.some(i => i.imageUrl || i.isGenerating) ?? false
+              return (
+                <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-0)', lineHeight: 1.7 }}>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={expandedItems?.length ? buildImageGenComponents(expandedItems) : MD_COMPONENTS}
+                    >
+                      {expandedContent.content}
+                    </ReactMarkdown>
+                  </div>
 
-              {/* Grid de imágenes PNG al final del modal expandido */}
-              {expandedContent.pngImages && (imageGenOutputs ?? []).some(o =>
-                (expandedContent.pngImages![o.outputKey] ?? []).some(i => i.image_url)
-              ) && (
-                <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--line-2)' }}>
-                  {(imageGenOutputs ?? []).map(outDef => {
-                    const imgs = (expandedContent.pngImages![outDef.outputKey] ?? []).filter(i => i.image_url)
-                    if (!imgs.length) return null
-                    return (
-                      <div key={outDef.outputKey} style={{ marginBottom: 20 }}>
-                        <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 10, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                          {outDef.outputKey}
-                        </div>
-                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                          {imgs.map(item => (
-                            <img
-                              key={item.index}
-                              src={item.image_url!}
-                              alt={outDef.outputKey}
-                              onClick={() => setZoomImageUrl(item.image_url!)}
-                              style={{ width: 190, height: 190, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
                 </div>
-              )}
-            </div>
+              )
+            })()}
           </div>
         </div>
       )}

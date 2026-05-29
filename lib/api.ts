@@ -1378,6 +1378,10 @@ export async function generateNodePdf(
   )
 }
 
+export interface OutputImageVariation { url: string; condition?: string | null }
+export interface OutputImageItem     { index: number; variations: OutputImageVariation[] }
+export type    OutputImagesMap       = Record<string, OutputImageItem[]>
+
 export async function generateItemImage(
   projectId:  string,
   nodeId:     string,
@@ -1385,18 +1389,19 @@ export async function generateItemImage(
   outputKey:  string,
   itemIndex:  number,
   itemText:   string,
-): Promise<{ image_url: string; output_images: Record<string, { index: number; text: string; image_url: string | null }[]> }> {
-  return request<{ success: boolean; image_url: string; output_images: Record<string, { index: number; text: string; image_url: string | null }[]> }>(
+  condition?: string,
+): Promise<{ image_url: string; output_images: OutputImagesMap }> {
+  return request<{ success: boolean; image_url: string; output_images: OutputImagesMap }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/sessions/${sessionId}/generate-item-image`,
-    { method: 'POST', body: JSON.stringify({ output_key: outputKey, item_index: itemIndex, item_text: itemText }) },
+    { method: 'POST', body: JSON.stringify({ output_key: outputKey, item_index: itemIndex, item_text: itemText, condition }) },
   )
 }
 
 export async function getNodeSession(
   projectId: string,
   nodeId:    string,
-): Promise<{ session: { id: string; status: string; iteration_count: number; output_images?: Record<string, { index: number; text: string; image_url: string | null }[]> | null } | null; messages: ChatMessage[]; asset?: unknown }> {
-  return request<{ success: boolean; session: { id: string; status: string; iteration_count: number; output_images?: Record<string, { index: number; text: string; image_url: string | null }[]> | null } | null; messages: ChatMessage[]; asset?: unknown }>(
+): Promise<{ session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: unknown }> {
+  return request<{ success: boolean; session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: unknown }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/session`,
   )
 }
