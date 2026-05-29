@@ -107,15 +107,20 @@ export interface InlineImageItem {
 function VariationPanel({ item, onClose }: { item: InlineImageItem; onClose: () => void }) {
   const [condition, setCondition] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [internalZoomUrl, setInternalZoomUrl] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => { textareaRef.current?.focus() }, [])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (internalZoomUrl) { setInternalZoomUrl(null) } else { onClose() }
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, internalZoomUrl])
 
   const handleGenerate = async () => {
     setGenerating(true)
@@ -128,6 +133,7 @@ function VariationPanel({ item, onClose }: { item: InlineImageItem; onClose: () 
   }
 
   return createPortal(
+    <>
     <div
       onClick={onClose}
       style={{
@@ -150,9 +156,19 @@ function VariationPanel({ item, onClose }: { item: InlineImageItem; onClose: () 
           padding: '12px 16px', borderBottom: '1px solid var(--line-2)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--text-0)', letterSpacing: '0.05em' }}>
-            GENERATE VARIATION
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{
+              width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+              border: '1px solid rgba(255,138,61,0.25)',
+              background: 'rgba(255,138,61,0.12)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <img src="/forgy/forgyi.png" alt="Forge" style={{ width: 16, height: 16, objectFit: 'contain' }} />
+            </div>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--text-0)', letterSpacing: '0.05em' }}>
+              GENERATE VARIATION
+            </span>
+          </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 14, lineHeight: 1 }}>✕</button>
         </div>
 
@@ -164,7 +180,7 @@ function VariationPanel({ item, onClose }: { item: InlineImageItem; onClose: () 
                 <img
                   src={v.url}
                   alt={`Variation ${i + 1}`}
-                  onClick={() => item.onZoom(v.url)}
+                  onClick={e => { e.stopPropagation(); setInternalZoomUrl(v.url) }}
                   style={{ width: 90, height: 90, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--line-2)', cursor: 'zoom-in', display: 'block' }}
                 />
                 {v.condition && (
@@ -187,46 +203,61 @@ function VariationPanel({ item, onClose }: { item: InlineImageItem; onClose: () 
 
         {/* Input de condiciones */}
         <div style={{ padding: '12px 16px' }}>
-          <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 4 }}>VARIATION INSTRUCTIONS <span style={{ color: 'var(--text-4)' }}>(optional)</span></div>
-          <textarea
-            ref={textareaRef}
-            value={condition}
-            onChange={e => setCondition(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleGenerate() }}
-            placeholder="Describe what to change — style, mood, color palette, composition…"
-            rows={3}
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              background: 'var(--bg-2)', border: '1px solid var(--line-2)',
-              borderRadius: 6, padding: '8px 10px',
-              fontSize: 12, color: 'var(--text-0)', lineHeight: 1.5,
-              resize: 'none', fontFamily: 'inherit', outline: 'none',
-            }}
-          />
-          <div style={{ fontSize: 9, color: 'var(--text-4)', marginTop: 4, fontFamily: 'var(--font-mono)' }}>⌘↵ to generate</div>
-        </div>
-
-        {/* Botones */}
-        <div style={{ padding: '0 16px 14px', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onClose} style={{ fontSize: 11, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-2)', cursor: 'pointer' }}>
-            Cancel
-          </button>
-          <button
-            onClick={handleGenerate}
-            disabled={generating}
-            style={{
-              fontSize: 11, padding: '6px 16px', borderRadius: 6,
-              border: '1px solid color-mix(in srgb, var(--action) 50%, transparent)',
-              background: generating ? 'color-mix(in srgb, var(--action) 18%, var(--bg-2))' : 'color-mix(in srgb, var(--action) 12%, var(--bg-2))',
-              color: 'var(--action)', cursor: generating ? 'not-allowed' : 'pointer', fontWeight: 600,
-              animation: generating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
-            }}
-          >
-            {generating ? 'Generating…' : 'Generate variation'}
-          </button>
+          <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 6 }}>VARIATION INSTRUCTIONS <span style={{ color: 'var(--text-4)' }}>(optional)</span></div>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <textarea
+              ref={textareaRef}
+              value={condition}
+              onChange={e => setCondition(e.target.value)}
+              placeholder="Describe what to change — style, mood, color palette, composition…"
+              rows={3}
+              style={{
+                flex: '1 1 0', resize: 'none',
+                background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+                borderRadius: 8, padding: '8px 10px',
+                fontSize: 12, color: 'var(--text-0)', lineHeight: 1.5,
+                fontFamily: 'inherit', outline: 'none',
+              }}
+              onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
+              onBlur={e => { e.currentTarget.style.borderColor = 'var(--line-2)' }}
+            />
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              style={{
+                width: 38, borderRadius: 8, border: 'none', flexShrink: 0,
+                background: generating ? 'var(--bg-3)' : 'var(--action)',
+                color: generating ? 'var(--text-4)' : 'var(--action-fg)',
+                fontSize: 18, cursor: generating ? 'not-allowed' : 'pointer',
+                transition: 'background 120ms',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                animation: generating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
+              }}
+            >
+              →
+            </button>
+          </div>
         </div>
       </div>
-    </div>,
+    </div>
+    {/* Zoom interno — sibling del backdrop para no burbujear a onClose */}
+    {internalZoomUrl && (
+      <div
+        onClick={() => setInternalZoomUrl(null)}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 30000,
+          background: 'rgba(0,0,0,0.92)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <img
+          src={internalZoomUrl}
+          onClick={e => e.stopPropagation()}
+          style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 10, display: 'block' }}
+        />
+      </div>
+    )}
+    </>,
     document.body,
   )
 }
