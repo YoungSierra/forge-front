@@ -1315,7 +1315,7 @@ export async function chatWithForgeNode(
   sessionId?:    string,
   file?:         File | null,
   attachmentUrl?: string,
-): Promise<{ reply: string; session_id: string; doc_url?: string; attachment?: ChatAttachment }> {
+): Promise<{ reply: string; session_id: string; doc_url?: string; doc_format?: string; attachment?: ChatAttachment }> {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
 
   let body: BodyInit
