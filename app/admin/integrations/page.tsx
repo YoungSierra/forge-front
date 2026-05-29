@@ -1289,7 +1289,7 @@ export default function IntegrationsPage() {
 
       {/* Tab bar */}
       <div style={{ padding: '0 20px', borderBottom: '1px solid var(--line-2)', display: 'flex', gap: 2, background: 'var(--bg-1)', flexShrink: 0 }}>
-        {([['workflows', 'ComfyUI Workflows'], ['steps', 'Step Configs']] as [Tab, string][]).map(([t, l]) => (
+        {([['workflows', 'ComfyUI Workflows']] as [Tab, string][]).map(([t, l]) => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '10px 16px', background: 'none', border: 'none',
             borderBottom: `2px solid ${tab === t ? 'var(--action)' : 'transparent'}`,
