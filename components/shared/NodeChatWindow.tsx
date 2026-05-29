@@ -38,8 +38,12 @@ export function parseOutputItems(content: string, format: string): string[] {
   const numbered = [...content.matchAll(numberedRx)].map(m => m[1].trim())
   if (numbered.length > 0) return numbered
 
-  const labeled  = [...content.matchAll(labeledRx)].map(m => m[1].trim())
-  if (labeled.length > 0) return labeled
+  // Labeled con descripción: dividir por el inicio de cada "Variation N:" y capturar el bloque completo
+  const labeledParts = content
+    .split(/(?=^[A-Za-z]+[ \t]+\d+[:.]\s)/m)
+    .map(p => p.trim())
+    .filter(p => /^[A-Za-z]+[ \t]+\d+[:.]\s/.test(p))
+  if (labeledParts.length > 0) return labeledParts.map(p => p.slice(0, 900))
 
   // Heading con número + descripción subsiguiente (captura bloque completo)
   // Cada variación = "### Variation N: título\n\ndescripción..."
@@ -177,7 +181,7 @@ function VariationPanel({ item, onClose }: { item: InlineImageItem; onClose: () 
         <div style={{ padding: '12px 16px 0' }}>
           <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 4 }}>CONCEPT</div>
           <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, background: 'var(--bg-2)', borderRadius: 6, padding: '8px 10px', border: '1px solid var(--line-2)' }}>
-            {item.text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').split('\n')[0]}
+            {item.text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1')}
           </div>
         </div>
 
