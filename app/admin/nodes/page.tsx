@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { BACKEND_URL, getAdminWorkflows, getModelsConfig } from '@/lib/api'
+import { BACKEND_URL, getAdminWorkflows, getAdminSkillConfigs, getModelsConfig } from '@/lib/api'
+import type { SkillConfig } from '@/lib/api'
 import type { ComfyUIWorkflow } from '@/lib/types'
 
 function adminFetch(path: string, options?: RequestInit) {
@@ -461,6 +462,63 @@ function CollapsibleSection({ title, summary, children }: {
   )
 }
 
+// ─── SkillSelector ───────────────────────────────────────────
+
+function SkillSelector({ values, onChange, skills }: {
+  values:   string[]
+  onChange: (v: string[]) => void
+  skills:   SkillConfig[]
+}) {
+  const available = skills.filter(s => !values.includes(s.key))
+
+  return (
+    <div>
+      {/* Tags seleccionados */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
+        {values.map(v => {
+          const meta = skills.find(s => s.key === v)
+          return (
+            <span key={v} style={{
+              fontSize: 10, fontFamily: 'var(--font-mono)', padding: '3px 8px',
+              background: 'color-mix(in srgb, var(--action) 12%, var(--bg-2))',
+              border: '1px solid color-mix(in srgb, var(--action) 30%, transparent)',
+              borderRadius: 4, color: 'var(--text-1)',
+              display: 'flex', alignItems: 'center', gap: 5,
+            }}
+              title={meta?.description ?? v}
+            >
+              {v}
+              <button type="button" onClick={() => onChange(values.filter(x => x !== v))}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 11, padding: 0 }}>
+                ×
+              </button>
+            </span>
+          )
+        })}
+        {values.length === 0 && (
+          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>No skills assigned</span>
+        )}
+      </div>
+
+      {/* Dropdown para agregar */}
+      {available.length > 0 && (
+        <select
+          style={{ ...inputSx, cursor: 'pointer' }}
+          value=""
+          onChange={e => { if (e.target.value) onChange([...values, e.target.value]) }}
+        >
+          <option value="">+ Add skill…</option>
+          {available.map(s => (
+            <option key={s.key} value={s.key}>
+              {s.key}{s.description ? ` — ${s.description}` : ''}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  )
+}
+
 // ─── Formulario de nodo ───────────────────────────────────────
 
 const EMPTY_NODE: Partial<ForgeNode> = {
@@ -470,12 +528,13 @@ const EMPTY_NODE: Partial<ForgeNode> = {
   executor: null,
 }
 
-function NodeForm({ node, onSave, onCancel, workflows, availableProviders }: {
+function NodeForm({ node, onSave, onCancel, workflows, availableProviders, skillCatalog }: {
   node:               Partial<ForgeNode>
   onSave:             (data: Partial<ForgeNode>) => Promise<void>
   onCancel:           () => void
   workflows:          ComfyUIWorkflow[]
   availableProviders: Record<string, boolean>
+  skillCatalog:       SkillConfig[]
 }) {
   const [form, setForm] = useState<Partial<ForgeNode>>({ ...node, inputs: normalizeInputs(node.inputs) })
   const [saving, setSaving] = useState(false)
@@ -573,7 +632,7 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders }: {
           content: (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>{label('tools')}<TagInput values={form.tools || []} onChange={v => set('tools', v)} placeholder="web_search" /></div>
-              <div>{label('skills')}<TagInput values={form.skills || []} onChange={v => set('skills', v)} placeholder="game_concept_generation" /></div>
+              <div>{label('skills')}<SkillSelector values={form.skills || []} onChange={v => set('skills', v)} skills={skillCatalog} /></div>
             </div>
           ),
         },
@@ -729,12 +788,14 @@ export default function AdminNodesPage() {
   const [error,     setError]     = useState('')
   const [workflows,           setWorkflows]           = useState<ComfyUIWorkflow[]>([])
   const [availableProviders,  setAvailableProviders]  = useState<Record<string, boolean>>({})
+  const [skillCatalog,        setSkillCatalog]        = useState<SkillConfig[]>([])
 
   useEffect(() => {
-    Promise.all([getAdminWorkflows(), getModelsConfig()])
-      .then(([wfs, cfg]) => {
+    Promise.all([getAdminWorkflows(), getModelsConfig(), getAdminSkillConfigs()])
+      .then(([wfs, cfg, skills]) => {
         setWorkflows(wfs)
         setAvailableProviders(cfg.available_providers)
+        setSkillCatalog(skills)
       })
       .catch(() => {})
   }, [])
@@ -915,6 +976,7 @@ export default function AdminNodesPage() {
               onCancel={handleCancel}
               workflows={workflows}
               availableProviders={availableProviders}
+              skillCatalog={skillCatalog}
             />
           </>
         ) : (
