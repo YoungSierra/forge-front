@@ -61,6 +61,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           { href: '/admin/skills',       label: 'Skills'       },
           { href: '/admin/prompts',      label: 'Prompts'      },
           { href: '/admin/feedback',     label: 'Feedback'     },
+          { href: '/admin/analytics',    label: 'Analytics'    },
         ].map(({ href, label }) => {
           const active = pathname === href
           return (

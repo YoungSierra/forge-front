@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import type { Node } from '@xyflow/react'
 import type { Project, ProjectMember } from '@/lib/types'
@@ -10,7 +10,7 @@ import ReviewBadge from '@/components/layout/ReviewBadge'
 import MembersModal from '@/components/projects/MembersModal'
 import PipelineSuggestionModal from './PipelineSuggestionModal'
 import { useAuth } from '@/lib/auth-context'
-import { getProjectMembers } from '@/lib/api'
+import { getProjectMembers, BACKEND_URL } from '@/lib/api'
 import { useTheme } from '@/lib/theme'
 
 type PipelinePhase = 'idle' | 'running' | 'error'
@@ -115,8 +115,160 @@ function MembersButton({ project, currentMemberId }: { project: Project; current
   )
 }
 
+// ─── CostChip — chip de costo total del proyecto con dropdown de desglose ─────
+
+function adminFetch(path: string) {
+  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+  return fetch(`${BACKEND_URL}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...(memberId ? { 'x-member-id': memberId } : {}) },
+  })
+}
+
+function fmtCost(v: number) {
+  if (v === 0)   return '$0.00'
+  if (v >= 1)    return `$${v.toFixed(2)}`
+  if (v >= 0.01) return `$${v.toFixed(4)}`
+  return `$${v.toFixed(5)}`
+}
+
+interface ProviderRow { key: string; label: string; calls: number; cost_usd: number }
+interface CostSummary { total_cost: number; total_calls: number; llm_calls: number; image_calls: number }
+
+function CostChip({ projectId }: { projectId: string }) {
+  const [open,      setOpen]      = useState(false)
+  const [summary,   setSummary]   = useState<CostSummary | null>(null)
+  const [providers, setProviders] = useState<ProviderRow[]>([])
+  const [loaded,    setLoaded]    = useState(false)
+  const [dots,      setDots]      = useState('·')
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Cicla · → ·· → ··· mientras no está cargado
+  useEffect(() => {
+    if (loaded) return
+    const id = setInterval(() => setDots(d => d.length >= 3 ? '·' : d + '·'), 400)
+    return () => clearInterval(id)
+  }, [loaded])
+
+  // Fetch del chip — reutilizable para mount, open y polling
+  const fetchChip = useCallback(() => {
+    adminFetch(`/api/admin/analytics/project-chip/${projectId}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) {
+          setSummary({ total_cost: d.total_cost, total_calls: d.total_calls, llm_calls: d.llm_calls, image_calls: d.image_calls })
+          setProviders(d.providers || [])
+        }
+        setLoaded(true)
+      })
+      .catch(() => setLoaded(true))
+  }, [projectId])
+
+  // Fetch eager al montar
+  useEffect(() => { fetchChip() }, [fetchChip])
+
+  // Polling cada 30s para reflejar nuevas generaciones sin recargar
+  useEffect(() => {
+    const id = setInterval(fetchChip, 30_000)
+    return () => clearInterval(id)
+  }, [fetchChip])
+
+  // Cerrar al hacer click fuera
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as globalThis.Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const totalCost = summary?.total_cost ?? 0
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => { setOpen(o => !o); fetchChip() }}
+        title="Project execution cost"
+        style={{
+          fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+          padding: '3px 9px', borderRadius: 6,
+          border: '1px solid var(--line-2)',
+          background: open ? 'var(--bg-3)' : 'var(--bg-2)',
+          color: totalCost > 0 ? 'var(--action)' : 'var(--text-4)',
+          cursor: 'pointer', transition: 'all 120ms',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--line)')}
+        onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--line-2)')}
+      >
+        {loaded ? fmtCost(totalCost) : dots}
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 8px)', right: 0,
+          width: 280, background: 'var(--bg-1)',
+          border: '1px solid var(--line-2)', borderRadius: 10,
+          boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
+          zIndex: 5000, overflow: 'hidden',
+        }}>
+          {/* Header */}
+          <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', letterSpacing: '0.06em', marginBottom: 4 }}>TOTAL COST</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-0)', fontFamily: 'var(--font-mono)' }}>{fmtCost(totalCost)}</div>
+            </div>
+            {summary && (
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-3)' }}>{summary.total_calls} calls</div>
+                <div style={{ fontSize: 10, color: 'var(--text-4)' }}>{summary.llm_calls} LLM · {summary.image_calls} img</div>
+              </div>
+            )}
+          </div>
+
+          {/* Desglose por provider */}
+          {providers.length > 0 && (
+            <div style={{ padding: '8px 0' }}>
+              {providers.map(p => (
+                <div key={p.key} style={{ display: 'flex', alignItems: 'center', padding: '5px 14px', gap: 8 }}>
+                  <span style={{ flex: 1, fontSize: 11, color: 'var(--text-1)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.label}
+                  </span>
+                  <span style={{ fontSize: 10, color: 'var(--text-3)', flexShrink: 0 }}>{p.calls}×</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--action)', fontFamily: 'var(--font-mono)', flexShrink: 0, minWidth: 52, textAlign: 'right' }}>
+                    {fmtCost(p.cost_usd)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!loaded && (
+            <div style={{ padding: '16px', textAlign: 'center', fontSize: 10, color: 'var(--text-4)', fontFamily: 'var(--font-mono)' }}>Loading…</div>
+          )}
+
+          {loaded && providers.length === 0 && (
+            <div style={{ padding: '16px', textAlign: 'center', fontSize: 10, color: 'var(--text-4)', fontFamily: 'var(--font-mono)' }}>No executions yet</div>
+          )}
+
+          {/* Footer — link a analytics completo */}
+          <div style={{ borderTop: '1px solid var(--line-2)', padding: '8px 14px' }}>
+            <Link
+              href={`/admin/analytics?project_id=${projectId}`}
+              style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textDecoration: 'none', transition: 'color 100ms' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-0)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-3)')}
+            >
+              View full analytics →
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, runProgress, nodes = [], approvedCount: approvedCountProp, totalCount: totalCountProp }: Props) {
-  const { user } = useAuth()
+  const { user, member } = useAuth()
   const { theme, toggle: toggleTheme } = useTheme()
   const [currentMemberId,       setCurrentMemberId]       = useState<string | null>(null)
   const [showPipelineModal,     setShowPipelineModal]     = useState(false)
@@ -195,6 +347,11 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>
           {approvedCount}/{totalCount} approved
         </span>
+      )}
+
+      {/* Chip de costo — solo admins */}
+      {hasProject && member?.role === 'admin' && (
+        <CostChip projectId={project.id} />
       )}
 
       <div className="tb-divider" />
