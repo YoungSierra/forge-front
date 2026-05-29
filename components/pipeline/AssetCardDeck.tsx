@@ -116,24 +116,24 @@ export default function AssetCardDeck({
         })
         const data = await res.json()
 
-        if (!data.success || !data.asset) {
+        if (!data.success) {
           if (!cancelled) { CACHE.set(key, []); setDeck({ status: 'empty' }) }
           return
         }
 
-        const { format, content, storage_url, name } = data.asset
+        // Cards de texto del asset aprobado
         let textCards: DeckCard[] = []
-
-        if (content && ['markdown', 'markdown_table', 'structured', 'single_sentence', 'docx', 'pptx'].includes(format)) {
-          textCards = splitMarkdown(content)
-        } else if (storage_url && format === 'png') {
-          // Solo crear ImageCard si realmente es una imagen
-          textCards = [{ kind: 'image', label: name ?? 'Asset', url: storage_url }]
+        if (data.asset) {
+          const { format, content, storage_url, name } = data.asset
+          if (content && ['markdown', 'markdown_table', 'structured', 'single_sentence', 'docx', 'pptx'].includes(format)) {
+            textCards = splitMarkdown(content)
+          } else if (storage_url && format === 'png') {
+            textCards = [{ kind: 'image', label: name ?? 'Asset', url: storage_url }]
+          }
         }
-        // docx/pptx con storage_url no tienen preview — se omiten
 
-        // Imágenes PNG primero para que aparezcan en el abanico antes que las secciones de texto
-        const imageCards: DeckCard[] = (data.image_assets ?? [])
+        // Cards de imágenes aprobadas (forge_assets)
+        const assetImageCards: DeckCard[] = (data.image_assets ?? [])
           .filter((img: { storage_url?: string }) => img.storage_url)
           .map((img: { name?: string; storage_url: string }) => ({
             kind:  'image' as const,
@@ -141,7 +141,29 @@ export default function AssetCardDeck({
             url:   img.storage_url,
           }))
 
-        const cards = [...imageCards, ...textCards]
+        // Cards de variaciones generadas por ítem (última variación de cada ítem)
+        const outputImages: Record<string, Array<{ index: number; variations?: Array<{ url: string }> }>> =
+          data.session?.output_images ?? {}
+        const outputImageCards: DeckCard[] = []
+        for (const [outputKey, items] of Object.entries(outputImages)) {
+          for (const item of items) {
+            const lastVar = item.variations?.at(-1)
+            if (lastVar?.url) {
+              outputImageCards.push({
+                kind:  'image' as const,
+                label: `${outputKey} #${item.index + 1}`,
+                url:   lastVar.url,
+              })
+            }
+          }
+        }
+
+        // Deduplicar: si una URL ya está en outputImageCards, omitirla de assetImageCards
+        const outputUrls = new Set(outputImageCards.map(c => (c as ImageCard).url))
+        const uniqueAssetCards = assetImageCards.filter(c => !outputUrls.has((c as ImageCard).url))
+
+        // Imágenes generadas primero, luego assets únicos, luego texto para llenar los slots
+        const cards: DeckCard[] = [...outputImageCards, ...uniqueAssetCards, ...textCards]
 
         if (!cancelled) {
           CACHE.set(key, cards)

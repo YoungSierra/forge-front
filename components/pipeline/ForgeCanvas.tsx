@@ -2440,7 +2440,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             locked:    lockedNodeIds.has(cn.project_node_id),
             projectId: project.id,
             onImagesUpdate: (imgs: OutputImagesMap) => {
-              // Sincronizar chat modal cuando se genera imagen desde el output modal
+              // Invalidar caché del deck para que muestre las nuevas variaciones
+              invalidateAssetDeckCache(project.id, cn.node?.id ?? '')
               setChatOutputImages(imgs)
               setCanvasData(prev => prev ? {
                 ...prev,
