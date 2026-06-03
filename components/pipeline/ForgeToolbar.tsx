@@ -334,21 +334,7 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
         </button>
       )}
 
-      {/* Botón Run All — solo cuando hay nodos runnables y no está corriendo */}
-      {hasProject && onRunPipeline && phase !== 'running' && (() => {
-        const count = runnableCount ?? idleCount
-        if (count <= 0) return null
-        return (
-          <button
-            className="tb-btn"
-            onClick={onRunPipeline}
-            title={`Auto-run ${count} node${count !== 1 ? 's' : ''}`}
-            style={{ color: 'var(--action)', borderColor: 'color-mix(in oklch, var(--action) 35%, transparent)' }}
-          >
-            ▶ Run {count}
-          </button>
-        )
-      })()}
+      {/* Botón Run All — oculto temporalmente */}
 
       <div className="tb-spacer" />
 
