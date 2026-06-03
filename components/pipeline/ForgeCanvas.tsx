@@ -13,13 +13,15 @@ import {
 import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
-import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage } from '@/lib/api'
+import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, autoRunNode } from '@/lib/api'
+import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import NodeChatWindow, { parseOutputItems, buildImageGenComponents, ImageThumbnailRow } from '@/components/shared/NodeChatWindow'
 import type { ImageOutputDef, InlineImageItem } from '@/components/shared/NodeChatWindow'
 import AssetCardDeck, { invalidateAssetDeckCache } from './AssetCardDeck'
 import ForgeToolbar from './ForgeToolbar'
+import ExportModal from '@/components/shared/ExportModal'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
@@ -27,9 +29,10 @@ import { MD_COMPONENTS } from '@/lib/md-components'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ForgeSession {
+  has_content?: boolean
   id: string
   node_id: string
-  status: 'active' | 'approved' | 'rejected' | 'abandoned'
+  status: 'active' | 'approved' | 'auto_approved' | 'rejected' | 'abandoned'
   iteration_count: number
   started_at: string | null
   completed_at: string | null
@@ -51,6 +54,7 @@ interface CanvasNode {
   node_type: 'forge_node' | 'library_asset' | 'text_input'
   text_label:   string | null
   text_content: string | null
+  is_stale:     boolean
   node: {
     id: string
     node_key: string
@@ -106,6 +110,9 @@ interface ForgeNodeCardData extends Record<string, unknown> {
   onClick:         () => void
   locked:          boolean
   projectId:       string
+  isRunning?:      boolean
+  isStale?:        boolean
+  isError?:        boolean
   onImagesUpdate?: (imgs: OutputImagesMap) => void
 }
 
@@ -133,10 +140,11 @@ const TEXT_NODE_W   = 200
 const TEXT_NODE_CLR = ASSET_NODE_CLR
 
 const SESSION_COLOR: Record<string, string> = {
-  active:    '#A78BFA',
-  approved:  '#34D399',
-  rejected:  '#EF4444',
-  abandoned: '#FBBF24',
+  active:       '#A78BFA',
+  approved:     '#34D399',
+  auto_approved:'#86EFAC',
+  rejected:     '#EF4444',
+  abandoned:    '#FBBF24',
 }
 
 const EXECUTOR_LABEL: Record<string, string> = {
@@ -152,8 +160,9 @@ const PHASE_COLOR: Record<string, string> = {
   production: '#FBBF24',
 }
 
-const PULSE_KF = `@keyframes canvas-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`
-const SPIN_KF  = `@keyframes canvas-spin  { to { transform: rotate(360deg); } }`
+const PULSE_KF      = `@keyframes canvas-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`
+const SPIN_KF       = `@keyframes canvas-spin  { to { transform: rotate(360deg); } }`
+const ACTION_PULSE_KF = `@keyframes action-border-pulse { 0%,100%{opacity:1;box-shadow:0 0 8px rgba(255,138,61,0.5)} 50%{opacity:0.35;box-shadow:0 0 3px rgba(255,138,61,0.2)} }`
 
 // ─── Request helper ───────────────────────────────────────────────────────────
 
@@ -1180,16 +1189,22 @@ function extractSection(content: string, sectionName: string, otherKeys: string[
 // ─── ForgeNodeCard ────────────────────────────────────────────────────────────
 
 const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeNodeCardData }) {
-  const { canvasNode, onClick, locked, projectId, onImagesUpdate } = data
+  const { canvasNode, onClick, locked, projectId, onImagesUpdate, isRunning, isStale, isError } = data
   const { node, session } = canvasNode
   if (!node) return null
   const status      = session?.status ?? null
-  const statusColor = locked ? null : (status ? (SESSION_COLOR[status] ?? null) : null)
+  const statusColor = locked ? null : isError ? '#EF4444' : isRunning ? '#60A5FA' : (status ? (SESSION_COLOR[status] ?? null) : null)
   const phaseColor  = locked ? '#6B7280' : (PHASE_COLOR[node.phase] ?? '#6B7280')
 
   // Borde y glow reactivos al estado de sesión
-  const borderColor = locked ? 'var(--line-2)' : (statusColor ?? 'var(--line-2)')
-  const glowShadow  = !locked && status === 'active'
+  const borderColor = isStale  ? '#F59E0B'
+                    : isError  ? '#EF4444'
+                    : isRunning? 'transparent'
+                    : locked   ? 'var(--line-2)'
+                    : (statusColor ?? 'var(--line-2)')
+  const glowShadow  = isRunning
+    ? 'none'
+    : !locked && status === 'active'
     ? `0 0 0 1px ${statusColor}, 0 0 18px ${statusColor}55, 0 4px 24px rgba(0,0,0,0.28)`
     : `0 4px 20px rgba(0,0,0,0.24)`
 
@@ -1197,7 +1212,8 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const cardRef    = useRef<HTMLDivElement>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [deckAnchor, setDeckAnchor] = useState<{ x: number; y: number } | null>(null)
-  const isApproved   = status === 'approved'
+  // Mostrar deck cuando hay contenido disponible (aprobado, auto-aprobado, o active con output)
+  const isApproved   = !!session?.has_content
   const [outputOpen, setOutputOpen] = useState(false)
   const [generatedPdfUrl, setGeneratedPdfUrl] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
@@ -1241,10 +1257,48 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   return (
     <div style={{ position: 'relative' }} ref={cardRef}>
       {status === 'active' && <style>{PULSE_KF}</style>}
+      {isRunning && <style>{ACTION_PULSE_KF + SPIN_KF}</style>}
+
+      {/* Borde naranja pulsante — overlay para no conflictuar con estilos inline */}
+      {isRunning && (
+        <div style={{
+          position: 'absolute', inset: 0, borderRadius: 8, pointerEvents: 'none', zIndex: 5,
+          border: '2px solid rgba(255,138,61,1)',
+          animation: 'action-border-pulse 1s ease-in-out infinite',
+        }} />
+      )}
+
+      {/* Spinner ↻ — esquina superior derecha */}
+      {isRunning && (
+        <div style={{
+          position: 'absolute', top: -11, right: -11, zIndex: 10,
+          width: 22, height: 22, borderRadius: '50%',
+          background: 'rgba(255,138,61,1)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 13, color: '#fff', fontWeight: 700,
+          border: '2px solid var(--bg-1)',
+          animation: 'canvas-spin 1s linear infinite',
+          lineHeight: 1,
+        }}>↻</div>
+      )}
+
+      {/* Badge de stale / error */}
+      {!isRunning && (isStale || isError) && (
+        <div style={{
+          position: 'absolute', top: -8, right: -8, zIndex: 10,
+          width: 18, height: 18, borderRadius: '50%',
+          background: isError ? '#EF4444' : '#F59E0B',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 9, border: '2px solid var(--bg-1)',
+        }}>
+          {isError ? '✕' : '⚠'}
+        </div>
+      )}
 
       <div
         onClick={onClick}
         style={{
+          position: 'relative',
           width: NODE_W,
           background: 'var(--bg-1)',
           border: `1px solid ${borderColor}`,
@@ -1252,7 +1306,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
           boxShadow: glowShadow,
           cursor: 'pointer',
           transition: 'box-shadow 200ms ease, border-color 200ms ease',
-          animation: status === 'active' ? 'canvas-pulse 2s ease-in-out infinite' : 'none',
+          animation: status === 'active' && !isRunning ? 'canvas-pulse 2s ease-in-out infinite' : 'none',
         }}
         onMouseEnter={e => {
           const hoverBorder = statusColor ?? 'var(--action)'
@@ -2219,7 +2273,13 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [chatDocUrl,        setChatDocUrl]        = useState<string | null>(null)
   const [chatDocFormat,     setChatDocFormat]     = useState<string | null>(null)
   const [chatOutputImages,  setChatOutputImages]  = useState<OutputImagesMap>({})
+  const [chatApprovedAsset, setChatApprovedAsset] = useState<ApprovedAsset | null>(null)
   const [collapsedAssets,   setCollapsedAssets]   = useState<Set<string>>(new Set())
+  const [runPhase,          setRunPhase]          = useState<'idle' | 'running' | 'error'>('idle')
+  const [runProgress,       setRunProgress]       = useState<{ done: number; total: number } | null>(null)
+  const [runningNodeIds,    setRunningNodeIds]     = useState<Set<string>>(new Set())
+  const [runErrorNodeId,    setRunErrorNodeId]     = useState<string | null>(null)
+  const [runErrors,         setRunErrors]          = useState<import('@/lib/api').RunValidateError[]>([])
 
   // Expone ancho del sidebar como CSS var para que FeedbackWidget calcule su posición
   useEffect(() => {
@@ -2266,12 +2326,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     })
   }, [])
 
-  const loadCanvas = useCallback(async (silent = false) => {
+  const loadCanvas = useCallback(async (silent = false): Promise<CanvasData | null> => {
     if (!silent) setLoading(true)
     try {
       const data = await canvasFetch<CanvasData>(`/api/projects/${project.id}/canvas`)
-      // En el primer load siempre aplicar el layout de DB (fuente de verdad cross-device).
-      // En reloads silenciosos posteriores preservar las posiciones del usuario en esta sesión.
       if (data.canvas_layout && !dbLayoutAppliedRef.current) {
         dbLayoutAppliedRef.current = true
         const dbLayout = data.canvas_layout as Parameters<typeof seedLayoutFromDB>[1]
@@ -2279,8 +2337,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         setSavedLayout(dbLayout)
       }
       setCanvasData(data)
+      return data
     } catch (e) {
       console.error('[forge-canvas] load failed', e)
+      return null
     } finally {
       if (!silent) setLoading(false)
     }
@@ -2316,6 +2376,31 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     [canvasData],
   )
 
+  // Set de project_node_ids con output válido — para activar FORGYI en edges salientes
+  const approvedProjectNodeIds = useMemo(
+    () => new Set((canvasData?.nodes ?? [])
+      .filter(cn => cn.session?.status === 'approved' || cn.session?.status === 'auto_approved')
+      .map(cn => cn.project_node_id)
+    ),
+    [canvasData],
+  )
+
+  // Nodos que el Run All puede correr:
+  // - sin sesión (idle)
+  // - sesión active (no corrió o está en progreso manual)
+  // - auto_approved + is_stale (output desactualizado)
+  // Excluye: approved (sellado) y auto_approved sin stale (ya tiene draft)
+  const runnableCount = useMemo(
+    () => (canvasData?.nodes ?? []).filter(cn => {
+      if (cn.node_type !== 'forge_node') return false
+      const s = cn.session?.status
+      if (s === 'approved') return false
+      if (s === 'auto_approved' && !cn.is_stale) return false
+      return true
+    }).length,
+    [canvasData],
+  )
+
 
   // Nodos bloqueados: secuencial — si el nodo i-1 no está aprobado, todos los siguientes están locked
   const lockedNodeIds = useMemo(() => {
@@ -2325,7 +2410,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
     const locked = new Set<string>()
     for (let i = 1; i < sorted.length; i++) {
-      if (sorted[i - 1].session?.status !== 'approved') {
+      const prevStatus = sorted[i - 1].session?.status
+      const prevDone   = prevStatus === 'approved' || prevStatus === 'auto_approved'
+      if (!prevDone) {
         for (let j = i; j < sorted.length; j++) locked.add(sorted[j].project_node_id)
         break
       }
@@ -2341,7 +2428,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     if (bpNodes.length === 0) return false
     // Todos los forge_nodes en canvas deben estar aprobados (incluyendo los re-agregados sin blueprint_id)
     const allForgeNodes = canvasData!.nodes.filter(n => n.node_type === 'forge_node')
-    return allForgeNodes.every(n => n.session?.status === 'approved')
+    return allForgeNodes.every(n => n.session?.status === 'approved' || n.session?.status === 'auto_approved')
   }, [canvasData])
 
   const [gateLoading,   setGateLoading]   = useState(false)
@@ -2438,6 +2525,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               setSelectedNode(cn)
             },
             locked:    lockedNodeIds.has(cn.project_node_id),
+            isRunning: false,
+            isStale:   cn.is_stale,
+            isError:   false,
             projectId: project.id,
             onImagesUpdate: (imgs: OutputImagesMap) => {
               // Invalidar caché del deck para que muestre las nuevas variaciones
@@ -2462,7 +2552,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   // Edges vienen de DB (canvasData); localStorage solo como caché de arranque rápido
   const initEdges = useMemo(() => savedLayout?.edges ?? [], [savedLayout])
 
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+  const [selectedEdgeId,   setSelectedEdgeId]   = useState<string | null>(null)
+  const [showExportModal,  setShowExportModal]   = useState(false)
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initEdges)
@@ -2482,6 +2573,18 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     onEdgesChange(changes.filter(c => c.type !== 'select'))
   }, [onEdgesChange])
 
+  // Actualizar badges de running/stale/error sin recargar canvas
+  useEffect(() => {
+    if (!canvasData) return
+    setNodes(prev => prev.map(n => {
+      const d = n.data as ForgeNodeCardData
+      if (!d.canvasNode) return n
+      const id = d.canvasNode.project_node_id
+      return { ...n, data: { ...d, isRunning: runningNodeIds.has(id), isStale: d.canvasNode.is_stale && !runningNodeIds.has(id), isError: runErrorNodeId === id } }
+    }))
+  }, [runningNodeIds, runErrorNodeId, canvasData])
+
+
   useEffect(() => {
     if (!canvasData) return
     const newNodes = buildNodes(canvasData.nodes)
@@ -2492,7 +2595,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     pendingPositionsRef.current = {}
     const validIds = new Set(newNodes.map(n => n.id))
 
-    // Reconstruir edges desde DB, filtrando los que apunten a nodos eliminados
+    // Reconstruir edges desde DB
     const dbEdges: Edge[] = (canvasData.edges ?? [])
       .filter(e => validIds.has(e.source) && validIds.has(e.target))
       .map(e => ({
@@ -2563,7 +2666,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         .filter(cn =>
           cn.node_type === 'library_asset' ||
           cn.node_type === 'text_input'    ||
-          (cn.node_type === 'forge_node' && cn.session?.status === 'approved')
+          (cn.node_type === 'forge_node' && (cn.session?.status === 'approved' || cn.session?.status === 'auto_approved'))
         )
         .map(cn => cn.project_node_id)
     )
@@ -2721,15 +2824,153 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     }
   }
 
+  // Topological sort: devuelve tiers de project_node_ids en orden de ejecución
+  function topoTiers(nodes: CanvasNode[], edges: DbEdge[]): string[][] {
+    const forgeNodes = nodes.filter(n => n.node_type === 'forge_node')
+    const ids        = new Set(forgeNodes.map(n => n.project_node_id))
+    const inDegree:  Record<string, number>   = {}
+    const children:  Record<string, string[]> = {}
+
+    for (const n of forgeNodes) {
+      inDegree[n.project_node_id]  = 0
+      children[n.project_node_id]  = []
+    }
+
+    for (const e of edges) {
+      if (ids.has(e.source) && ids.has(e.target)) {
+        inDegree[e.target]++
+        children[e.source].push(e.target)
+      }
+    }
+
+    const tiers: string[][] = []
+    let remaining = new Set(Object.keys(inDegree))
+
+    while (remaining.size > 0) {
+      const tier = [...remaining].filter(id => inDegree[id] === 0)
+      if (!tier.length) break  // ciclo — no debería ocurrir
+      tiers.push(tier)
+      for (const id of tier) {
+        remaining.delete(id)
+        for (const child of children[id]) inDegree[child]--
+      }
+    }
+
+    return tiers
+  }
+
+  async function handleRunAll() {
+    if (!canvasData) return
+    const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') ?? undefined : undefined
+
+    // Validar inputs
+    const validation = await runValidate(project.id)
+    if (!validation.valid) {
+      setRunErrors(validation.errors)
+      setRunPhase('error')
+      return
+    }
+
+    const nodes = canvasData.nodes
+    const edges = canvasData.edges as DbEdge[]
+
+    // Determinar qué nodos correr — misma lógica que runnableCount
+    const runnable = new Set(
+      nodes
+        .filter(n => n.node_type === 'forge_node')
+        .filter(n => {
+          const s = n.session?.status
+          if (s === 'approved') return false
+          if (s === 'auto_approved' && !n.is_stale) return false
+          return true
+        })
+        .map(n => n.project_node_id)
+    )
+
+    const tiers = topoTiers(nodes, edges).map(tier => tier.filter(id => runnable.has(id))).filter(t => t.length > 0)
+    const total = tiers.flat().length
+
+    if (total === 0) return
+
+    setRunPhase('running')
+    setRunProgress({ done: 0, total })
+    setRunErrors([])
+    setRunErrorNodeId(null)
+
+    let done = 0
+
+    for (const tier of tiers) {
+      setRunningNodeIds(new Set(tier))
+
+      const results = await Promise.allSettled(
+        tier.map(projectNodeId => autoRunNode(project.id, projectNodeId, memberId))
+      )
+
+      setRunningNodeIds(new Set())
+
+      // Marcar nodos completados como auto_approved en el estado local — inmediato
+      const succeeded = results
+        .map((r, i) => ({ r, id: tier[i] }))
+        .filter(({ r }) => r.status === 'fulfilled')
+        .map(({ id }) => id)
+
+      if (succeeded.length > 0) {
+        setCanvasData(prev => prev ? {
+          ...prev,
+          nodes: prev.nodes.map(n => {
+            if (!succeeded.includes(n.project_node_id)) return n
+            return {
+              ...n,
+              is_stale: false,
+              session: n.session
+                ? { ...n.session, status: 'auto_approved' as const, has_content: true }
+                : { id: '', status: 'auto_approved' as const, node_id: n.node?.id ?? '', iteration_count: 1, started_at: null, completed_at: null, output_asset_id: null, output_images: null, output_asset: null, has_content: true },
+            }
+          }),
+        } : null)
+
+      }
+
+      const failed = results
+        .map((r, i) => ({ r, id: tier[i] }))
+        .filter(({ r }) => r.status === 'rejected')
+
+      if (failed.length > 0) {
+        const errorId = failed[0].id
+        const reason  = (failed[0].r as PromiseRejectedResult).reason?.message ?? 'Unknown error'
+        setRunErrorNodeId(errorId)
+        const failedNode = canvasData?.nodes.find(n => n.project_node_id === errorId)
+        setRunErrors([{
+          projectNodeId: errorId,
+          nodeTitle:     failedNode?.node?.title ?? errorId,
+          nodeKey:       failedNode?.node?.node_key ?? '',
+          reason,
+          type:          'empty_source',
+        }])
+        setRunPhase('error')
+        await loadCanvas(true)
+        return
+      }
+
+      done += tier.length
+      setRunProgress({ done, total })
+    }
+
+    setRunPhase('idle')
+    setRunProgress(null)
+    await loadCanvas(true)
+  }
+
   // Abre el chat cargando la sesión persistida del nodo; cierra el panel para evitar superposición
   async function handleRunNode(node: CanvasNode) {
     setSelectedNode(null)
     setChatLoading(true)
     try {
-      const { session, messages } = await getNodeSession(project.id, node.node!.id)
+      const { session, messages, asset } = await getNodeSession(project.id, node.node!.id)
       setChatSessionId(session?.id ?? null)
       setChatMessages(messages)
       setChatOutputImages((session?.output_images as OutputImagesMap) ?? {})
+      setChatApprovedAsset(asset ?? null)
     } catch {
       setChatSessionId(null)
       setChatMessages([])
@@ -2759,10 +3000,14 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     <>
     <ForgeToolbar
       project={project}
-      phase="idle"
+      phase={runPhase}
       onRefresh={onRefresh}
+      onRunPipeline={runPhase === 'idle' ? handleRunAll : undefined}
+      onExport={() => setShowExportModal(true)}
+      runProgress={runProgress ?? undefined}
       approvedCount={approvedNodeIds.size}
       totalCount={canvasNodeIds.size}
+      runnableCount={runnableCount}
     />
     <div style={{ flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       {/* Sidebar izquierdo — catálogo de nodos */}
@@ -2895,6 +3140,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             setChatDocUrl(null)
             setChatDocFormat(null)
             setChatOutputImages({})
+            setChatApprovedAsset(null)
             // Recargar canvas para obtener output_asset actualizado
             loadCanvas(true)
           }}
@@ -2925,7 +3171,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             } : null)
             return r
           } : undefined}
-          onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); setChatDocUrl(null); setChatDocFormat(null); setChatOutputImages({}) }}
+          approvedAsset={chatApprovedAsset ?? undefined}
+          onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); setChatDocUrl(null); setChatDocFormat(null); setChatOutputImages({}); setChatApprovedAsset(null) }}
         />
         )
       })()}
@@ -2978,6 +3225,63 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           >
             Reopen gate ↩
           </button>
+        </div>
+      )}
+
+      {/* ── Banner de error Run All ── */}
+      {runPhase === 'error' && runErrors.length > 0 && (
+        <div style={{
+          position: 'fixed', top: 120, left: '50%', transform: 'translateX(-50%)', zIndex: 9000,
+          maxWidth: 500, width: 'max-content',
+          display: 'flex', flexDirection: 'column', gap: 6,
+          padding: '10px 14px',
+          background: 'color-mix(in srgb, #EF4444 10%, var(--bg-1))',
+          border: '1px solid color-mix(in srgb, #EF4444 40%, transparent)',
+          borderRadius: 8, boxShadow: '0 4px 20px rgba(239,68,68,0.2)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: '#EF4444', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, flex: 1 }}>
+              Run All blocked
+            </span>
+            <button
+              onClick={() => { setRunPhase('idle'); setRunErrors([]) }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 12, padding: 0 }}
+            >✕</button>
+          </div>
+          {runErrors.map((e, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8,
+              background: 'color-mix(in srgb, #EF4444 6%, var(--bg-2))',
+              border: '1px solid color-mix(in srgb, #EF4444 20%, transparent)',
+              borderRadius: 5, padding: '6px 10px',
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-1)', fontWeight: 600 }}>
+                  {e.nodeTitle}
+                </div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#EF4444', marginTop: 2 }}>
+                  {e.reason}
+                </div>
+              </div>
+              {e.type === 'unreviewed_session' && (() => {
+                const cn = canvasData?.nodes.find(n => n.project_node_id === e.projectNodeId)
+                if (!cn) return null
+                return (
+                  <button
+                    onClick={() => { setRunPhase('idle'); setRunErrors([]); handleRunNode(cn) }}
+                    style={{
+                      background: 'color-mix(in srgb, #EF4444 15%, var(--bg-2))',
+                      border: '1px solid color-mix(in srgb, #EF4444 35%, transparent)',
+                      borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
+                      fontFamily: 'var(--font-mono)', fontSize: 9, color: '#EF4444',
+                      fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0,
+                    }}
+                  >
+                    Open node →
+                  </button>
+                )
+              })()}
+            </div>
+          ))}
         </div>
       )}
 
@@ -3082,6 +3386,14 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           </div>
         </div>
       )}
+
+    {showExportModal && (
+      <ExportModal
+        project={project}
+        onClose={() => setShowExportModal(false)}
+        onRepoSaved={onRefresh}
+      />
+    )}
     </div>
     </>
   )

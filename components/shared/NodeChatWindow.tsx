@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { chatWithNode } from '@/lib/api'
-import type { ChatMessage, ChatAttachment, OutputImageItem, OutputImagesMap } from '@/lib/api'
+import type { ChatMessage, ChatAttachment, ChatToolCall, ApprovedAsset, OutputImageItem, OutputImagesMap } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import AttachmentCard from './AttachmentCard'
@@ -476,6 +476,58 @@ export function buildImageGenComponents(imageItems: InlineImageItem[]) {
   /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
+// ─── Tool call chips ──────────────────────────────────────────────────────────
+
+const TOOL_ICONS: Record<string, string> = {
+  web_search:   '⌕',
+  web_fetch:    '⌕',
+  doc_gen_docx: '⬡',
+  doc_gen_pptx: '⬡',
+  kb_read:      '⎘',
+}
+
+function ToolCallChips({ calls }: { calls: ChatToolCall[] }) {
+  const [open, setOpen] = React.useState(false)
+  if (!calls.length) return null
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 34, marginBottom: 4 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          background: 'none', border: '1px solid var(--line-2)',
+          borderRadius: 5, padding: '2px 8px',
+          color: 'var(--text-3)', fontSize: 10, fontFamily: 'var(--font-mono)',
+          cursor: 'pointer', width: 'fit-content', letterSpacing: '.02em',
+        }}
+      >
+        <span style={{ fontSize: 9, opacity: 0.7 }}>{open ? '▾' : '▸'}</span>
+        {calls.length} tool{calls.length > 1 ? 's' : ''} used
+      </button>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {calls.map((c, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'flex-start', gap: 6,
+              background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+              borderRadius: 5, padding: '4px 8px',
+              fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-2)',
+            }}>
+              <span style={{ color: 'var(--text-3)', flexShrink: 0 }}>{TOOL_ICONS[c.tool] ?? '⚙'}</span>
+              <span style={{ color: 'var(--action)', flexShrink: 0 }}>{c.tool}</span>
+              {c.args && Object.keys(c.args).length > 0 && (
+                <span style={{ color: 'var(--text-3)', wordBreak: 'break-all' }}>
+                  {Object.values(c.args).map(String).join(' · ').slice(0, 120)}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Burbuja ──────────────────────────────────────────────────────────────────
 
 function MessageBubble({ msg, onExpand }: {
@@ -485,6 +537,9 @@ function MessageBubble({ msg, onExpand }: {
   const isUser = msg.role === 'user'
   return (
     <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', gap: 8, flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
+      {!isUser && msg.tool_calls && msg.tool_calls.length > 0 && (
+        <ToolCallChips calls={msg.tool_calls} />
+      )}
       <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', gap: 8, width: '100%' }}>
         {!isUser && (
           <div style={{
@@ -583,6 +638,7 @@ export interface NodeChatWindowProps {
   onAccept?:        (content: string) => Promise<void>
   docUrl?:          string
   docFormat?:       string
+  approvedAsset?:       ApprovedAsset
   // Image gen por item
   imageGenOutputs?:     ImageOutputDef[]
   outputImages?:        OutputImagesMap
@@ -592,7 +648,7 @@ export interface NodeChatWindowProps {
 export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
   initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, docUrl, docFormat,
-  imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
+  approvedAsset, imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
 }: NodeChatWindowProps) {
   const [messages,        setMessages]        = useState<ChatMessage[]>(initialMessages ?? [])
   const [input,           setInput]           = useState('')
@@ -1100,6 +1156,59 @@ export default function NodeChatWindow({
               border: '1px solid rgba(248,113,113,0.20)',
             }}>
               {error}
+            </div>
+          )}
+
+          {/* Card de asset aprobado — visible cuando la sesión está locked */}
+          {locked && approvedAsset && (
+            <div style={{
+              margin: '12px 0 4px',
+              padding: '10px 12px',
+              borderRadius: 8,
+              background: 'color-mix(in srgb, #34D399 8%, var(--bg-2))',
+              border: '1px solid color-mix(in srgb, #34D399 30%, transparent)',
+              display: 'flex', flexDirection: 'column', gap: 6,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ color: '#34D399', fontSize: 11 }}>✓</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--text-0)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {approvedAsset.name}
+                </span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.06em', flexShrink: 0 }}>
+                  {approvedAsset.format}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {approvedAsset.storage_url && (
+                  <a
+                    href={approvedAsset.storage_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      flex: 1, padding: '5px 0', borderRadius: 5, textDecoration: 'none', textAlign: 'center',
+                      background: 'color-mix(in srgb, #34D399 15%, var(--bg-2))',
+                      border: '1px solid color-mix(in srgb, #34D399 35%, transparent)',
+                      color: '#34D399', fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                    }}
+                  >
+                    Open ↗
+                  </a>
+                )}
+                {approvedAsset.storage_url && (
+                  <a
+                    href={approvedAsset.storage_url}
+                    download
+                    style={{
+                      flex: 1, padding: '5px 0', borderRadius: 5, textDecoration: 'none', textAlign: 'center',
+                      background: 'var(--bg-3)',
+                      border: '1px solid var(--line-2)',
+                      color: 'var(--text-2)', fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                    }}
+                  >
+                    ↓ Download
+                  </a>
+                )}
+              </div>
             </div>
           )}
 

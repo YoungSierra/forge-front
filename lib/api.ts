@@ -267,8 +267,9 @@ export interface UnifiedAssetVersion {
 
 export interface UnifiedAsset {
   id: string
-  source: 'forge' | 'legacy'
+  source: 'forge' | 'legacy' | 'generated'
   name: string
+  project_id: string | null
   node_key: string | null
   node_title: string | null
   phase: string | null
@@ -725,13 +726,13 @@ export async function validateProjectRepo(projectId: string): Promise<{ ok: bool
 
 export async function exportProjectToRepo(
   projectId: string,
-  nodeKeys: string[]
-): Promise<{ ok: boolean; pushed: string[]; errors: string[] }> {
-  const data = await request<{ success: boolean; pushed: string[]; errors: string[] }>(`/api/projects/${projectId}/repo/export`, {
+  targetEngine?: string
+): Promise<{ ok: boolean; pushed: string[]; errors: string[]; engine?: string }> {
+  const data = await request<{ success: boolean; pushed: string[]; errors: string[]; engine?: string }>(`/api/projects/${projectId}/repo/export`, {
     method: 'POST',
-    body: JSON.stringify({ node_keys: nodeKeys }),
+    body: JSON.stringify({ target_engine: targetEngine }),
   })
-  return { ok: data.success, pushed: data.pushed ?? [], errors: data.errors ?? [] }
+  return { ok: data.success, pushed: data.pushed ?? [], errors: data.errors ?? [], engine: data.engine }
 }
 
 // ─── Idea Generator ──────────────────────────────────────────────────────────
@@ -1275,10 +1276,25 @@ export interface ChatAttachment {
   storage_url:     string
 }
 
+export interface ChatToolCall {
+  tool:   string
+  args:   Record<string, unknown>
+  result: string
+}
+
+export interface ApprovedAsset {
+  id:          string
+  name:        string
+  format:      string
+  content:     string | null
+  storage_url: string | null
+}
+
 export interface ChatMessage {
   role:         'user' | 'assistant'
   content:      string
   attachments?: ChatAttachment[]
+  tool_calls?:  ChatToolCall[]
 }
 
 export async function saveChatHistory(
@@ -1400,9 +1416,38 @@ export async function generateItemImage(
 export async function getNodeSession(
   projectId: string,
   nodeId:    string,
-): Promise<{ session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: unknown }> {
-  return request<{ success: boolean; session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: unknown }>(
+): Promise<{ session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: ApprovedAsset | null }> {
+  return request<{ success: boolean; session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: ApprovedAsset | null }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/session`,
+  )
+}
+
+export interface RunValidateError {
+  type?:         'unreviewed_session' | 'missing_input' | 'empty_source'
+  projectNodeId: string
+  nodeId?:       string
+  nodeKey:       string
+  nodeTitle:     string
+  reason:        string
+}
+
+export async function runValidate(
+  projectId: string,
+): Promise<{ valid: boolean; errors: RunValidateError[] }> {
+  return request<{ success: boolean; valid: boolean; errors: RunValidateError[] }>(
+    `/api/projects/${projectId}/canvas/run-validate`,
+    { method: 'POST' },
+  )
+}
+
+export async function autoRunNode(
+  projectId:     string,
+  projectNodeId: string,
+  memberId?:     string,
+): Promise<{ session_id: string; reply: string; doc_url?: string; doc_format?: string }> {
+  return request<{ success: boolean; session_id: string; reply: string; doc_url?: string; doc_format?: string }>(
+    `/api/projects/${projectId}/canvas/nodes/${projectNodeId}/auto-run`,
+    { method: 'POST', body: JSON.stringify({ member_id: memberId }) },
   )
 }
 

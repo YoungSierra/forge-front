@@ -55,22 +55,27 @@ const FORMAT_LABEL: Record<string, string> = {
   audio: 'Audio', model_3d: '3D Model', code: 'Code', other: 'Other',
 }
 
+const GENERATED_COLOR = 'var(--cat-output)'
+
 const STATUS_COLOR: Record<string, string> = {
   approved: 'var(--state-success)', pending: 'var(--state-warning)',
   rejected: 'var(--state-error)', invalidated: 'var(--text-3)',
 }
 
 function assetColor(a: UnifiedAsset) {
+  if (a.source === 'generated') return GENERATED_COLOR
   if (a.source === 'legacy' && a.node_key && NODE_KEY_COLOR[a.node_key]) return NODE_KEY_COLOR[a.node_key]
   return FORMAT_COLOR[a.format] ?? 'var(--text-3)'
 }
 
 function assetCategoryKey(a: UnifiedAsset): string {
+  if (a.source === 'generated') return 'generated'
   if (a.source === 'legacy' && a.node_key) return a.node_key
   return a.format ?? 'other'
 }
 
 function assetCategoryLabel(a: UnifiedAsset): string {
+  if (a.source === 'generated') return 'Generated'
   if (a.source === 'legacy' && a.node_key) return NODE_KEY_LABEL[a.node_key] ?? a.node_key
   return FORMAT_LABEL[a.format] ?? a.format
 }
@@ -180,6 +185,15 @@ function AssetCard({ asset, onClick }: { asset: UnifiedAsset; onClick: () => voi
             FORGE
           </div>
         )}
+        {asset.source === 'generated' && (
+          <div style={{
+            position: 'absolute', top: 6, left: 6,
+            background: 'color-mix(in oklch, var(--cat-output) 20%, rgba(0,0,0,0.7))', borderRadius: 4, padding: '2px 6px',
+            fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--cat-output)', letterSpacing: '0.06em',
+          }}>
+            GEN
+          </div>
+        )}
       </div>
 
       {/* Info */}
@@ -208,7 +222,7 @@ function AssetCard({ asset, onClick }: { asset: UnifiedAsset; onClick: () => voi
   )
 }
 
-function Lightbox({ asset, onClose }: { asset: UnifiedAsset; onClose: () => void }) {
+function Lightbox({ asset, onClose, projects }: { asset: UnifiedAsset; onClose: () => void; projects: Project[] }) {
   const [viewingVersion, setViewingVersion] = useState<UnifiedAssetVersion | undefined>(currentVersion(asset))
   const verUrl   = viewingVersion?.storage_url
   const url      = verUrl ? assetUrl(verUrl) : effectiveUrl(asset)
@@ -318,6 +332,15 @@ function Lightbox({ asset, onClose }: { asset: UnifiedAsset; onClose: () => void
 
           {/* Metadata */}
           <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {asset.project_id && (() => {
+              const proj = projects.find(p => p.id === asset.project_id)
+              return proj ? (
+                <div>
+                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Project</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-1)' }}>{proj.name}</div>
+                </div>
+              ) : null
+            })()}
             <div>
               <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Status</div>
               <div style={{ fontSize: 11, color: STATUS_COLOR[asset.status] ?? 'var(--text-3)' }}>{asset.status}</div>
@@ -600,7 +623,7 @@ export default function AssetLibrary({ defaultProjectId }: { defaultProjectId?: 
         )}
       </div>
 
-      {selected && <Lightbox asset={selected} onClose={() => setSelected(null)} />}
+      {selected && <Lightbox asset={selected} onClose={() => setSelected(null)} projects={projects} />}
     </div>
   )
 }

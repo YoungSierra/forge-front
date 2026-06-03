@@ -253,7 +253,6 @@ export default function LibraryPanel({ nodes, selectedNodeId, onSelect, onFocus,
       {exportOpen && project && (
         <ExportModal
           project={project}
-          nodes={nodes}
           onClose={() => setExportOpen(false)}
           onRepoSaved={onProjectRepoSaved}
         />

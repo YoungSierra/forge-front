@@ -103,8 +103,9 @@ export default function AssetCardDeck({
     const key = `${projectId}:${nodeId}`
     const cached = CACHE.get(key)
 
-    if (cached !== undefined) {
-      setDeck(cached.length > 0 ? { status: 'ready', cards: cached } : { status: 'empty' })
+    // Solo usar caché si tiene contenido — resultados vacíos se reintentan siempre
+    if (cached !== undefined && cached.length > 0) {
+      setDeck({ status: 'ready', cards: cached })
       return
     }
 
@@ -117,7 +118,7 @@ export default function AssetCardDeck({
         const data = await res.json()
 
         if (!data.success) {
-          if (!cancelled) { CACHE.set(key, []); setDeck({ status: 'empty' }) }
+          if (!cancelled) setDeck({ status: 'empty' })
           return
         }
 

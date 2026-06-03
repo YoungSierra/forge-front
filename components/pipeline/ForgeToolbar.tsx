@@ -21,10 +21,12 @@ interface Props {
   onRefresh: () => void
   onPipelineApply?: (activeNodes: string[]) => void
   onRunPipeline?: () => void
+  onExport?: () => void
   runProgress?: { done: number; total: number }
   nodes?: Node[]
   approvedCount?: number
   totalCount?: number
+  runnableCount?: number
 }
 
 /* Avatar individual — usa inicial si no hay imagen */
@@ -267,7 +269,7 @@ function CostChip({ projectId }: { projectId: string }) {
   )
 }
 
-export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, runProgress, nodes = [], approvedCount: approvedCountProp, totalCount: totalCountProp }: Props) {
+export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, onExport, runProgress, nodes = [], approvedCount: approvedCountProp, totalCount: totalCountProp, runnableCount }: Props) {
   const { user, member } = useAuth()
   const { theme, toggle: toggleTheme } = useTheme()
   const [currentMemberId,       setCurrentMemberId]       = useState<string | null>(null)
@@ -321,17 +323,32 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
         ↻ Refresh
       </button>
 
-      {/* Botón Run All — solo cuando hay nodos idle */}
-      {hasProject && onRunPipeline && idleCount > 0 && phase !== 'running' && (
+      {/* Botón Export — solo cuando hay nodos aprobados */}
+      {hasProject && onExport && (approvedCountProp ?? 0) > 0 && (
         <button
           className="tb-btn"
-          onClick={onRunPipeline}
-          title={`Auto-generate and approve ${idleCount} idle node${idleCount !== 1 ? 's' : ''}`}
-          style={{ color: 'var(--action)', borderColor: 'color-mix(in oklch, var(--action) 35%, transparent)' }}
+          onClick={onExport}
+          title="Export approved outputs to repository"
         >
-          ▶ Run {idleCount} idle
+          ↑ Export
         </button>
       )}
+
+      {/* Botón Run All — solo cuando hay nodos runnables y no está corriendo */}
+      {hasProject && onRunPipeline && phase !== 'running' && (() => {
+        const count = runnableCount ?? idleCount
+        if (count <= 0) return null
+        return (
+          <button
+            className="tb-btn"
+            onClick={onRunPipeline}
+            title={`Auto-run ${count} node${count !== 1 ? 's' : ''}`}
+            style={{ color: 'var(--action)', borderColor: 'color-mix(in oklch, var(--action) 35%, transparent)' }}
+          >
+            ▶ Run {count}
+          </button>
+        )
+      })()}
 
       <div className="tb-spacer" />
 
