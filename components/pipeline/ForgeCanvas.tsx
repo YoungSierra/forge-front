@@ -2268,6 +2268,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [sidebarCollapsed,  setSidebarCollapsed]  = useState(false)
   const [chatNode,          setChatNode]          = useState<CanvasNode | null>(null)
   const [chatSessionId,     setChatSessionId]     = useState<string | null>(null)
+  const chatSessionIdRef = useRef<string | null>(null)
   const [chatMessages,      setChatMessages]      = useState<ChatMessage[]>([])
   const [chatLoading,       setChatLoading]       = useState(false)
   const [chatDocUrl,        setChatDocUrl]        = useState<string | null>(null)
@@ -3115,6 +3116,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined, file, attachmentUrl)
             if (r.doc_url) { setChatDocUrl(r.doc_url); setChatDocFormat(r.doc_format ?? null) }
             // Actualizar sesión en el estado local si es nueva
+            chatSessionIdRef.current = r.session_id
             if (!chatSessionId) {
               setChatSessionId(r.session_id)
               setCanvasData(prev => prev ? {
@@ -3156,11 +3158,12 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             return defs.length > 0 ? defs : undefined
           })()}
           outputImages={chatOutputImages}
-          onGenerateItemImage={chatSessionId ? async (outputKey, itemIndex, itemText, condition) => {
-            const r = await generateItemImage(project.id, chatForgeNode.id, chatSessionId, outputKey, itemIndex, itemText, condition)
+          onGenerateItemImage={async (outputKey, itemIndex, itemText, condition) => {
+            const sid = chatSessionIdRef.current ?? chatSessionId
+            if (!sid) return { output_images: {} } as never
+            const r = await generateItemImage(project.id, chatForgeNode.id, sid, outputKey, itemIndex, itemText, condition)
             const imgs = r.output_images
             setChatOutputImages(imgs)
-            // Sincronizar output modal: actualizar output_images en la sesión del nodo en canvas
             setCanvasData(prev => prev ? {
               ...prev,
               nodes: prev.nodes.map(n =>
@@ -3170,9 +3173,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               ),
             } : null)
             return r
-          } : undefined}
+          }}
           approvedAsset={chatApprovedAsset ?? undefined}
-          onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); setChatDocUrl(null); setChatDocFormat(null); setChatOutputImages({}); setChatApprovedAsset(null) }}
+          onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); chatSessionIdRef.current = null; setChatDocUrl(null); setChatDocFormat(null); setChatOutputImages({}); setChatApprovedAsset(null) }}
         />
         )
       })()}
