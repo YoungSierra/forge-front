@@ -38,6 +38,31 @@ function fanParams(index: number, total: number): { rot: number; tx: number } {
 // Secciones wrapper de output format que se omiten si están vacías
 const OUTPUT_WRAPPER_RE = /^(investor_deck|output|result|response|deck)$/i
 
+// Si un body es una lista pura de 4+ items bullet, expande a sub-cartas individuales
+function expandListItems(title: string, body: string): TextCard[] {
+  const lines = body.split('\n').filter(s => s.trim())
+  const allBullets = lines.length >= 4 && lines.every(l => /^[-*•]\s/.test(l.trim()))
+  if (!allBullets) return [{ kind: 'text', title, body }]
+  const items = lines
+
+  return items.map(item => {
+    const raw      = item.replace(/^[-*•]\s+/, '').replace(/^\*\*/, '').replace(/\*\*$/, '')
+    const dashIdx  = raw.search(/\s+[—–]\s+/)
+    if (dashIdx > 0) {
+      return { kind: 'text' as const,
+        title: raw.slice(0, dashIdx).replace(/\*\*/g, '').trim(),
+        body:  raw.slice(dashIdx).replace(/^\s*[—–]\s*/, '').trim() }
+    }
+    const colonIdx = raw.indexOf(': ')
+    if (colonIdx > 0 && colonIdx < 50) {
+      return { kind: 'text' as const,
+        title: raw.slice(0, colonIdx).replace(/\*\*/g, '').trim(),
+        body:  raw.slice(colonIdx + 2).trim() }
+    }
+    return { kind: 'text' as const, title: raw.slice(0, 60).trim(), body: raw }
+  })
+}
+
 function splitMarkdown(content: string): TextCard[] {
   const parts = content.split(/^(?=##\s)/m).filter(s => s.trim())
   const cards: TextCard[] = []
@@ -45,7 +70,7 @@ function splitMarkdown(content: string): TextCard[] {
   // Preamble antes del primer ## (puede no tener heading)
   const hasPreamble = parts.length > 0 && !parts[0].startsWith('##')
   if (hasPreamble) {
-    cards.push({ kind: 'text', title: 'Overview', body: parts[0].trim() })
+    cards.push(...expandListItems('Overview', parts[0].trim()))
   }
 
   for (let i = hasPreamble ? 1 : 0; i < parts.length; i++) {
@@ -54,7 +79,7 @@ function splitMarkdown(content: string): TextCard[] {
     const body  = lines.slice(1).join('\n').trim()
     // Omitir secciones wrapper vacías (investor_deck, output, etc.)
     if (title && OUTPUT_WRAPPER_RE.test(title) && !body) continue
-    if (title) cards.push({ kind: 'text', title, body })
+    if (title) cards.push(...expandListItems(title, body))
   }
 
   // Sin secciones — todo el texto como una carta
@@ -126,7 +151,7 @@ export default function AssetCardDeck({
         let textCards: DeckCard[] = []
         if (data.asset) {
           const { format, content, storage_url, name } = data.asset
-          if (content && ['markdown', 'markdown_table', 'structured', 'single_sentence', 'docx', 'pptx'].includes(format)) {
+          if (content && format !== 'png') {
             textCards = splitMarkdown(content)
           } else if (storage_url && format === 'png') {
             textCards = [{ kind: 'image', label: name ?? 'Asset', url: storage_url }]

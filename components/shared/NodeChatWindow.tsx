@@ -341,19 +341,27 @@ function ThumbnailCard({ item }: { item: InlineImageItem }) {
           </div>
         )}
 
-        {/* Botón ↺ a la derecha del último thumbnail */}
-        {item.imageUrl && (
-          <button
-            onClick={e => { e.stopPropagation(); setShowPanel(true) }}
-            title="Generate a new variation"
-            style={{
-              fontSize: 9, padding: '2px 6px', borderRadius: 5, lineHeight: 1.6,
-              border: '1px solid color-mix(in srgb, var(--action) 40%, transparent)',
-              background: 'color-mix(in srgb, var(--bg-1) 80%, transparent)',
-              color: 'var(--action)', cursor: 'pointer', fontFamily: 'var(--font-mono)', flexShrink: 0,
-            }}
-          >↺</button>
-        )}
+        {/* Botón generate / re-generate */}
+        <button
+          disabled={item.isGenerating}
+          onClick={e => {
+            e.stopPropagation()
+            if (item.imageUrl) { setShowPanel(true) } else { item.onGenerate() }
+          }}
+          title={item.isGenerating ? 'Generating…' : item.imageUrl ? 'Generate a new variation' : 'Generate image'}
+          style={{
+            fontSize: 9, padding: '2px 6px', borderRadius: 5, lineHeight: 1.6,
+            border: '1px solid color-mix(in srgb, var(--action) 40%, transparent)',
+            background: item.isGenerating
+              ? 'color-mix(in srgb, var(--action) 14%, var(--bg-2))'
+              : 'color-mix(in srgb, var(--action) 8%, var(--bg-2))',
+            color: 'var(--action)', cursor: item.isGenerating ? 'not-allowed' : 'pointer',
+            fontFamily: 'var(--font-mono)', flexShrink: 0,
+            animation: item.isGenerating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
+          }}
+        >
+          {item.isGenerating ? '…' : item.imageUrl ? '↺' : '✦'}
+        </button>
       </div>
       <span style={{
         fontSize: 9, color: 'var(--text-3)', lineHeight: 1.35,
@@ -370,11 +378,10 @@ function ThumbnailCard({ item }: { item: InlineImageItem }) {
 
 // Grid de thumbnails — muestra todas las variaciones de cada ítem
 export function ImageThumbnailRow({ items }: { items?: InlineImageItem[] }) {
-  const visible = items?.filter(item => item.imageUrl !== null || item.isGenerating) ?? []
-  if (visible.length === 0) return null
+  if (!items || items.length === 0) return null
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0 4px 34px' }}>
-      {visible.map(item => <ThumbnailCard key={item.itemKey} item={item} />)}
+      {items.map(item => <ThumbnailCard key={item.itemKey} item={item} />)}
     </div>
   )
 }
