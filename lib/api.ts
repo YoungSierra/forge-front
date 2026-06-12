@@ -243,10 +243,10 @@ export async function getProjectMembers(project_id: string): Promise<ProjectMemb
   return data.members || []
 }
 
-export async function addProjectMember(project_id: string, member_id: string): Promise<ProjectMember> {
+export async function addProjectMember(project_id: string, member_id: string, project_role?: string, discipline?: string): Promise<ProjectMember> {
   const data = await request<{ success: boolean; member: ProjectMember }>(`/api/projects/${project_id}/members`, {
     method: 'POST',
-    body: JSON.stringify({ member_id }),
+    body: JSON.stringify({ member_id, project_role, discipline }),
   })
   return data.member
 }

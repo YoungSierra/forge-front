@@ -621,7 +621,7 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded
   onCollapsedChange: (v: boolean) => void
   onFocusNode?: (forgeNodeId: string) => void
   isDroppingNode?: boolean
-  dropZoneRef?: React.RefObject<HTMLDivElement>
+  dropZoneRef?: React.RefObject<HTMLDivElement | null>
 }) {
   const scale = useContext(CanvasScaleContext)
   const [catalog,   setCatalog]   = useState<CatalogNode[]>([])
@@ -3286,11 +3286,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     }
   }
 
-  const handleNodeDragStart = useCallback((_event: React.MouseEvent, node: import('reactflow').Node) => {
+  const handleNodeDragStart = useCallback((_event: React.MouseEvent, node: import('@xyflow/react').Node) => {
     setDraggingNodeId(node.id)
   }, [])
 
-  const handleNodeDragStop = useCallback((event: React.MouseEvent, node: import('reactflow').Node) => {
+  const handleNodeDragStop = useCallback((event: React.MouseEvent, node: import('@xyflow/react').Node) => {
     persistLayout()
     if (dropZoneRef.current) {
       // getBoundingClientRect ya devuelve coords de pantalla reales (incluye zoom CSS)
