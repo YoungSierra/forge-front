@@ -1935,9 +1935,10 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 ? (extractSection(session.output_asset.content, activeOut.name, otherKeys) ?? session.output_asset.content)
                 : null
 
-              // Detectar si el contenido es una lista estructurada
+              // Detectar si el contenido es una lista estructurada (solo formatos no-prosa)
+              const PROSE_FORMATS = ['markdown', 'document', 'text', 'pptx', 'pdf']
               const parsedItems = section ? parseOutputItems(section, activeOut.format) : []
-              const isGallery   = parsedItems.length >= 2
+              const isGallery   = parsedItems.length >= 2 && !PROSE_FORMATS.includes(activeOut.format ?? '')
 
               // Construir image items si el output tiene image_gen
               const imageItems: InlineImageItem[] = []

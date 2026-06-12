@@ -105,160 +105,214 @@ export interface InlineImageItem {
   onZoom:       (url: string) => void
 }
 
+const VP_W = 480
+const VP_H = 520
+
 // Panel modal para generar una nueva variación con condiciones del usuario
 export function VariationPanel({ item, onClose }: { item: InlineImageItem; onClose: () => void }) {
-  const [condition, setCondition] = useState('')
-  const [generating, setGenerating] = useState(false)
-  const [internalZoomUrl, setInternalZoomUrl] = useState<string | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [condition,      setCondition]      = useState('')
+  const [generating,     setGenerating]     = useState(false)
+  const [internalZoomUrl,setInternalZoomUrl]= useState<string | null>(null)
+  const [vpPos,          setVpPos]          = useState({ x: 0, y: 0 })
+  const [vpSize,         setVpSize]         = useState({ w: VP_W, h: VP_H })
+  const [vpMaximized,    setVpMaximized]    = useState(false)
+  const [vpDragging,     setVpDragging]     = useState(false)
+  const [vpResizing,     setVpResizing]     = useState(false)
+  const vpDragOrigin   = useRef({ sx: 0, sy: 0, ox: 0, oy: 0 })
+  const vpResizeOrigin = useRef({ sx: 0, sy: 0, ow: 0, oh: 0 })
+  const vpSizeRef      = useRef({ w: VP_W, h: VP_H })
+  const vpSavedGeom    = useRef<{ pos: { x: number; y: number }; size: { w: number; h: number } } | null>(null)
+  const textareaRef    = useRef<HTMLTextAreaElement>(null)
 
-  useEffect(() => { textareaRef.current?.focus() }, [])
+  // Centrar al montar
+  useEffect(() => {
+    setVpPos({
+      x: Math.max(0, (window.innerWidth  - VP_W) / 2),
+      y: Math.max(0, (window.innerHeight - VP_H) / 2),
+    })
+    textareaRef.current?.focus()
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (internalZoomUrl) { setInternalZoomUrl(null) } else { onClose() }
-      }
+      if (e.key === 'Escape') { internalZoomUrl ? setInternalZoomUrl(null) : onClose() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose, internalZoomUrl])
 
+  // Drag
+  const onVpDragStart = (e: React.MouseEvent) => {
+    if (vpMaximized) return
+    e.preventDefault()
+    vpDragOrigin.current = { sx: e.clientX, sy: e.clientY, ox: vpPos.x, oy: vpPos.y }
+    setVpDragging(true)
+  }
+  useEffect(() => {
+    if (!vpDragging) return
+    const onMove = (e: MouseEvent) => setVpPos({ x: vpDragOrigin.current.ox + e.clientX - vpDragOrigin.current.sx, y: vpDragOrigin.current.oy + e.clientY - vpDragOrigin.current.sy })
+    const onUp   = () => setVpDragging(false)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup',   onUp)
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  }, [vpDragging])
+
+  // Resize
+  const onVpResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    vpResizeOrigin.current = { sx: e.clientX, sy: e.clientY, ow: vpSizeRef.current.w, oh: vpSizeRef.current.h }
+    setVpResizing(true)
+  }
+  useEffect(() => {
+    if (!vpResizing) return
+    const onMove = (e: MouseEvent) => {
+      const nw = Math.max(360, vpResizeOrigin.current.ow + e.clientX - vpResizeOrigin.current.sx)
+      const nh = Math.max(280, vpResizeOrigin.current.oh + e.clientY - vpResizeOrigin.current.sy)
+      vpSizeRef.current = { w: nw, h: nh }
+      setVpSize({ w: nw, h: nh })
+    }
+    const onUp = () => setVpResizing(false)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup',   onUp)
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  }, [vpResizing])
+
+  const toggleVpMaximize = () => {
+    if (vpMaximized) {
+      const g = vpSavedGeom.current
+      if (g) { vpSizeRef.current = g.size; setVpSize(g.size); setVpPos(g.pos) }
+    } else {
+      vpSavedGeom.current = { pos: vpPos, size: vpSizeRef.current }
+    }
+    setVpMaximized(v => !v)
+  }
+
   const handleGenerate = async () => {
     setGenerating(true)
-    try {
-      await item.onGenerate(condition.trim() || undefined)
-      onClose()
-    } finally {
-      setGenerating(false)
-    }
+    try { await item.onGenerate(condition.trim() || undefined); onClose() }
+    finally { setGenerating(false) }
   }
 
   return createPortal(
     <>
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 20000,
-        background: 'rgba(0,0,0,0.72)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    >
+      {/* Backdrop */}
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 20000, background: 'rgba(0,0,0,0.72)' }} />
+
+      {/* Modal draggable/resizable */}
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: 480, background: 'var(--bg-1)',
-          border: '1px solid var(--line-2)', borderRadius: 12,
-          boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
+          position: 'fixed',
+          left:   vpMaximized ? 0 : vpPos.x,
+          top:    vpMaximized ? 0 : vpPos.y,
+          width:  vpMaximized ? '100vw' : vpSize.w,
+          height: vpMaximized ? '100vh' : vpSize.h,
+          zIndex: 20001,
+          background: 'var(--bg-1)', border: '1px solid var(--line-2)',
+          borderRadius: vpMaximized ? 0 : 12,
+          boxShadow: vpMaximized ? 'none' : '0 24px 64px rgba(0,0,0,0.55)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          userSelect: vpDragging || vpResizing ? 'none' : 'auto',
         }}
       >
         {/* Header */}
-        <div style={{
-          padding: '12px 16px', borderBottom: '1px solid var(--line-2)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
+        <div
+          onMouseDown={onVpDragStart}
+          style={{
+            padding: '12px 16px', borderBottom: '1px solid var(--line-2)', flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            cursor: vpMaximized ? 'default' : (vpDragging ? 'grabbing' : 'grab'),
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{
-              width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
-              border: '1px solid rgba(255,138,61,0.25)',
-              background: 'rgba(255,138,61,0.12)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
+            <div style={{ width: 30, height: 30, borderRadius: '50%', flexShrink: 0, border: '1px solid rgba(255,138,61,0.25)', background: 'rgba(255,138,61,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <img src="/forgy/forgyi.png" alt="Forge" style={{ width: 16, height: 16, objectFit: 'contain' }} />
             </div>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--text-0)', letterSpacing: '0.05em' }}>
-              GENERATE VARIATION
-            </span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--text-0)', letterSpacing: '0.05em' }}>GENERATE VARIATION</span>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 14, lineHeight: 1 }}>✕</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} onMouseDown={e => e.stopPropagation()}>
+            <button onClick={toggleVpMaximize} title={vpMaximized ? 'Restore' : 'Maximize'} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-2)', padding: '4px 8px', borderRadius: 6, flexShrink: 0 }}>
+              {vpMaximized ? (
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ display: 'block' }}>
+                  <rect x="3.75" y="0.75" width="8.5" height="8.5" stroke="currentColor" strokeWidth="1.5" rx="1"/>
+                  <rect x="0.75" y="3.75" width="8.5" height="8.5" stroke="currentColor" strokeWidth="1.5" rx="1" fill="var(--bg-1)"/>
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ display: 'block' }}>
+                  <rect x="0.75" y="0.75" width="11.5" height="11.5" stroke="currentColor" strokeWidth="1.5" rx="1"/>
+                </svg>
+              )}
+            </button>
+            <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: 16, padding: '4px 8px', borderRadius: 6, lineHeight: 1 }}>✕</button>
+          </div>
         </div>
 
-        {/* Imagen actual de referencia + galería de variaciones */}
-        {item.allVariations.length > 0 && (
-          <div style={{ padding: '12px 16px 0', display: 'flex', gap: 8, overflowX: 'auto' }}>
-            {item.allVariations.map((v, i) => (
-              <div key={i} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <img
-                  src={v.url}
-                  alt={`Variation ${i + 1}`}
-                  onClick={e => { e.stopPropagation(); setInternalZoomUrl(v.url) }}
-                  style={{ width: 90, height: 90, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--line-2)', cursor: 'zoom-in', display: 'block' }}
-                />
-                {v.condition && (
-                  <span style={{ fontSize: 8, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.condition}>
-                    {v.condition}
-                  </span>
-                )}
-              </div>
-            ))}
+        {/* Contenido — columna flex que llena el alto del modal */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {/* Galería de variaciones existentes */}
+          {item.allVariations.length > 0 && (
+            <div style={{ padding: '12px 16px 0', display: 'flex', gap: 8, overflowX: 'auto', flexShrink: 0 }}>
+              {item.allVariations.map((v, i) => (
+                <div key={i} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <img src={v.url} alt={`Variation ${i + 1}`} onClick={e => { e.stopPropagation(); setInternalZoomUrl(v.url) }}
+                    style={{ width: 90, height: 90, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--line-2)', cursor: 'zoom-in', display: 'block' }} />
+                  {v.condition && (
+                    <span style={{ fontSize: 8, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.condition}>
+                      {v.condition}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Concepto de referencia */}
+          <div style={{ padding: '12px 16px 0', flexShrink: 0 }}>
+            <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 4 }}>CONCEPT</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, background: 'var(--bg-2)', borderRadius: 6, padding: '8px 10px', border: '1px solid var(--line-2)' }}>
+              {item.text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1')}
+            </div>
+          </div>
+
+          {/* Input de condiciones — crece para llenar el alto restante */}
+          <div style={{ padding: '12px 16px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 6, flexShrink: 0 }}>VARIATION INSTRUCTIONS <span style={{ color: 'var(--text-4)' }}>(optional)</span></div>
+            <div style={{ display: 'flex', gap: 7, flex: 1, minHeight: 0 }}>
+              <textarea
+                ref={textareaRef}
+                value={condition}
+                onChange={e => setCondition(e.target.value)}
+                placeholder="Describe what to change — style, mood, color palette, composition…"
+                style={{ flex: 1, resize: 'none', background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 8, padding: '8px 10px', fontSize: 12, color: 'var(--text-0)', lineHeight: 1.5, fontFamily: 'inherit', outline: 'none', minHeight: 80 }}
+                onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
+                onBlur={e  => { e.currentTarget.style.borderColor = 'var(--line-2)' }}
+              />
+              <button
+                onClick={handleGenerate} disabled={generating}
+                style={{ width: 38, borderRadius: 8, border: 'none', flexShrink: 0, background: generating ? 'var(--bg-3)' : 'var(--action)', color: generating ? 'var(--text-4)' : 'var(--action-fg)', fontSize: 18, cursor: generating ? 'not-allowed' : 'pointer', transition: 'background 120ms', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: generating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none' }}
+              >→</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Handle de resize */}
+        {!vpMaximized && (
+          <div onMouseDown={onVpResizeStart} style={{ position: 'absolute', bottom: 0, right: 0, width: 18, height: 18, cursor: 'se-resize', display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', padding: 4 }}>
+            <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: 0.3 }}>
+              <line x1="2" y1="10" x2="10" y2="2" stroke="var(--text-1)" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="5" y1="10" x2="10" y2="5" stroke="var(--text-1)" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="8" y1="10" x2="10" y2="8" stroke="var(--text-1)" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
           </div>
         )}
-
-        {/* Concepto de referencia */}
-        <div style={{ padding: '12px 16px 0' }}>
-          <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 4 }}>CONCEPT</div>
-          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, background: 'var(--bg-2)', borderRadius: 6, padding: '8px 10px', border: '1px solid var(--line-2)' }}>
-            {item.text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1')}
-          </div>
-        </div>
-
-        {/* Input de condiciones */}
-        <div style={{ padding: '12px 16px' }}>
-          <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 6 }}>VARIATION INSTRUCTIONS <span style={{ color: 'var(--text-4)' }}>(optional)</span></div>
-          <div style={{ display: 'flex', gap: 7 }}>
-            <textarea
-              ref={textareaRef}
-              value={condition}
-              onChange={e => setCondition(e.target.value)}
-              placeholder="Describe what to change — style, mood, color palette, composition…"
-              rows={3}
-              style={{
-                flex: '1 1 0', resize: 'none',
-                background: 'var(--bg-2)', border: '1px solid var(--line-2)',
-                borderRadius: 8, padding: '8px 10px',
-                fontSize: 12, color: 'var(--text-0)', lineHeight: 1.5,
-                fontFamily: 'inherit', outline: 'none',
-              }}
-              onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'var(--line-2)' }}
-            />
-            <button
-              onClick={handleGenerate}
-              disabled={generating}
-              style={{
-                width: 38, borderRadius: 8, border: 'none', flexShrink: 0,
-                background: generating ? 'var(--bg-3)' : 'var(--action)',
-                color: generating ? 'var(--text-4)' : 'var(--action-fg)',
-                fontSize: 18, cursor: generating ? 'not-allowed' : 'pointer',
-                transition: 'background 120ms',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                animation: generating ? 'img-gen-pulse 1.2s ease-in-out infinite' : 'none',
-              }}
-            >
-              →
-            </button>
-          </div>
-        </div>
       </div>
-    </div>
-    {/* Zoom interno — sibling del backdrop para no burbujear a onClose */}
-    {internalZoomUrl && (
-      <div
-        onClick={() => setInternalZoomUrl(null)}
-        style={{
-          position: 'fixed', inset: 0, zIndex: 30000,
-          background: 'rgba(0,0,0,0.92)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}
-      >
-        <img
-          src={internalZoomUrl}
-          onClick={e => e.stopPropagation()}
-          style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 10, display: 'block' }}
-        />
-      </div>
-    )}
+
+      {/* Zoom interno */}
+      {internalZoomUrl && (
+        <div onClick={() => setInternalZoomUrl(null)} style={{ position: 'fixed', inset: 0, zIndex: 30000, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <img src={internalZoomUrl} onClick={e => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 10, display: 'block' }} />
+        </div>
+      )}
     </>,
     document.body,
   )
