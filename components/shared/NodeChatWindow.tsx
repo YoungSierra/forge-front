@@ -166,8 +166,8 @@ export function VariationPanel({ item, onClose }: { item: InlineImageItem; onClo
   useEffect(() => {
     if (!vpResizing) return
     const onMove = (e: MouseEvent) => {
-      const nw = Math.max(360, vpResizeOrigin.current.ow + e.clientX - vpResizeOrigin.current.sx)
-      const nh = Math.max(280, vpResizeOrigin.current.oh + e.clientY - vpResizeOrigin.current.sy)
+      const nw = Math.max(420, vpResizeOrigin.current.ow + e.clientX - vpResizeOrigin.current.sx)
+      const nh = Math.max(420, vpResizeOrigin.current.oh + e.clientY - vpResizeOrigin.current.sy)
       vpSizeRef.current = { w: nw, h: nh }
       setVpSize({ w: nw, h: nh })
     }
@@ -205,8 +205,9 @@ export function VariationPanel({ item, onClose }: { item: InlineImageItem; onClo
           position: 'fixed',
           left:   vpMaximized ? 0 : vpPos.x,
           top:    vpMaximized ? 0 : vpPos.y,
-          width:  vpMaximized ? '100vw' : vpSize.w,
-          height: vpMaximized ? '100vh' : vpSize.h,
+          width:    vpMaximized ? '100vw' : vpSize.w,
+          height:   vpMaximized ? '100vh' : vpSize.h,
+          minWidth: 420, minHeight: 420,
           zIndex: 20001,
           background: 'var(--bg-1)', border: '1px solid var(--line-2)',
           borderRadius: vpMaximized ? 0 : 12,
