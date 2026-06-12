@@ -1266,6 +1266,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const [textModal,    setTextModal]    = useState<{ text: string; label: string } | null>(null)
   const [textFontSize, setTextFontSize] = useState(14)
   const [outTab,            setOutTab]            = useState<string>('')
+  const [viewMode,          setViewMode]          = useState<'gallery' | 'list'>('gallery')
   // Guardamos solo el key; el item vivo se lee del ref en cada render para evitar datos stale
   const [variationItemKey,  setVariationItemKey]  = useState<string | null>(null)
   const imageItemsRef = useRef<import('@/components/shared/NodeChatWindow').InlineImageItem[]>([])
@@ -1303,6 +1304,14 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
       const factor   = e.deltaY < 0 ? 1.12 : 1 / 1.12
       const newScale = Math.min(8, Math.max(1, oldScale * factor))
       if (newScale === oldScale) return
+      imgScaleRef.current = newScale
+      setImgScale(newScale)
+      // Al volver a escala 1 centrar siempre la imagen
+      if (newScale === 1) {
+        imgOffsetRef.current = { x: 0, y: 0 }
+        setImgOffset({ x: 0, y: 0 })
+        return
+      }
       // zoom centrado en la posición del cursor
       const mx = e.clientX - window.innerWidth  / 2
       const my = e.clientY - window.innerHeight / 2
@@ -1311,9 +1320,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
         x: mx * (1 - f) + imgOffsetRef.current.x * f,
         y: my * (1 - f) + imgOffsetRef.current.y * f,
       }
-      imgScaleRef.current  = newScale
       imgOffsetRef.current = newOffset
-      setImgScale(newScale)
       setImgOffset({ ...newOffset })
     }
 
@@ -1833,32 +1840,59 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 onMouseDown={e => e.stopPropagation()}
                 onClick={toggleOutMaximize}
                 title={outMaximized ? 'Restore' : 'Maximize'}
-                style={{ border: 'none', background: 'var(--bg-2)', cursor: 'pointer', color: 'var(--text-2)', fontSize: 11, padding: '4px 7px', borderRadius: 5, lineHeight: 1, flexShrink: 0 }}
-              >{outMaximized ? '⊡' : '⊞'}</button>
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-2)', fontSize: 13, padding: '4px 8px', borderRadius: 6, flexShrink: 0, fontFamily: 'var(--font-mono)' }}
+              >
+                {outMaximized ? (
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ display: 'block' }}>
+                    <rect x="3.75" y="0.75" width="8.5" height="8.5" stroke="currentColor" strokeWidth="1.5" rx="1"/>
+                    <rect x="0.75" y="3.75" width="8.5" height="8.5" stroke="currentColor" strokeWidth="1.5" rx="1" fill="var(--bg-1)"/>
+                  </svg>
+                ) : (
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ display: 'block' }}>
+                    <rect x="0.75" y="0.75" width="11.5" height="11.5" stroke="currentColor" strokeWidth="1.5" rx="1"/>
+                  </svg>
+                )}
+              </button>
               <button
                 onMouseDown={e => e.stopPropagation()}
                 onClick={() => setOutputOpen(false)}
-                style={{ border: 'none', background: 'var(--bg-2)', cursor: 'pointer', color: 'var(--text-2)', fontSize: 13, padding: '4px 8px', borderRadius: 6, flexShrink: 0, fontFamily: 'var(--font-mono)' }}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-2)', fontSize: 16, padding: '4px 8px', borderRadius: 6, flexShrink: 0, fontFamily: 'var(--font-mono)' }}
               >✕</button>
             </div>
-            {/* Tab bar — una tab por output */}
+            {/* Tab bar — una tab por output + toggle gallery/list */}
             {(node.outputs ?? []).length > 0 && (
-              <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--line-2)', flexShrink: 0, overflowX: 'auto' }}>
-                {(node.outputs ?? []).map(o => (
+              <div style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
+                {/* Tabs scrollables */}
+                <div style={{ display: 'flex', overflowX: 'auto', flex: 1 }}>
+                  {(node.outputs ?? []).map(o => (
+                    <button
+                      key={o.name}
+                      onClick={() => { setOutTab(o.name); setViewMode('gallery') }}
+                      style={{
+                        padding: '8px 16px', border: 'none', borderBottom: outTab === o.name ? '2px solid var(--action)' : '2px solid transparent',
+                        marginBottom: -1, background: 'none', cursor: 'pointer',
+                        fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: outTab === o.name ? 700 : 400,
+                        color: outTab === o.name ? 'var(--action)' : 'var(--text-3)',
+                        flexShrink: 0, whiteSpace: 'nowrap', transition: 'color 120ms, border-color 120ms',
+                      }}
+                    >
+                      {o.name.replace(/_/g, ' ')}
+                    </button>
+                  ))}
+                </div>
+                {/* Toggle gallery / list */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '0 8px', borderLeft: '1px solid var(--line-2)', flexShrink: 0 }}>
                   <button
-                    key={o.name}
-                    onClick={() => setOutTab(o.name)}
-                    style={{
-                      padding: '8px 16px', border: 'none', borderBottom: outTab === o.name ? '2px solid var(--action)' : '2px solid transparent',
-                      marginBottom: -1, background: 'none', cursor: 'pointer',
-                      fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: outTab === o.name ? 700 : 400,
-                      color: outTab === o.name ? 'var(--action)' : 'var(--text-3)',
-                      flexShrink: 0, whiteSpace: 'nowrap', transition: 'color 120ms, border-color 120ms',
-                    }}
-                  >
-                    {o.name.replace(/_/g, ' ')}
-                  </button>
-                ))}
+                    onClick={() => setViewMode('gallery')}
+                    title="Gallery view"
+                    style={{ border: 'none', background: viewMode === 'gallery' ? 'var(--bg-3)' : 'none', borderRadius: 4, padding: '4px 6px', cursor: 'pointer', color: viewMode === 'gallery' ? 'var(--text-0)' : 'var(--text-4)', fontSize: 13, lineHeight: 1 }}
+                  >⊞</button>
+                  <button
+                    onClick={() => setViewMode('list')}
+                    title="List view"
+                    style={{ border: 'none', background: viewMode === 'list' ? 'var(--bg-3)' : 'none', borderRadius: 4, padding: '4px 6px', cursor: 'pointer', color: viewMode === 'list' ? 'var(--text-0)' : 'var(--text-4)', fontSize: 13, lineHeight: 1 }}
+                  >☰</button>
+                </div>
               </div>
             )}
 
@@ -1938,8 +1972,8 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 }
               }
 
-              // Vista galería — lista estructurada con 2+ ítems
-              if (isGallery) {
+              // Vista galería — lista estructurada con 2+ ítems y modo gallery activo
+              if (isGallery && viewMode === 'gallery') {
                 return (
                   <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(185px, 1fr))', gap: 12 }}>
@@ -2019,6 +2053,85 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                           >
                             <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', letterSpacing: '0.08em' }}>#{i + 1}</span>
                             <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6 }}>{text.length > 120 ? text.slice(0, 120) + '…' : text}</div>
+                          </div>
+                        ))
+                      }
+                    </div>
+                  </div>
+                )
+              }
+
+              // Vista lista — mismos imageItems en layout de filas, texto completo, sin shrink
+              if (isGallery && viewMode === 'list') {
+                return (
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {imageItems.length > 0
+                        ? imageItems.map(item => (
+                          /* flexShrink:0 evita que el flex-column padre encoja las filas */
+                          <div key={item.itemKey} style={{ display: 'grid', gridTemplateColumns: '76px 1fr', flexShrink: 0, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 10, overflow: 'hidden' }}>
+                            {/* Thumbnail — minHeight asegura alto mínimo visible */}
+                            <div style={{ background: 'var(--bg-3)', minHeight: 80, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {item.imageUrl ? (
+                                <>
+                                  <img
+                                    src={item.imageUrl} alt=""
+                                    onClick={() => {
+                                      const urls = item.allVariations.map(v => v.url)
+                                      setZoomGallery({ urls, idx: urls.length - 1 })
+                                    }}
+                                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
+                                  />
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => item.onGenerate?.()}
+                                  disabled={item.isGenerating}
+                                  style={{ position: 'absolute', inset: 0, border: 'none', background: 'none', cursor: item.isGenerating ? 'default' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                                >
+                                  <span style={{ fontSize: 20, color: 'var(--action)', opacity: item.isGenerating ? 0.35 : 0.8 }}>{item.isGenerating ? '◌' : '✦'}</span>
+                                  <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>{item.isGenerating ? 'generating…' : 'generate'}</span>
+                                </button>
+                              )}
+                            </div>
+                            {/* Texto completo + botones */}
+                            <div style={{ padding: '11px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              <div
+                                onClick={() => setTextModal({ text: item.text, label: `Item ${item.index + 1}` })}
+                                title="Click to read full text"
+                                style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.65, cursor: 'zoom-in', display: 'flex', alignItems: 'flex-start', gap: 4 }}
+                              >
+                                <span style={{ flex: 1 }}>{item.text}</span>
+                                <span style={{ fontSize: 9, color: 'var(--text-4)', flexShrink: 0, paddingTop: 2 }}>⊕</span>
+                              </div>
+                              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                {item.imageUrl ? (
+                                  <>
+                                    <button
+                                      onClick={() => { const urls = item.allVariations.map(v => v.url); setZoomGallery({ urls, idx: urls.length - 1 }) }}
+                                      style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}
+                                    >View image{item.allVariations.length > 1 ? ` (${item.allVariations.length})` : ''}</button>
+                                    <button
+                                      onClick={() => !item.isGenerating && setVariationItemKey(item.itemKey)}
+                                      disabled={item.isGenerating}
+                                      style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--action)', background: 'color-mix(in srgb, var(--action) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--action) 25%, transparent)', borderRadius: 4, padding: '3px 8px', cursor: item.isGenerating ? 'default' : 'pointer' }}
+                                    >✦ New variation</button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={() => !item.isGenerating && item.onGenerate?.()}
+                                    disabled={item.isGenerating}
+                                    style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--action)', background: 'color-mix(in srgb, var(--action) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--action) 25%, transparent)', borderRadius: 4, padding: '3px 8px', cursor: item.isGenerating ? 'default' : 'pointer' }}
+                                  >✦ {item.isGenerating ? 'Generating…' : 'Generate image'}</button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                        : parsedItems.map((text, i) => (
+                          <div key={i} style={{ flexShrink: 0, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 10, padding: '11px 14px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                            <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', flexShrink: 0, paddingTop: 3 }}>#{i + 1}</span>
+                            <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.65 }}>{text}</div>
                           </div>
                         ))
                       }
@@ -2120,11 +2233,18 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
             setImgScale(ns); setImgOffset({ ...no })
           }
           const zoomOut = () => {
-            const ns = Math.max(1, imgScaleRef.current / 1.3)
-            const f  = ns / imgScaleRef.current
-            const no = { x: imgOffsetRef.current.x * f, y: imgOffsetRef.current.y * f }
-            imgScaleRef.current = ns; imgOffsetRef.current = no
-            setImgScale(ns); setImgOffset({ ...no })
+            const os = imgScaleRef.current
+            const ns = Math.max(1, os / 1.3)
+            imgScaleRef.current = ns
+            setImgScale(ns)
+            if (ns === 1) {
+              imgOffsetRef.current = { x: 0, y: 0 }
+              setImgOffset({ x: 0, y: 0 })
+            } else {
+              const f  = ns / os
+              const no = { x: imgOffsetRef.current.x * f, y: imgOffsetRef.current.y * f }
+              imgOffsetRef.current = no; setImgOffset({ ...no })
+            }
           }
           const btn: React.CSSProperties = {
             background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
