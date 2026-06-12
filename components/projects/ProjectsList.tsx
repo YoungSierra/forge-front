@@ -46,15 +46,15 @@ export default function ProjectsList() {
   const [sortKey, setSortKey]   = useState<SortKey>('created_desc')
   const [pageSize, setPageSize] = useState(12)
   const [page, setPage]         = useState(0)
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
 
   useEffect(() => {
-    if (user === undefined) return
+    if (authLoading) return
     getProjects(user?.id)
       .then(setProjects)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [user])
+  }, [user, authLoading])
 
   useEffect(() => { setPage(0) }, [search, pageSize, sortKey])
 

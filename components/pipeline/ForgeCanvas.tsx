@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ReactFlow, ReactFlowProvider,
@@ -17,7 +17,7 @@ import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, gener
 import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap } from '@/lib/api'
 import type { Project } from '@/lib/types'
-import NodeChatWindow, { parseOutputItems, buildImageGenComponents, ImageThumbnailRow } from '@/components/shared/NodeChatWindow'
+import NodeChatWindow, { parseOutputItems, buildImageGenComponents, ImageThumbnailRow, VariationPanel } from '@/components/shared/NodeChatWindow'
 import type { ImageOutputDef, InlineImageItem } from '@/components/shared/NodeChatWindow'
 import AssetCardDeck, { invalidateAssetDeckCache } from './AssetCardDeck'
 import ForgeToolbar from './ForgeToolbar'
@@ -612,7 +612,7 @@ function ProjectLibraryPanel({ projectId }: { projectId: string }) {
 
 // ─── NodeLibrarySidebar ───────────────────────────────────────────────────────
 
-function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded, collapsed, onCollapsedChange, onFocusNode }: {
+function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded, collapsed, onCollapsedChange, onFocusNode, isDroppingNode, dropZoneRef }: {
   projectId: string
   canvasNodeIds: Set<string>
   approvedNodeIds: Set<string>
@@ -620,7 +620,10 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded
   collapsed: boolean
   onCollapsedChange: (v: boolean) => void
   onFocusNode?: (forgeNodeId: string) => void
+  isDroppingNode?: boolean
+  dropZoneRef?: React.RefObject<HTMLDivElement>
 }) {
+  const scale = useContext(CanvasScaleContext)
   const [catalog,   setCatalog]   = useState<CatalogNode[]>([])
   const [loading,   setLoading]   = useState(true)
   const [query,     setQuery]     = useState('')
@@ -697,12 +700,36 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded
 
   /* ── Expanded ── */
   return (
-    <div style={{
-      width: 220, flexShrink: 0,
-      background: 'var(--bg-1)', borderRight: '1px solid var(--line-2)',
-      display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      transition: 'width 150ms ease',
-    }}>
+    <div
+      ref={dropZoneRef}
+      style={{
+        width: 220, flexShrink: 0, position: 'relative',
+        background: isDroppingNode ? 'color-mix(in srgb, #EF4444 8%, var(--bg-1))' : 'var(--bg-1)',
+        borderRight: `1px solid ${isDroppingNode ? 'rgba(239,68,68,0.5)' : 'var(--line-2)'}`,
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        transition: 'background 200ms, border-color 200ms',
+        zoom: scale,
+      }}
+    >
+      {/* Overlay de drop — cubre el sidebar con instrucción */}
+      {isDroppingNode && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 30, pointerEvents: 'none',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 8, background: 'rgba(239,68,68,0.07)',
+          animation: 'drop-zone-in 150ms ease',
+        }}>
+          <span style={{ fontSize: 28, lineHeight: 1, opacity: 0.7 }}>✕</span>
+          <span style={{
+            fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+            color: 'rgba(239,68,68,0.9)', textTransform: 'uppercase',
+            letterSpacing: '0.1em', textAlign: 'center', lineHeight: 1.5,
+          }}>
+            Drop to<br/>remove
+          </span>
+          <style>{`@keyframes drop-zone-in { from { opacity:0 } to { opacity:1 } }`}</style>
+        </div>
+      )}
       {/* Header: tabs + collapse */}
       <div style={{ padding: '8px 10px 0', borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -1191,6 +1218,7 @@ function extractSection(content: string, sectionName: string, otherKeys: string[
 const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeNodeCardData }) {
   const { canvasNode, onClick, locked, projectId, onImagesUpdate, isRunning, isStale, isError } = data
   const { node, session } = canvasNode
+  const scale = useContext(CanvasScaleContext)
   if (!node) return null
   const status      = session?.status ?? null
   const statusColor = locked ? null : isError ? '#EF4444' : isRunning ? '#60A5FA' : (status ? (SESSION_COLOR[status] ?? null) : null)
@@ -1220,16 +1248,186 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const [localOutputImages, setLocalOutputImages] = useState<OutputImagesMap>(
     (session?.output_images as OutputImagesMap) ?? {}
   )
-  // Sincronizar cuando se genera desde el modal de expansión (chat)
+  // Sincronizar siempre — incluye el caso session re-ejecutada con output_images = null
   useEffect(() => {
-    if (session?.output_images) {
-      setLocalOutputImages(session.output_images as OutputImagesMap)
-    }
+    setLocalOutputImages((session?.output_images as OutputImagesMap) ?? {})
   }, [session?.output_images])
-  const [generatingImgKey, setGeneratingImgKey] = useState<string | null>(null)
-  const [zoomUrl, setZoomUrl] = useState<string | null>(null)
+  const [generatingImgKey,  setGeneratingImgKey]  = useState<string | null>(null)
+  const [zoomUrl,           setZoomUrl]           = useState<string | null>(null)
+  const [zoomGallery,       setZoomGallery]       = useState<{ urls: string[]; idx: number } | null>(null)
+  // Estado de zoom interno del overlay de imagen
+  const [imgScale,          setImgScale]          = useState(1)
+  const [imgOffset,         setImgOffset]         = useState({ x: 0, y: 0 })
+  const imgScaleRef   = useRef(1)
+  const imgOffsetRef  = useRef({ x: 0, y: 0 })
+  const imgDragRef    = useRef({ active: false, startX: 0, startY: 0, startOX: 0, startOY: 0 })
+  const imgOverlayRef = useRef<HTMLDivElement>(null)
+  // Modal de texto completo para cards de galería
+  const [textModal,    setTextModal]    = useState<{ text: string; label: string } | null>(null)
+  const [textFontSize, setTextFontSize] = useState(14)
+  const [outTab,            setOutTab]            = useState<string>('')
+  // Guardamos solo el key; el item vivo se lee del ref en cada render para evitar datos stale
+  const [variationItemKey,  setVariationItemKey]  = useState<string | null>(null)
+  const imageItemsRef = useRef<import('@/components/shared/NodeChatWindow').InlineImageItem[]>([])
+
+  // Navegación de teclado para el zoom gallery
+  useEffect(() => {
+    if (!zoomGallery) return
+    const resetZoom = () => {
+      imgScaleRef.current = 1; imgOffsetRef.current = { x: 0, y: 0 }
+      setImgScale(1); setImgOffset({ x: 0, y: 0 })
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft')  { resetZoom(); setZoomGallery(g => g && g.idx > 0                 ? { ...g, idx: g.idx - 1 } : g) }
+      if (e.key === 'ArrowRight') { resetZoom(); setZoomGallery(g => g && g.idx < g.urls.length - 1 ? { ...g, idx: g.idx + 1 } : g) }
+      if (e.key === 'Escape')     setZoomGallery(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoomGallery])
+
+  // Resetear zoom cuando cambia la imagen (navegación o apertura nueva)
+  useEffect(() => {
+    imgScaleRef.current = 1; imgOffsetRef.current = { x: 0, y: 0 }
+    setImgScale(1); setImgOffset({ x: 0, y: 0 })
+  }, [zoomUrl, zoomGallery?.idx])
+
+  // Rueda (no-pasiva) + drag de paneo cuando el overlay está abierto
+  useEffect(() => {
+    const el = imgOverlayRef.current
+    if (!el || (!zoomUrl && !zoomGallery)) return
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const oldScale = imgScaleRef.current
+      const factor   = e.deltaY < 0 ? 1.12 : 1 / 1.12
+      const newScale = Math.min(8, Math.max(1, oldScale * factor))
+      if (newScale === oldScale) return
+      // zoom centrado en la posición del cursor
+      const mx = e.clientX - window.innerWidth  / 2
+      const my = e.clientY - window.innerHeight / 2
+      const f  = newScale / oldScale
+      const newOffset = {
+        x: mx * (1 - f) + imgOffsetRef.current.x * f,
+        y: my * (1 - f) + imgOffsetRef.current.y * f,
+      }
+      imgScaleRef.current  = newScale
+      imgOffsetRef.current = newOffset
+      setImgScale(newScale)
+      setImgOffset({ ...newOffset })
+    }
+
+    const onMove = (e: MouseEvent) => {
+      if (!imgDragRef.current.active) return
+      const newOffset = {
+        x: imgDragRef.current.startOX + (e.clientX - imgDragRef.current.startX),
+        y: imgDragRef.current.startOY + (e.clientY - imgDragRef.current.startY),
+      }
+      imgOffsetRef.current = newOffset
+      setImgOffset({ ...newOffset })
+    }
+
+    const onUp = () => { imgDragRef.current.active = false }
+
+    el.addEventListener('wheel', onWheel, { passive: false })
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup',   onUp)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup',   onUp)
+    }
+  }, [zoomUrl, zoomGallery])
   // Resolución del PDF URL: del asset (ya guardado) o generado on-demand en esta sesión
   const effectivePdfUrl = session?.output_asset?.storage_url || generatedPdfUrl
+
+  // ── Drag / Resize / Maximize del modal de output ─────────────────────────
+  const OUT_W = 720, OUT_H = 640, OUT_MARGIN = 12
+  const [outPos,       setOutPos]       = useState({ x: 0, y: 0 })
+  const [outSize,      setOutSize]      = useState({ w: OUT_W, h: OUT_H })
+  const [outMaximized, setOutMaximized] = useState(false)
+  const [outDragging,  setOutDragging]  = useState(false)
+  const [outResizing,  setOutResizing]  = useState(false)
+  const outDragOrigin   = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
+  const outResizeOrigin = useRef<{ sx: number; sy: number; ow: number; oh: number } | null>(null)
+  const outSizeRef      = useRef({ w: OUT_W, h: OUT_H })
+  const outSavedGeom    = useRef<{ pos: { x: number; y: number }; size: { w: number; h: number } } | null>(null)
+
+  // Posición, tamaño y tab inicial al abrir el modal
+  useEffect(() => {
+    if (!outputOpen) return
+    const w = Math.min(OUT_W, window.innerWidth  - OUT_MARGIN * 2)
+    const h = Math.min(OUT_H, window.innerHeight - OUT_MARGIN * 2)
+    const x = Math.max((window.innerWidth  - w) / 2, OUT_MARGIN)
+    const y = Math.max((window.innerHeight - h) / 2, OUT_MARGIN)
+    outSizeRef.current = { w, h }
+    setOutSize({ w, h })
+    setOutPos({ x, y })
+    setOutTab(node.outputs?.[0]?.name ?? '')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outputOpen])
+
+  const onOutDragMove = useCallback((e: MouseEvent) => {
+    if (!outDragOrigin.current) return
+    const nx = outDragOrigin.current.ox + e.clientX - outDragOrigin.current.sx
+    const ny = outDragOrigin.current.oy + e.clientY - outDragOrigin.current.sy
+    setOutPos({
+      x: Math.max(OUT_MARGIN, Math.min(nx, window.innerWidth  - outSizeRef.current.w - OUT_MARGIN)),
+      y: Math.max(OUT_MARGIN, Math.min(ny, window.innerHeight - outSizeRef.current.h - OUT_MARGIN)),
+    })
+  }, [])
+
+  const onOutDragEnd = useCallback(() => {
+    outDragOrigin.current = null
+    setOutDragging(false)
+    window.removeEventListener('mousemove', onOutDragMove)
+    window.removeEventListener('mouseup',   onOutDragEnd)
+  }, [onOutDragMove])
+
+  const onOutDragStart = (e: React.MouseEvent) => {
+    if (outMaximized) return
+    e.preventDefault()
+    outDragOrigin.current = { sx: e.clientX, sy: e.clientY, ox: outPos.x, oy: outPos.y }
+    setOutDragging(true)
+    window.addEventListener('mousemove', onOutDragMove)
+    window.addEventListener('mouseup',   onOutDragEnd)
+  }
+
+  const onOutResizeMove = useCallback((e: MouseEvent) => {
+    if (!outResizeOrigin.current) return
+    const nw = Math.max(480, Math.min(outResizeOrigin.current.ow + e.clientX - outResizeOrigin.current.sx, window.innerWidth  - OUT_MARGIN))
+    const nh = Math.max(320, Math.min(outResizeOrigin.current.oh + e.clientY - outResizeOrigin.current.sy, window.innerHeight - OUT_MARGIN))
+    outSizeRef.current = { w: nw, h: nh }
+    setOutSize({ w: nw, h: nh })
+  }, [])
+
+  const onOutResizeEnd = useCallback(() => {
+    outResizeOrigin.current = null
+    setOutResizing(false)
+    window.removeEventListener('mousemove', onOutResizeMove)
+    window.removeEventListener('mouseup',   onOutResizeEnd)
+  }, [onOutResizeMove])
+
+  const onOutResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    outResizeOrigin.current = { sx: e.clientX, sy: e.clientY, ow: outSizeRef.current.w, oh: outSizeRef.current.h }
+    setOutResizing(true)
+    window.addEventListener('mousemove', onOutResizeMove)
+    window.addEventListener('mouseup',   onOutResizeEnd)
+  }
+
+  const toggleOutMaximize = () => {
+    if (outMaximized) {
+      const g = outSavedGeom.current
+      if (g) { outSizeRef.current = g.size; setOutSize(g.size); setOutPos(g.pos) }
+      setOutMaximized(false)
+    } else {
+      outSavedGeom.current = { pos: outPos, size: outSize }
+      setOutMaximized(true)
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleGeneratePdf = useCallback(async (e?: React.MouseEvent) => {
     e?.stopPropagation()
@@ -1255,7 +1453,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   }, [])
 
   return (
-    <div style={{ position: 'relative' }} ref={cardRef}>
+    <div style={{ position: 'relative', zoom: scale }} ref={cardRef}>
       {status === 'active' && <style>{PULSE_KF}</style>}
       {isRunning && <style>{ACTION_PULSE_KF + SPIN_KF}</style>}
 
@@ -1507,28 +1705,30 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 </div>
               )}
 
-              {/* Imágenes generadas sin text asset — nodos de solo PNG */}
+              {/* Imágenes generadas — click abre slideshow directo */}
               {(() => {
                 const hasImgs = Object.values(localOutputImages).some(arr => arr.some(i => i.variations?.length > 0))
                 if (!hasImgs) return null
-                const total = Object.values(localOutputImages).reduce((s, a) => s + a.reduce((n, i) => n + (i.variations?.length ?? 0), 0), 0)
+                const allUrls = Object.values(localOutputImages).flatMap(arr => arr.flatMap(i => (i.variations ?? []).map(v => v.url)))
+                const total   = allUrls.length
+                const openSlideshow = () => setZoomGallery({ urls: allUrls, idx: 0 })
                 return (
                   <div style={{ padding: '5px 8px', borderBottom: '1px solid var(--line-2)' }} onClick={e => e.stopPropagation()}>
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 4,
-                      background: 'color-mix(in srgb, #818CF8 9%, var(--bg-2))',
-                      border: '1px solid color-mix(in srgb, #818CF8 22%, var(--line-2))',
-                      borderRadius: 5, padding: '4px 7px',
-                    }}>
+                    <div
+                      onClick={openSlideshow}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        background: 'color-mix(in srgb, #818CF8 9%, var(--bg-2))',
+                        border: '1px solid color-mix(in srgb, #818CF8 22%, var(--line-2))',
+                        borderRadius: 5, padding: '4px 7px',
+                        cursor: 'pointer',
+                      }}
+                    >
                       <span style={{ fontSize: 10, color: '#818CF8', flexShrink: 0 }}>🖼</span>
                       <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-1)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {total} image{total !== 1 ? 's' : ''} generated
                       </span>
-                      <button
-                        onClick={() => setOutputOpen(true)}
-                        title="View images"
-                        style={{ border: 'none', background: 'none', color: '#818CF8', cursor: 'pointer', fontSize: 12, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}
-                      >👁</button>
+                      <span style={{ color: '#818CF8', fontSize: 12, lineHeight: 1, flexShrink: 0 }}>👁</span>
                     </div>
                   </div>
                 )
@@ -1573,24 +1773,30 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
         />
       )}
 
-      {/* Modal de output — portal para escapar el contexto de ReactFlow */}
+      {/* Modal de output — draggable, resizable, maximizable */}
       {outputOpen && typeof document !== 'undefined' && (session?.output_asset || Object.values(localOutputImages).some(a => a.some(i => i.variations?.length > 0))) && createPortal(
         <>
           <div
-            onClick={() => setOutputOpen(false)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 10000 }}
-          />
-          <div
-            onClick={e => e.stopPropagation()}
+            onMouseDown={e => e.stopPropagation()}
             style={{
-              position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-              zIndex: 10001, width: 720, maxHeight: '82vh',
-              background: 'var(--bg-1)', border: '1px solid var(--line-2)',
-              borderRadius: 10, boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
-              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+              position:     'fixed',
+              left:         outMaximized ? 0 : outPos.x,
+              top:          outMaximized ? 0 : outPos.y,
+              zIndex:       10001,
+              width:        outMaximized ? '100vw' : outSize.w,
+              height:       outMaximized ? '100vh' : outSize.h,
+              background:   'var(--bg-1)',
+              border:       '1px solid var(--line-2)',
+              borderRadius: outMaximized ? 0 : 10,
+              boxShadow:    outMaximized ? 'none' : '0 24px 64px rgba(0,0,0,0.6)',
+              display:      'flex', flexDirection: 'column', overflow: 'hidden',
+              userSelect:   outDragging || outResizing ? 'none' : 'auto',
             }}
           >
-            <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--line-2)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div
+              onMouseDown={onOutDragStart}
+              style={{ padding: '12px 20px', borderBottom: '1px solid var(--line-2)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, cursor: outMaximized ? 'default' : (outDragging ? 'grabbing' : 'grab') }}
+            >
               <span style={{ fontSize: 14, flexShrink: 0 }}>
                 {session?.output_asset ? (effectivePdfUrl ? '📄' : '📝') : '🖼'}
               </span>
@@ -1599,11 +1805,12 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               </span>
               {session?.output_asset && (
                 <>
-                  <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', padding: '2px 6px', borderRadius: 3, flexShrink: 0 }}>
+                  <span onMouseDown={e => e.stopPropagation()} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', padding: '2px 6px', borderRadius: 3, flexShrink: 0 }}>
                     {session.output_asset.format}
                   </span>
                   {effectivePdfUrl ? (
                     <a
+                      onMouseDown={e => e.stopPropagation()}
                       href={effectivePdfUrl}
                       target="_blank"
                       rel="noreferrer"
@@ -1611,6 +1818,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                     >↓ {session.output_asset.format === 'pptx' ? 'PPTX' : 'PDF'}</a>
                   ) : session.output_asset.content ? (
                     <button
+                      onMouseDown={e => e.stopPropagation()}
                       onClick={handleGeneratePdf}
                       disabled={pdfLoading}
                       style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', background: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0, cursor: pdfLoading ? 'default' : 'pointer', opacity: pdfLoading ? 0.6 : 1 }}
@@ -1618,158 +1826,341 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                   ) : null}
                 </>
               )}
+              {/* Grip */}
+              <span onMouseDown={e => e.stopPropagation()} style={{ fontSize: 15, flexShrink: 0, lineHeight: 1, opacity: 0.55, userSelect: 'none', filter: 'brightness(0) invert(1)' }}>🖐️</span>
+              {/* Maximizar */}
               <button
+                onMouseDown={e => e.stopPropagation()}
+                onClick={toggleOutMaximize}
+                title={outMaximized ? 'Restore' : 'Maximize'}
+                style={{ border: 'none', background: 'var(--bg-2)', cursor: 'pointer', color: 'var(--text-2)', fontSize: 11, padding: '4px 7px', borderRadius: 5, lineHeight: 1, flexShrink: 0 }}
+              >{outMaximized ? '⊡' : '⊞'}</button>
+              <button
+                onMouseDown={e => e.stopPropagation()}
                 onClick={() => setOutputOpen(false)}
                 style={{ border: 'none', background: 'var(--bg-2)', cursor: 'pointer', color: 'var(--text-2)', fontSize: 13, padding: '4px 8px', borderRadius: 6, flexShrink: 0, fontFamily: 'var(--font-mono)' }}
               >✕</button>
             </div>
+            {/* Tab bar — una tab por output */}
+            {(node.outputs ?? []).length > 0 && (
+              <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--line-2)', flexShrink: 0, overflowX: 'auto' }}>
+                {(node.outputs ?? []).map(o => (
+                  <button
+                    key={o.name}
+                    onClick={() => setOutTab(o.name)}
+                    style={{
+                      padding: '8px 16px', border: 'none', borderBottom: outTab === o.name ? '2px solid var(--action)' : '2px solid transparent',
+                      marginBottom: -1, background: 'none', cursor: 'pointer',
+                      fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: outTab === o.name ? 700 : 400,
+                      color: outTab === o.name ? 'var(--action)' : 'var(--text-3)',
+                      flexShrink: 0, whiteSpace: 'nowrap', transition: 'color 120ms, border-color 120ms',
+                    }}
+                  >
+                    {o.name.replace(/_/g, ' ')}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Contenido del tab activo */}
             {(() => {
-              // Vista de solo imágenes cuando no hay text asset
-              if (!session?.output_asset) {
-                const imgOutputs = (node.outputs ?? []).filter(o => o.image_gen)
+              const outputs    = node.outputs ?? []
+              const activeOut  = outputs.find(o => o.name === outTab) ?? outputs[0]
+              if (!activeOut) return null
+
+              const isPureImage = activeOut.format === 'png' || activeOut.format === 'image'
+
+              // Tab de imagen pura
+              if (isPureImage || !session?.output_asset) {
+                const imgs    = (localOutputImages[activeOut.name] ?? []).filter(i => i.variations?.length > 0)
+                const allUrls = imgs.flatMap(item => item.variations.map(v => v.url))
                 return (
                   <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px' }}>
-                    {imgOutputs.map(outDef => {
-                      const imgs = (localOutputImages[outDef.name] ?? []).filter(i => i.variations?.length > 0)
-                      return (
-                        <div key={outDef.name} style={{ marginBottom: 28 }}>
-                          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 10, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                            {outDef.name}
-                          </div>
-                          {imgs.length === 0 ? (
-                            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>No image generated yet.</div>
-                          ) : (
-                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                              {imgs.map(item => (
-                                item.variations.map((v, vi) => (
-                                  <div key={`${item.index}-${vi}`} style={{ position: 'relative' }}>
-                                    <img
-                                      src={v.url}
-                                      alt={outDef.name}
-                                      onClick={() => setZoomUrl(v.url)}
-                                      style={{ width: 200, height: 200, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
-                                    />
-                                  </div>
-                                ))
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
+                    {imgs.length === 0 ? (
+                      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', paddingTop: 8 }}>No images generated yet.</div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                        {imgs.flatMap(item => item.variations.map((v, vi) => (
+                          <img
+                            key={`${item.index}-${vi}`}
+                            src={v.url}
+                            alt={activeOut.name}
+                            onClick={() => setZoomGallery({ urls: allUrls, idx: allUrls.indexOf(v.url) })}
+                            style={{ width: 190, height: 190, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
+                          />
+                        )))}
+                      </div>
+                    )}
                   </div>
                 )
               }
 
-              // Vista normal con markdown + botones de imagen inline
-              const modalImageItems: InlineImageItem[] = []
-              if (session.output_asset.content) {
-                const imageGenDefs = (node.outputs ?? []).filter(o => o.image_gen && o.image_gen_model)
-                let fullContentUsed = false
-                for (const outDef of imageGenDefs) {
-                  const otherKeys = imageGenDefs.filter(d => d.name !== outDef.name).map(d => d.name)
-                  const foundSection = extractSection(session.output_asset.content, outDef.name, otherKeys)
-                  if (!foundSection && fullContentUsed) continue
-                  const section = foundSection || session.output_asset.content
-                  if (!foundSection) fullContentUsed = true
-                  const items = parseOutputItems(section, outDef.format)
-                  const savedItems = localOutputImages[outDef.name] ?? []
-                  for (let idx = 0; idx < items.length; idx++) {
-                    const itemText   = items[idx]
-                    const saved      = savedItems.find(s => s.index === idx)
-                    const variations = saved?.variations ?? []
-                    const key        = `${outDef.name}:${idx}`
-                    modalImageItems.push({
-                      itemKey:       key,
-                      index:         idx,
-                      text:          itemText,
-                      imageUrl:      variations.at(-1)?.url ?? null,
-                      allVariations: variations,
-                      isGenerating:  generatingImgKey === key,
-                      onZoom:        url => setZoomUrl(url),
-                      onGenerate:    async (condition?: string) => {
-                        if (!session?.id) return
-                        setGeneratingImgKey(key)
-                        try {
-                          const r = await generateItemImage(projectId, node.id, session.id, outDef.name, idx, itemText, condition)
-                          const imgs = r.output_images
-                          setLocalOutputImages(imgs)
-                          onImagesUpdate?.(imgs)
-                        } catch (e) {
-                          console.error('[image-gen]', e)
-                        } finally {
-                          setGeneratingImgKey(null)
-                        }
-                      },
-                    })
-                  }
+              // Tab de texto/markdown
+              const otherKeys   = outputs.filter(o => o.name !== activeOut.name).map(o => o.name)
+              const section     = session.output_asset.content
+                ? (extractSection(session.output_asset.content, activeOut.name, otherKeys) ?? session.output_asset.content)
+                : null
+
+              // Detectar si el contenido es una lista estructurada
+              const parsedItems = section ? parseOutputItems(section, activeOut.format) : []
+              const isGallery   = parsedItems.length >= 2
+
+              // Construir image items si el output tiene image_gen
+              const imageItems: InlineImageItem[] = []
+              imageItemsRef.current = imageItems   // se actualiza en cada render
+              if (section && activeOut.image_gen && activeOut.image_gen_model) {
+                const savedItems = localOutputImages[activeOut.name] ?? []
+                for (let idx = 0; idx < parsedItems.length; idx++) {
+                  const itemText   = parsedItems[idx]
+                  const saved      = savedItems.find(s => s.index === idx)
+                  const variations = saved?.variations ?? []
+                  const key        = `${activeOut.name}:${idx}`
+                  imageItems.push({
+                    itemKey:       key,
+                    index:         idx,
+                    text:          itemText,
+                    imageUrl:      variations.at(-1)?.url ?? null,
+                    allVariations: variations,
+                    isGenerating:  generatingImgKey === key,
+                    onZoom:        url => setZoomUrl(url),
+                    onGenerate:    async (condition?: string) => {
+                      if (!session?.id) return
+                      setGeneratingImgKey(key)
+                      try {
+                        const r = await generateItemImage(projectId, node.id, session.id, activeOut.name, idx, itemText, condition)
+                        const imgs = r.output_images
+                        setLocalOutputImages(imgs)
+                        onImagesUpdate?.(imgs)
+                      } catch (e) { console.error('[image-gen]', e) }
+                      finally { setGeneratingImgKey(null) }
+                    },
+                  })
                 }
               }
-              const mdComponents = modalImageItems.length > 0
-                ? buildImageGenComponents(modalImageItems)
-                : MD_COMPONENTS
 
-              // Outputs PNG con imágenes guardadas — se muestran como grid debajo del texto
-              const pngOutputsWithImages = (node.outputs ?? [])
-                .filter(o => (o.format === 'png' || o.format === 'image') && o.image_gen)
-                .filter(o => (localOutputImages[o.name] ?? []).some(i => i.variations?.length > 0))
+              // Vista galería — lista estructurada con 2+ ítems
+              if (isGallery) {
+                return (
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(185px, 1fr))', gap: 12 }}>
+                      {imageItems.length > 0
+                        ? imageItems.map(item => (
+                          <div key={item.itemKey} style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                            {/* Área de imagen */}
+                            <div style={{ position: 'relative', width: '100%', paddingBottom: '100%', background: 'var(--bg-3)', flexShrink: 0 }}>
+                              <div style={{ position: 'absolute', inset: 0 }}>
+                                {item.imageUrl ? (
+                                  <>
+                                    <img
+                                      src={item.imageUrl} alt=""
+                                      onClick={() => {
+                                        // Navegar por las variaciones de esta card, no por el gallery completo
+                                        const urls = item.allVariations.map(v => v.url)
+                                        setZoomGallery({ urls, idx: urls.length - 1 })
+                                      }}
+                                      style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
+                                    />
+                                    {/* Botón ✦ — guarda solo el key para evitar datos stale */}
+                                    <button
+                                      onClick={() => item.isGenerating ? null : setVariationItemKey(item.itemKey)}
+                                      disabled={item.isGenerating}
+                                      title={item.isGenerating ? 'Generating…' : 'Generate new variation'}
+                                      style={{
+                                        position: 'absolute', bottom: 6, right: 6,
+                                        width: 26, height: 26, borderRadius: '50%',
+                                        border: '1px solid rgba(255,255,255,0.35)',
+                                        background: 'rgba(0,0,0,0.55)',
+                                        backdropFilter: 'blur(4px)',
+                                        cursor: item.isGenerating ? 'default' : 'pointer',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: 12, color: '#fff',
+                                        opacity: item.isGenerating ? 0.4 : 0.85,
+                                      }}
+                                    >
+                                      {item.isGenerating ? '◌' : '✦'}
+                                    </button>
+                                    {/* Dots de variaciones */}
+                                    {item.allVariations.length > 1 && (
+                                      <div style={{ position: 'absolute', bottom: 7, left: 0, right: 40, display: 'flex', justifyContent: 'center', gap: 4 }}>
+                                        {item.allVariations.map((_, vi) => (
+                                          <div key={vi} style={{ width: 5, height: 5, borderRadius: '50%', background: '#fff', opacity: vi === item.allVariations.length - 1 ? 1 : 0.4 }} />
+                                        ))}
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={() => item.onGenerate?.()}
+                                    disabled={item.isGenerating}
+                                    style={{ width: '100%', height: '100%', border: 'none', background: 'none', cursor: item.isGenerating ? 'default' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                                  >
+                                    <span style={{ fontSize: 22, color: 'var(--action)', opacity: item.isGenerating ? 0.35 : 0.8 }}>{item.isGenerating ? '◌' : '✦'}</span>
+                                    <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>{item.isGenerating ? 'Generating…' : 'Generate'}</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            {/* Texto — click abre modal de lectura */}
+                            <div
+                              onClick={() => setTextModal({ text: item.text, label: `Item ${item.index + 1}` })}
+                              title="Click to read full text"
+                              style={{ padding: '9px 11px', fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', lineHeight: 1.5, flex: 1, cursor: 'zoom-in', position: 'relative', display: 'flex', alignItems: 'flex-start', gap: 4 }}
+                            >
+                              <span style={{ flex: 1 }}>{item.text.length > 120 ? item.text.slice(0, 120) + '…' : item.text}</span>
+                              <span style={{ fontSize: 9, color: 'var(--text-4)', flexShrink: 0, paddingTop: 1 }}>⊕</span>
+                            </div>
+                          </div>
+                        ))
+                        : parsedItems.map((text, i) => (
+                          <div
+                            key={i}
+                            onClick={() => setTextModal({ text, label: `Item ${i + 1}` })}
+                            style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 10, padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'zoom-in' }}
+                          >
+                            <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', letterSpacing: '0.08em' }}>#{i + 1}</span>
+                            <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6 }}>{text.length > 120 ? text.slice(0, 120) + '…' : text}</div>
+                          </div>
+                        ))
+                      }
+                    </div>
+                  </div>
+                )
+              }
 
+              // Vista prosa — markdown normal
+              const mdComponents = imageItems.length > 0 ? buildImageGenComponents(imageItems) : MD_COMPONENTS
               return (
                 <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', fontSize: 12, color: 'var(--text-1)', lineHeight: 1.7 }}>
-                  {session.output_asset.content ? (
+                  {section ? (
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                      {session.output_asset.content}
+                      {section}
                     </ReactMarkdown>
                   ) : session.output_asset.storage_url ? (
                     <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
-                      This asset is stored as a file. Use the Open button above to view it.
+                      This asset is stored as a file. Use the download button above to view it.
                     </div>
                   ) : (
                     <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>No preview available.</div>
                   )}
-
-                  {/* Grid de imágenes PNG al final del contenido */}
-                  {pngOutputsWithImages.length > 0 && (
-                    <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--line-2)' }}>
-                      {pngOutputsWithImages.map(outDef => {
-                        const imgs = (localOutputImages[outDef.name] ?? []).filter(i => i.variations?.length > 0)
-                        return (
-                          <div key={outDef.name} style={{ marginBottom: 20 }}>
-                            <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 10, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                              {outDef.name}
-                            </div>
-                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                              {imgs.flatMap(item => item.variations.map((v, vi) => (
-                                <img
-                                  key={`${item.index}-${vi}`}
-                                  src={v.url}
-                                  alt={outDef.name}
-                                  onClick={() => setZoomUrl(v.url)}
-                                  style={{ width: 190, height: 190, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
-                                />
-                              )))}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
                 </div>
               )
             })()}
+
+            {/* Handle de resize — esquina inferior derecha */}
+            {!outMaximized && (
+              <div
+                onMouseDown={onOutResizeStart}
+                style={{ position: 'absolute', bottom: 0, right: 0, width: 18, height: 18, cursor: 'se-resize', display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', padding: 4 }}
+              >
+                <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: 0.3 }}>
+                  <line x1="2" y1="10" x2="10" y2="2" stroke="var(--text-1)" strokeWidth="1.5" strokeLinecap="round"/>
+                  <line x1="5" y1="10" x2="10" y2="5" stroke="var(--text-1)" strokeWidth="1.5" strokeLinecap="round"/>
+                  <line x1="8" y1="10" x2="10" y2="8" stroke="var(--text-1)" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+              </div>
+            )}
           </div>
 
-          {/* Zoom overlay */}
-          {zoomUrl && (
+          {/* VariationPanel — lee item vivo del ref para no usar datos stale */}
+          {variationItemKey && (() => {
+            const liveItem = imageItemsRef.current.find(i => i.itemKey === variationItemKey)
+            return liveItem
+              ? <VariationPanel item={liveItem} onClose={() => setVariationItemKey(null)} />
+              : null
+          })()}
+
+          {/* Modal de texto completo con control de tamaño de fuente */}
+          {textModal && (
             <div
-              onClick={() => setZoomUrl(null)}
-              style={{ position: 'fixed', inset: 0, zIndex: 10002, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32, cursor: 'zoom-out' }}
+              onClick={() => setTextModal(null)}
+              style={{ position: 'fixed', inset: 0, zIndex: 10004, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}
             >
-              <img src={zoomUrl} alt="Generated" onClick={e => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 10, boxShadow: '0 24px 80px rgba(0,0,0,0.7)', cursor: 'default' }} />
-              <button onClick={() => setZoomUrl(null)} style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#fff', fontSize: 14, padding: '4px 10px', cursor: 'pointer' }}>✕</button>
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, width: '100%', maxWidth: 620, maxHeight: '72vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.55)' }}
+              >
+                <div style={{ padding: '11px 16px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: 12 }}>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{textModal.label}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <button onClick={() => setTextFontSize(s => Math.max(10, s - 1))} style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 5, color: 'var(--text-1)', fontSize: 13, fontWeight: 700, padding: '3px 9px', cursor: 'pointer', lineHeight: 1 }}>A−</button>
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', minWidth: 32, textAlign: 'center' }}>{textFontSize}px</span>
+                    <button onClick={() => setTextFontSize(s => Math.min(28, s + 1))} style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 5, color: 'var(--text-1)', fontSize: 13, fontWeight: 700, padding: '3px 9px', cursor: 'pointer', lineHeight: 1 }}>A+</button>
+                    <button onClick={() => setTextFontSize(14)} style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 5, color: 'var(--text-3)', fontSize: 10, fontFamily: 'var(--font-mono)', padding: '4px 8px', cursor: 'pointer', lineHeight: 1, marginLeft: 2 }} title="Reset font size">↺</button>
+                    <button onClick={() => setTextModal(null)} style={{ background: 'none', border: 'none', color: 'var(--text-3)', fontSize: 16, cursor: 'pointer', lineHeight: 1, padding: '0 0 0 8px' }}>✕</button>
+                  </div>
+                </div>
+                <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, fontSize: textFontSize, lineHeight: 1.75, color: 'var(--text-1)', whiteSpace: 'pre-wrap' }}>
+                  {textModal.text}
+                </div>
+              </div>
             </div>
           )}
         </>,
+        document.body
+      )}
+
+      {/* Zoom overlay — portal independiente, funciona sin necesidad de outputOpen */}
+      {(zoomUrl || zoomGallery) && typeof document !== 'undefined' && createPortal(
+        (() => {
+          const src      = zoomGallery ? zoomGallery.urls[zoomGallery.idx] : zoomUrl!
+          const hasPrev  = zoomGallery && zoomGallery.idx > 0
+          const hasNext  = zoomGallery && zoomGallery.idx < zoomGallery.urls.length - 1
+          const close    = () => { setZoomUrl(null); setZoomGallery(null) }
+          const resetZoom = () => {
+            imgScaleRef.current = 1; imgOffsetRef.current = { x: 0, y: 0 }
+            setImgScale(1); setImgOffset({ x: 0, y: 0 })
+          }
+          const navPrev = () => { resetZoom(); setZoomGallery(g => g ? { ...g, idx: g.idx - 1 } : g) }
+          const navNext = () => { resetZoom(); setZoomGallery(g => g ? { ...g, idx: g.idx + 1 } : g) }
+          const zoomIn  = () => {
+            const ns = Math.min(8, imgScaleRef.current * 1.3)
+            const f  = ns / imgScaleRef.current
+            const no = { x: imgOffsetRef.current.x * f, y: imgOffsetRef.current.y * f }
+            imgScaleRef.current = ns; imgOffsetRef.current = no
+            setImgScale(ns); setImgOffset({ ...no })
+          }
+          const zoomOut = () => {
+            const ns = Math.max(1, imgScaleRef.current / 1.3)
+            const f  = ns / imgScaleRef.current
+            const no = { x: imgOffsetRef.current.x * f, y: imgOffsetRef.current.y * f }
+            imgScaleRef.current = ns; imgOffsetRef.current = no
+            setImgScale(ns); setImgOffset({ ...no })
+          }
+          const btn: React.CSSProperties = {
+            background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 6, color: '#fff', cursor: 'pointer', lineHeight: 1, flexShrink: 0,
+          }
+          return (
+            <div
+              ref={imgOverlayRef}
+              onClick={() => { if (imgScaleRef.current <= 1) close() }}
+              onMouseDown={e => {
+                if (imgScaleRef.current <= 1 || e.button !== 0) return
+                e.preventDefault()
+                imgDragRef.current = { active: true, startX: e.clientX, startY: e.clientY, startOX: imgOffsetRef.current.x, startOY: imgOffsetRef.current.y }
+              }}
+              style={{ position: 'fixed', inset: 0, zIndex: 10002, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: imgScale > 1 ? 'grab' : 'zoom-out', userSelect: 'none' }}
+            >
+              <img
+                src={src} alt="" draggable={false}
+                style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: imgScale > 1 ? 4 : 10, boxShadow: '0 24px 80px rgba(0,0,0,0.7)', display: 'block', pointerEvents: 'none', transform: `translate(${imgOffset.x}px, ${imgOffset.y}px) scale(${imgScale})`, transformOrigin: 'center center', willChange: 'transform' }}
+              />
+              {hasPrev && <button onClick={e => { e.stopPropagation(); navPrev() }} style={{ ...btn, position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 22, padding: '10px 14px' }}>‹</button>}
+              {hasNext && <button onClick={e => { e.stopPropagation(); navNext() }} style={{ ...btn, position: 'absolute', right: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 22, padding: '10px 14px' }}>›</button>}
+              <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {zoomGallery && zoomGallery.urls.length > 1 && (
+                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.6)', background: 'rgba(0,0,0,0.45)', padding: '5px 12px', borderRadius: 99, marginRight: 4 }}>
+                    {zoomGallery.idx + 1} / {zoomGallery.urls.length}
+                  </span>
+                )}
+                <button onClick={() => zoomOut()} style={{ ...btn, fontSize: 18, padding: '4px 11px' }} title="Zoom out">−</button>
+                <button onClick={() => resetZoom()} style={{ ...btn, fontSize: 10, fontFamily: 'var(--font-mono)', padding: '5px 10px', minWidth: 46, textAlign: 'center', opacity: imgScale === 1 ? 0.45 : 1 }} title="Reset zoom">{Math.round(imgScale * 100)}%</button>
+                <button onClick={() => zoomIn()} style={{ ...btn, fontSize: 18, padding: '4px 11px' }} title="Zoom in">+</button>
+              </div>
+              <button onClick={e => { e.stopPropagation(); close() }} style={{ ...btn, position: 'absolute', top: 20, right: 20, fontSize: 14, padding: '4px 10px' }}>✕</button>
+            </div>
+          )
+        })(),
         document.body
       )}
     </div>
@@ -1890,6 +2281,8 @@ function MonoPair({ k, v, color }: { k: string; v: string; color?: string }) {
   )
 }
 
+const PANEL_POS_KEY = 'forge_node_panel_pos'
+
 function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutput, removing, locked, projectId, canvasNodes, edges }: {
   canvasNode:          CanvasNode
   onClose:             () => void
@@ -1903,25 +2296,73 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
   edges:               Edge[]
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const [pos, setPos] = useState<{ x: number; y: number }>(() => {
+    if (typeof window === 'undefined') return { x: 0, y: 80 }
+    try {
+      const saved = localStorage.getItem(PANEL_POS_KEY)
+      if (saved) {
+        const p = JSON.parse(saved)
+        return {
+          x: Math.max(0, Math.min(window.innerWidth  - 340, p.x)),
+          y: Math.max(0, Math.min(window.innerHeight - 200, p.y)),
+        }
+      }
+    } catch {}
+    return { x: Math.max(0, window.innerWidth - 360), y: 80 }
+  })
+  const draggingRef  = useRef(false)
+  const offsetRef    = useRef({ x: 0, y: 0 })
+
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      if (!draggingRef.current) return
+      setPos({
+        x: Math.max(0, Math.min(window.innerWidth  - 340, e.clientX - offsetRef.current.x)),
+        y: Math.max(0, Math.min(window.innerHeight - 200, e.clientY - offsetRef.current.y)),
+      })
+    }
+    function onMouseUp() {
+      if (!draggingRef.current) return
+      draggingRef.current = false
+      setPos(prev => { localStorage.setItem(PANEL_POS_KEY, JSON.stringify(prev)); return prev })
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup',   onMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup',   onMouseUp)
+    }
+  }, [])
+
+  function onHeaderMouseDown(e: React.MouseEvent) {
+    if ((e.target as HTMLElement).closest('button')) return
+    draggingRef.current = true
+    offsetRef.current   = { x: e.clientX - pos.x, y: e.clientY - pos.y }
+    e.preventDefault()
+  }
+
   const { node, session } = canvasNode
   if (!node) return null
   const statusColor = session ? (SESSION_COLOR[session.status] ?? 'var(--text-3)') : null
   const phaseColor  = PHASE_COLOR[node.phase] ?? 'var(--text-3)'
 
-
-
   return (
-    <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(0,0,0,0.18)' }} />
-      <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: 340, zIndex: 50,
-        background: 'var(--bg-1)', borderLeft: '1px solid var(--line-2)',
-        boxShadow: '-8px 0 40px rgba(0,0,0,0.3)',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }}>
-        {/* Header */}
-        <div style={{ padding: '16px 18px 14px', borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 9 }}>
+    <div style={{
+      position: 'fixed', left: pos.x, top: pos.y, width: 340, zIndex: 50,
+      maxHeight: 'calc(100vh - 100px)',
+      background: 'var(--bg-1)', border: '1px solid var(--line-2)',
+      borderRadius: 10,
+      boxShadow: '0 8px 40px rgba(0,0,0,0.45)',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
+      {/* Header — arrastrable */}
+      <div
+        onMouseDown={onHeaderMouseDown}
+        style={{ padding: '12px 14px 12px', borderBottom: '1px solid var(--line-2)', flexShrink: 0, cursor: 'grab', userSelect: 'none' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 9 }}>
+            {/* Grip — mano abierta blanca, igual al cursor grab del browser */}
+            <span style={{ fontSize: 15, flexShrink: 0, lineHeight: 1, opacity: 0.55, userSelect: 'none', filter: 'brightness(0) invert(1)' }}>🖐️</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 3 }}>{node.node_key}</div>
               <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-0)', lineHeight: 1.2 }}>{node.title}</div>
@@ -2164,8 +2605,7 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
             </button>
           )}
         </div>
-      </div>
-    </>
+    </div>
   )
 }
 
@@ -2260,6 +2700,13 @@ function BlueprintBar({ activeBlueprint, projectId, onLoaded }: {
 
 // ─── ForgeCanvasInner ─────────────────────────────────────────────────────────
 
+const TEXT_SIZE_KEY    = 'forge_canvas_text_size'
+const TEXT_SIZE_SCALES = { sm: 0.88, md: 1.0, lg: 1.22 } as const
+type TextSize = keyof typeof TEXT_SIZE_SCALES
+
+// Contexto para pasar el scale a los nodos y sidebar sin prop-drilling
+const CanvasScaleContext = createContext(1)
+
 function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh: () => void }) {
   const [canvasData,        setCanvasData]        = useState<CanvasData | null>(null)
   const [loading,           setLoading]           = useState(true)
@@ -2281,6 +2728,12 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [runningNodeIds,    setRunningNodeIds]     = useState<Set<string>>(new Set())
   const [runErrorNodeId,    setRunErrorNodeId]     = useState<string | null>(null)
   const [runErrors,         setRunErrors]          = useState<import('@/lib/api').RunValidateError[]>([])
+  const [draggingNodeId,    setDraggingNodeId]     = useState<string | null>(null)
+  const dropZoneRef = useRef<HTMLDivElement>(null)
+  const [textSize,          setTextSize]           = useState<TextSize>(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(TEXT_SIZE_KEY) : null
+    return (saved as TextSize | null) ?? 'md'
+  })
 
   // Expone ancho del sidebar como CSS var para que FeedbackWidget calcule su posición
   useEffect(() => {
@@ -2617,6 +3070,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const { zoomIn, zoomOut, fitView, getViewport, setViewport, screenToFlowPosition, getNodes, setCenter, getNode } = useReactFlow()
   const { zoom } = useViewport()
 
+  function applyTextSize(size: TextSize) {
+    setTextSize(size)
+    localStorage.setItem(TEXT_SIZE_KEY, size)
+  }
+
   const handleFocusNode = useCallback((forgeNodeId: string) => {
     const cn = canvasData?.nodes.find(n => n.node?.id === forgeNodeId)
     if (!cn) return
@@ -2632,7 +3090,6 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   useEffect(() => {
     if (viewportInitRef.current || !canvasData) return
     viewportInitRef.current = true
-    // Esperar un frame para que ReactFlow posicione los nodos antes de cambiar la cámara
     setTimeout(() => {
       if (savedLayout?.viewport) {
         setViewport(savedLayout.viewport, { duration: 0 })
@@ -2803,27 +3260,50 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     }
   }, [project.id, screenToFlowPosition, loadCanvas, getNodes])
 
-  async function handleRemoveNode() {
-    if (!selectedNode) return
-    setRemoving(true)
+  async function removeNodeById(projectNodeId: string) {
     try {
-      await canvasFetch(`/api/projects/${project.id}/canvas/nodes/${selectedNode.project_node_id}`, { method: 'DELETE' })
-      const removedId = selectedNode.project_node_id
-      setSelectedNode(null)
-      // Actualizar estado local sin recargar todo el canvas
-      setNodes(prev => prev.filter(n => n.id !== removedId))
-      setEdges(prev => prev.filter(e => e.source !== removedId && e.target !== removedId))
+      await canvasFetch(`/api/projects/${project.id}/canvas/nodes/${projectNodeId}`, { method: 'DELETE' })
+      setNodes(prev => prev.filter(n => n.id !== projectNodeId))
+      setEdges(prev => prev.filter(e => e.source !== projectNodeId && e.target !== projectNodeId))
       setCanvasData(prev => prev
-        ? { ...prev, nodes: prev.nodes.filter(cn => cn.project_node_id !== removedId) }
+        ? { ...prev, nodes: prev.nodes.filter(cn => cn.project_node_id !== projectNodeId) }
         : prev
       )
       requestAnimationFrame(persistLayout)
     } catch (e) {
       console.error('[forge-canvas] remove failed', e)
+    }
+  }
+
+  async function handleRemoveNode() {
+    if (!selectedNode) return
+    setRemoving(true)
+    setSelectedNode(null)
+    try {
+      await removeNodeById(selectedNode.project_node_id)
     } finally {
       setRemoving(false)
     }
   }
+
+  const handleNodeDragStart = useCallback((_event: React.MouseEvent, node: import('reactflow').Node) => {
+    setDraggingNodeId(node.id)
+  }, [])
+
+  const handleNodeDragStop = useCallback((event: React.MouseEvent, node: import('reactflow').Node) => {
+    persistLayout()
+    if (dropZoneRef.current) {
+      // getBoundingClientRect ya devuelve coords de pantalla reales (incluye zoom CSS)
+      const rect = dropZoneRef.current.getBoundingClientRect()
+      if (
+        event.clientX >= rect.left && event.clientX <= rect.right &&
+        event.clientY >= rect.top  && event.clientY <= rect.bottom
+      ) {
+        removeNodeById(node.id)
+      }
+    }
+    setDraggingNodeId(null)
+  }, [persistLayout])
 
   // Topological sort: devuelve tiers de project_node_ids en orden de ejecución
   function topoTiers(nodes: CanvasNode[], edges: DbEdge[]): string[][] {
@@ -2997,7 +3477,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     )
   }
 
+  const canvasScale = TEXT_SIZE_SCALES[textSize]
+
   return (
+    <CanvasScaleContext.Provider value={canvasScale}>
     <>
     <ForgeToolbar
       project={project}
@@ -3020,6 +3503,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         collapsed={sidebarCollapsed}
         onCollapsedChange={setSidebarCollapsed}
         onFocusNode={handleFocusNode}
+        isDroppingNode={!!draggingNodeId}
+        dropZoneRef={dropZoneRef}
       />
 
       {/* Área principal: blueprint bar + canvas */}
@@ -3045,6 +3530,27 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
                 {label}
               </button>
             ))}
+            {/* Separador */}
+            <div style={{ width: 1, height: 16, background: 'var(--line-2)', margin: '0 2px', flexShrink: 0 }} />
+            {/* Botones de tamaño de texto */}
+            {(['sm', 'md', 'lg'] as const).map((size, i) => (
+              <button
+                key={size}
+                title={{ sm: 'Small text', md: 'Medium text', lg: 'Large text' }[size]}
+                onClick={() => applyTextSize(size)}
+                style={{
+                  padding: '3px 7px', borderRadius: 6, cursor: 'pointer',
+                  border: `1px solid ${textSize === size ? 'var(--accent, #7c6af7)' : 'var(--line-2)'}`,
+                  background: textSize === size ? 'color-mix(in srgb, var(--accent, #7c6af7) 15%, var(--bg-2))' : 'var(--bg-2)',
+                  color: textSize === size ? 'var(--accent, #7c6af7)' : 'var(--text-2)',
+                  fontFamily: 'var(--font-mono)', fontWeight: 700,
+                  fontSize: [9, 11, 13][i],
+                  lineHeight: 1, transition: 'all 150ms',
+                }}
+              >
+                A
+              </button>
+            ))}
             <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', minWidth: 32, textAlign: 'right' }}>
               {Math.round(zoom * 100)}%
             </span>
@@ -3068,7 +3574,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             onConnect={onConnect}
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
-            onNodeDragStop={persistLayout}
+            onNodeDragStart={handleNodeDragStart}
+            onNodeDragStop={handleNodeDragStop}
             onMoveEnd={persistLayout}
             onDragOver={handleDragOver}
             onDrop={handleDrop}
@@ -3399,6 +3906,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     )}
     </div>
     </>
+    </CanvasScaleContext.Provider>
   )
 }
 

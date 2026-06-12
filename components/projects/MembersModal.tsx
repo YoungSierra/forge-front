@@ -1,13 +1,10 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
-import type { ProjectMember, Member, Discipline } from '@/lib/types'
+import { useEffect, useState } from 'react'
+import type { ProjectMember, Member } from '@/lib/types'
 import { getProjectMembers, searchMembers, addProjectMember, removeProjectMember } from '@/lib/api'
 
-const DISCIPLINES: Discipline[] = ['design', 'art', 'vfx', 'code', 'audio', 'infra']
-const ROLES = ['reviewer', 'editor', 'lead']
-
-const DISC_COLOR: Record<Discipline, string> = {
+const DISC_COLOR: Record<string, string> = {
   design: 'var(--cat-design)',
   art:    'var(--cat-asset)',
   vfx:    'var(--cat-level)',
@@ -41,49 +38,44 @@ interface Props {
 
 export default function MembersModal({ projectId, projectName, ownerMemberId, currentMemberId, onClose }: Props) {
   const [members, setMembers]         = useState<ProjectMember[]>([])
+  const [allMembers, setAllMembers]   = useState<Member[]>([])
   const [loading, setLoading]         = useState(true)
-  const [searchQ, setSearchQ]         = useState('')
-  const [searchResults, setSearchResults] = useState<Member[]>([])
-  const [searching, setSearching]     = useState(false)
-  const [selectedMember, setSelected] = useState<Member | null>(null)
-  const [discipline, setDiscipline]   = useState<Discipline>('design')
-  const [role, setRole]               = useState('reviewer')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [adding, setAdding]           = useState(false)
   const [error, setError]             = useState<string | null>(null)
-  const searchTimeout                 = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Puede gestionar el equipo: el owner del proyecto o cualquier admin global
-  const isOwner    = currentMemberId === ownerMemberId
-  const isAdmin    = members.some(m => m.members.id === currentMemberId && m.members.role === 'admin')
-  const canManage  = isOwner || isAdmin
+  const [filterQ, setFilterQ]         = useState('')
+
+  const isOwner   = currentMemberId === ownerMemberId
+  const isAdmin   = members.some(m => m.members.id === currentMemberId && m.members.role === 'admin')
+  const canManage = isOwner || isAdmin
 
   useEffect(() => {
-    getProjectMembers(projectId)
-      .then(setMembers)
-      .finally(() => setLoading(false))
+    Promise.all([
+      getProjectMembers(projectId),
+      searchMembers(''),
+    ]).then(([pm, all]) => {
+      setMembers(pm)
+      setAllMembers(all)
+    }).finally(() => setLoading(false))
   }, [projectId])
 
-  useEffect(() => {
-    if (!searchQ.trim()) { setSearchResults([]); return }
-    if (searchTimeout.current) clearTimeout(searchTimeout.current)
-    searchTimeout.current = setTimeout(async () => {
-      setSearching(true)
-      const results = await searchMembers(searchQ)
-      const existingIds = new Set(members.map(m => m.members.id))
-      setSearchResults(results.filter(r => !existingIds.has(r.id)))
-      setSearching(false)
-    }, 300)
-  }, [searchQ, members])
+  // Miembros que todavía no están en el proyecto
+  const existingIds  = new Set(members.map(m => m.members.id))
+  const q            = filterQ.toLowerCase()
+  const available    = allMembers
+    .filter(m => !existingIds.has(m.id))
+    .filter(m => !q || m.display_name.toLowerCase().includes(q))
 
   async function handleAdd() {
-    if (!selectedMember) return
+    if (selectedIds.size === 0) return
     setAdding(true)
     setError(null)
     try {
-      const newMember = await addProjectMember(projectId, selectedMember.id, role, discipline)
-      setMembers(prev => [...prev, newMember])
-      setSelected(null)
-      setSearchQ('')
-      setSearchResults([])
+      const results = await Promise.all(
+        [...selectedIds].map(id => addProjectMember(projectId, id))
+      )
+      setMembers(prev => [...prev, ...results])
+      setSelectedIds(new Set())
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error adding member')
     } finally {
@@ -100,13 +92,20 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
     }
   }
 
+  function toggleMember(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
   return (
-    <div
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-    >
-      <div style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, width: '100%', maxWidth: 480, maxHeight: canManage ? '80vh' : '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+      <div style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, width: '100%', maxWidth: 520, maxHeight: '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
         {/* Header */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>Team Members</div>
             <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'monospace', marginTop: 2 }}>{projectName}</div>
@@ -114,29 +113,32 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 18, lineHeight: 1, padding: 4 }}>✕</button>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Members list */}
-          <div>
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+
+          {/* Miembros actuales del proyecto */}
+          <div style={{ padding: '14px 20px 0' }}>
             <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
               Members {!loading && `(${members.length})`}
             </div>
             {loading ? (
-              <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'monospace' }}>Loading...</div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'monospace', paddingBottom: 12 }}>Loading...</div>
             ) : members.length === 0 ? (
-              <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'monospace' }}>No members yet</div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'monospace', paddingBottom: 12 }}>No members yet</div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: canManage ? 220 : undefined, overflowY: 'auto' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto', paddingBottom: 14 }}>
                 {members.map(pm => (
-                  <div key={pm.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--line-2)' }}>
+                  <div key={pm.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--bg-2)', borderRadius: 8, border: '1px solid var(--line-2)', flexShrink: 0 }}>
                     <Avatar member={pm.members} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {pm.members.display_name}
                       </div>
                       <div style={{ display: 'flex', gap: 4, marginTop: 3 }}>
-                        <span style={{ fontSize: 9, fontFamily: 'monospace', color: DISC_COLOR[pm.discipline], background: `color-mix(in srgb, ${DISC_COLOR[pm.discipline]} 12%, transparent)`, padding: '1px 6px', borderRadius: 99 }}>
-                          {pm.discipline}
-                        </span>
+                        {pm.discipline && (
+                          <span style={{ fontSize: 9, fontFamily: 'monospace', color: DISC_COLOR[pm.discipline] ?? 'var(--text-3)', background: `color-mix(in srgb, ${DISC_COLOR[pm.discipline] ?? 'var(--text-3)'} 12%, transparent)`, padding: '1px 6px', borderRadius: 99 }}>
+                            {pm.discipline}
+                          </span>
+                        )}
                         <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--text-3)', background: 'var(--bg-3)', padding: '1px 6px', borderRadius: 99 }}>
                           {pm.project_role}
                         </span>
@@ -160,69 +162,90 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
             )}
           </div>
 
-          {/* Add member — only owner */}
-          {canManage && (
-            <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 16 }}>
-              <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+          {/* Panel de selección — solo si puede gestionar */}
+          {canManage && !loading && (
+            <div style={{ borderTop: '1px solid var(--line-2)', padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0 }}>
+              <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                 Add Member
               </div>
 
-              {/* Search */}
-              <div style={{ position: 'relative', marginBottom: 8 }}>
-                <input
-                  value={searchQ}
-                  onChange={e => { setSearchQ(e.target.value); setSelected(null) }}
-                  placeholder="Search by name..."
-                  style={{ width: '100%', background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '7px 10px', fontSize: 12, color: 'var(--text-0)', outline: 'none', boxSizing: 'border-box' }}
-                />
-                {searchResults.length > 0 && !selectedMember && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, marginTop: 2, zIndex: 10, overflow: 'hidden' }}>
-                    {searchResults.map(m => (
-                      <div
-                        key={m.id}
-                        onClick={() => { setSelected(m); setSearchQ(m.display_name); setSearchResults([]) }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', cursor: 'pointer', fontSize: 12, color: 'var(--text-0)' }}
-                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-3)')}
-                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                      >
-                        <Avatar member={m} size={24} />
-                        {m.display_name}
-                      </div>
-                    ))}
+              {/* Filtro rápido */}
+              <input
+                value={filterQ}
+                onChange={e => setFilterQ(e.target.value)}
+                placeholder="Filter members..."
+                style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '7px 10px', fontSize: 12, color: 'var(--text-0)', outline: 'none', flexShrink: 0 }}
+              />
+
+              {/* Lista scrolleable de todos los miembros disponibles */}
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 120, maxHeight: 260 }}>
+                {available.length === 0 ? (
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'monospace', padding: '12px 0', textAlign: 'center' }}>
+                    {filterQ ? 'No members match the filter' : 'All members are already in this project'}
                   </div>
-                )}
+                ) : available.map(m => {
+                  const isSelected = selectedIds.has(m.id)
+                  return (
+                    <div
+                      key={m.id}
+                      onClick={() => toggleMember(m.id)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                        border: `1px solid ${isSelected ? 'var(--action)' : 'var(--line-2)'}`,
+                        background: isSelected ? 'color-mix(in srgb, var(--action) 10%, var(--bg-2))' : 'var(--bg-2)',
+                        transition: 'border-color 120ms, background 120ms',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {/* Checkbox visual */}
+                      <div style={{
+                        width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                        border: `1.5px solid ${isSelected ? 'var(--action)' : 'var(--line-1)'}`,
+                        background: isSelected ? 'var(--action)' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'all 120ms',
+                        fontSize: 10, color: '#fff',
+                      }}>
+                        {isSelected && '✓'}
+                      </div>
+                      <Avatar member={m} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {m.display_name}
+                        </div>
+                        {m.role && (
+                          <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', marginTop: 2 }}>{m.role}</div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
 
-              {/* Discipline + Role */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <select
-                  value={discipline}
-                  onChange={e => setDiscipline(e.target.value as Discipline)}
-                  style={{ flex: 1, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '7px 8px', fontSize: 12, color: 'var(--text-0)', outline: 'none' }}
-                >
-                  {DISCIPLINES.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-                <select
-                  value={role}
-                  onChange={e => setRole(e.target.value)}
-                  style={{ flex: 1, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '7px 8px', fontSize: 12, color: 'var(--text-0)', outline: 'none' }}
-                >
-                  {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-              </div>
-
+              {/* Botón de añadir */}
               <button
                 onClick={handleAdd}
-                disabled={!selectedMember || adding}
-                style={{ width: '100%', padding: '8px', borderRadius: 6, border: 'none', cursor: selectedMember ? 'pointer' : 'not-allowed', background: selectedMember ? 'var(--action)' : 'var(--bg-4)', color: selectedMember ? 'var(--action-fg)' : 'var(--text-3)', fontSize: 12, fontWeight: 600, transition: 'all 120ms' }}
+                disabled={selectedIds.size === 0 || adding}
+                style={{
+                  padding: '9px', borderRadius: 6, border: 'none', flexShrink: 0,
+                  cursor: selectedIds.size > 0 ? 'pointer' : 'not-allowed',
+                  background: selectedIds.size > 0 ? 'var(--action)' : 'var(--bg-4)',
+                  color: selectedIds.size > 0 ? 'var(--action-fg)' : 'var(--text-3)',
+                  fontSize: 12, fontWeight: 600, transition: 'all 120ms',
+                }}
               >
-                {adding ? 'Adding...' : '+ Add to project'}
+                {adding
+                  ? 'Adding...'
+                  : selectedIds.size > 0
+                    ? `+ Add ${selectedIds.size} member${selectedIds.size > 1 ? 's' : ''}`
+                    : '+ Add Members'}
               </button>
             </div>
           )}
 
           {error && (
-            <div style={{ fontSize: 11, color: 'var(--cat-output)', fontFamily: 'monospace', background: 'color-mix(in srgb, var(--cat-output) 10%, transparent)', padding: '6px 10px', borderRadius: 6 }}>
+            <div style={{ margin: '0 20px 14px', fontSize: 11, color: 'var(--cat-output)', fontFamily: 'monospace', background: 'color-mix(in srgb, var(--cat-output) 10%, transparent)', padding: '6px 10px', borderRadius: 6 }}>
               {error}
             </div>
           )}

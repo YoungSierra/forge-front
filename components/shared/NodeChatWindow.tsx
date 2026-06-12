@@ -72,6 +72,8 @@ const KEYFRAMES = `
 
 const WINDOW_W = 560
 const WINDOW_H = 820
+// Margen mínimo respecto al borde de pantalla
+const MARGIN   = 12
 
 // ─── Typing dots ──────────────────────────────────────────────────────────────
 
@@ -104,7 +106,7 @@ export interface InlineImageItem {
 }
 
 // Panel modal para generar una nueva variación con condiciones del usuario
-function VariationPanel({ item, onClose }: { item: InlineImageItem; onClose: () => void }) {
+export function VariationPanel({ item, onClose }: { item: InlineImageItem; onClose: () => void }) {
   const [condition, setCondition] = useState('')
   const [generating, setGenerating] = useState(false)
   const [internalZoomUrl, setInternalZoomUrl] = useState<string | null>(null)
@@ -671,21 +673,32 @@ export default function NodeChatWindow({
   const [generatingImgKeys, setGeneratingImgKeys] = useState<Set<string>>(new Set())  // set de "outputKey:index" en progreso
   const [zoomImageUrl,    setZoomImageUrl]    = useState<string | null>(null)
 
-  // Posición del drag — calculada tras mount para evitar problemas de SSR
+  // Posición y tamaño del modal — calculados tras mount para evitar SSR
   const [pos,        setPos]        = useState({ x: 0, y: 0 })
+  const [size,       setSize]       = useState({ w: WINDOW_W, h: WINDOW_H })
+  const [maximized,  setMaximized]  = useState(false)
   const [positioned, setPositioned] = useState(false)
   const [dragging,   setDragging]   = useState(false)
-  const dragOrigin = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
+  const [resizing,   setResizing]   = useState(false)
+  const dragOrigin   = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
+  const resizeOrigin = useRef<{ sx: number; sy: number; ow: number; oh: number } | null>(null)
+  const savedGeom    = useRef<{ pos: { x: number; y: number }; size: { w: number; h: number } } | null>(null)
+  // Ref para acceder al tamaño actual sin closure stale
+  const sizeRef      = useRef({ w: WINDOW_W, h: WINDOW_H })
 
   const bottomRef  = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  // Posición inicial: lado derecho, centrado verticalmente
+  // Posición y tamaño iniciales: lado derecho, centrado verticalmente
   useEffect(() => {
-    const x = Math.max(window.innerWidth - WINDOW_W - 24, 20)
-    const y = Math.max((window.innerHeight - WINDOW_H) / 2, 20)
+    const w = Math.min(WINDOW_W, window.innerWidth  - MARGIN * 2)
+    const h = Math.min(WINDOW_H, window.innerHeight - MARGIN * 2)
+    const x = Math.max(window.innerWidth  - w - MARGIN, MARGIN)
+    const y = Math.max((window.innerHeight - h) / 2,    MARGIN)
+    sizeRef.current = { w, h }
+    setSize({ w, h })
     setPos({ x, y })
     setPositioned(true)
   }, [])
@@ -710,10 +723,10 @@ export default function NodeChatWindow({
     if (!dragOrigin.current) return
     const nx = dragOrigin.current.ox + e.clientX - dragOrigin.current.sx
     const ny = dragOrigin.current.oy + e.clientY - dragOrigin.current.sy
-    // Clamp para no salir de pantalla
+    // Clamp usando sizeRef para evitar closure stale
     setPos({
-      x: Math.max(0, Math.min(nx, window.innerWidth  - WINDOW_W)),
-      y: Math.max(0, Math.min(ny, window.innerHeight - WINDOW_H)),
+      x: Math.max(MARGIN, Math.min(nx, window.innerWidth  - sizeRef.current.w - MARGIN)),
+      y: Math.max(MARGIN, Math.min(ny, window.innerHeight - sizeRef.current.h - MARGIN)),
     })
   }, [])
 
@@ -725,11 +738,57 @@ export default function NodeChatWindow({
   }, [onMouseMove])
 
   const onDragStart = (e: React.MouseEvent) => {
+    if (maximized) return
     e.preventDefault()
     dragOrigin.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y }
     setDragging(true)
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup',   onMouseUp)
+  }
+
+  // ── Resize ────────────────────────────────────────────────────────────────
+
+  const onResizeMove = useCallback((e: MouseEvent) => {
+    if (!resizeOrigin.current) return
+    const MIN_W = 300, MIN_H = 360
+    const nw = Math.max(MIN_W, Math.min(resizeOrigin.current.ow + e.clientX - resizeOrigin.current.sx, window.innerWidth  - MARGIN))
+    const nh = Math.max(MIN_H, Math.min(resizeOrigin.current.oh + e.clientY - resizeOrigin.current.sy, window.innerHeight - MARGIN))
+    sizeRef.current = { w: nw, h: nh }
+    setSize({ w: nw, h: nh })
+  }, [])
+
+  const onResizeEnd = useCallback(() => {
+    resizeOrigin.current = null
+    setResizing(false)
+    window.removeEventListener('mousemove', onResizeMove)
+    window.removeEventListener('mouseup',   onResizeEnd)
+  }, [onResizeMove])
+
+  const onResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    resizeOrigin.current = { sx: e.clientX, sy: e.clientY, ow: sizeRef.current.w, oh: sizeRef.current.h }
+    setResizing(true)
+    window.addEventListener('mousemove', onResizeMove)
+    window.addEventListener('mouseup',   onResizeEnd)
+  }
+
+  // ── Maximizar ─────────────────────────────────────────────────────────────
+
+  const toggleMaximize = () => {
+    if (maximized) {
+      // Restaurar geometría guardada
+      const g = savedGeom.current
+      if (g) {
+        sizeRef.current = g.size
+        setSize(g.size)
+        setPos(g.pos)
+      }
+      setMaximized(false)
+    } else {
+      savedGeom.current = { pos, size }
+      setMaximized(true)
+    }
   }
 
   // ── Auto-generación de imágenes al recibir respuesta del asistente ──────────
@@ -927,19 +986,19 @@ export default function NodeChatWindow({
 
       {/* Ventana flotante — sin overlay, no bloquea el modal de fondo */}
       <div style={{
-        position:  'fixed',
-        left:      pos.x,
-        top:       pos.y,
-        zIndex:    110,
-        width:     WINDOW_W,
-        height:    WINDOW_H,
+        position:     'fixed',
+        left:         maximized ? 0 : pos.x,
+        top:          maximized ? 0 : pos.y,
+        zIndex:       110,
+        width:        maximized ? '100vw' : size.w,
+        height:       maximized ? '100vh' : size.h,
         background:   'var(--bg-1)',
-        borderRadius:  14,
-        border:    '1px solid var(--line-2)',
-        boxShadow: '0 24px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04)',
-        display:   'flex', flexDirection: 'column', overflow: 'hidden',
-        // Evita selección de texto al arrastrar
-        userSelect: dragging ? 'none' : 'auto',
+        borderRadius: maximized ? 0 : 14,
+        border:       '1px solid var(--line-2)',
+        boxShadow:    maximized ? 'none' : '0 24px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04)',
+        display:      'flex', flexDirection: 'column', overflow: 'hidden',
+        userSelect:   dragging || resizing ? 'none' : 'auto',
+        transition:   maximized ? 'none' : undefined,
       }}>
 
         {/* Header — drag handle */}
@@ -980,12 +1039,21 @@ export default function NodeChatWindow({
               ✓ Read only
             </span>
           )}
-          {/* Grip visual */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, opacity: 0.3, paddingRight: 4 }}>
-            {[0,1,2].map(i => (
-              <div key={i} style={{ width: 14, height: 2, borderRadius: 1, background: 'var(--text-2)' }} />
-            ))}
-          </div>
+          {/* Grip — mano blanca, igual al cursor grab del modal */}
+          <span style={{ fontSize: 15, flexShrink: 0, lineHeight: 1, opacity: 0.55, userSelect: 'none', filter: 'brightness(0) invert(1)' }}>🖐️</span>
+          {/* Botón maximizar */}
+          <button
+            onMouseDown={e => e.stopPropagation()}
+            onClick={toggleMaximize}
+            title={maximized ? 'Restore' : 'Maximize'}
+            style={{
+              border: 'none', background: 'var(--bg-3)', cursor: 'pointer',
+              color: 'var(--text-2)', fontSize: 11, padding: '4px 7px',
+              borderRadius: 5, lineHeight: 1, flexShrink: 0,
+            }}
+          >
+            {maximized ? '⊡' : '⊞'}
+          </button>
           <button
             onMouseDown={e => e.stopPropagation()}
             onClick={onClose}
@@ -1403,6 +1471,25 @@ export default function NodeChatWindow({
             textAlign: 'center', letterSpacing: '0.04em',
           }}>
             {modelName}
+          </div>
+        )}
+
+        {/* Handle de resize — esquina inferior derecha, oculto en maximizado */}
+        {!maximized && (
+          <div
+            onMouseDown={onResizeStart}
+            style={{
+              position: 'absolute', bottom: 0, right: 0,
+              width: 18, height: 18, cursor: 'se-resize',
+              display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
+              padding: 4,
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: 0.3 }}>
+              <line x1="2" y1="10" x2="10" y2="2" stroke="var(--text-1)" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="5" y1="10" x2="10" y2="5" stroke="var(--text-1)" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="8" y1="10" x2="10" y2="8" stroke="var(--text-1)" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
           </div>
         )}
       </div>
