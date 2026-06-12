@@ -1101,21 +1101,26 @@ export default function NodeChatWindow({
             onMouseDown={e => e.stopPropagation()}
             onClick={toggleMaximize}
             title={maximized ? 'Restore' : 'Maximize'}
-            style={{
-              border: 'none', background: 'var(--bg-3)', cursor: 'pointer',
-              color: 'var(--text-2)', fontSize: 11, padding: '4px 7px',
-              borderRadius: 5, lineHeight: 1, flexShrink: 0,
-            }}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-2)', padding: '4px 8px', borderRadius: 6, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
           >
-            {maximized ? '⊡' : '⊞'}
+            {maximized ? (
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ display: 'block' }}>
+                <rect x="3.75" y="0.75" width="8.5" height="8.5" stroke="currentColor" strokeWidth="1.5" rx="1"/>
+                <rect x="0.75" y="3.75" width="8.5" height="8.5" stroke="currentColor" strokeWidth="1.5" rx="1" fill="var(--bg-1)"/>
+              </svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ display: 'block' }}>
+                <rect x="0.75" y="0.75" width="11.5" height="11.5" stroke="currentColor" strokeWidth="1.5" rx="1"/>
+              </svg>
+            )}
           </button>
           <button
             onMouseDown={e => e.stopPropagation()}
             onClick={onClose}
             style={{
-              border: 'none', background: 'var(--bg-3)', cursor: 'pointer',
-              color: 'var(--text-2)', fontSize: 12, padding: '4px 8px',
-              borderRadius: 5, lineHeight: 1, flexShrink: 0,
+              border: 'none', background: 'transparent', cursor: 'pointer',
+              color: 'var(--text-2)', fontSize: 16, padding: '4px 8px',
+              borderRadius: 6, lineHeight: 1, flexShrink: 0,
             }}
           >
             ✕
