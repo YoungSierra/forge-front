@@ -23,7 +23,9 @@ export default function ProjectPage({ params }: PageProps) {
     if (!id) return
     setLoading(true)
     try {
-      setProject(await getProject(id))
+      const p = await getProject(id)
+      setProject(p)
+      localStorage.setItem('forge_last_project', JSON.stringify({ id, name: p.name }))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load project')
     } finally {

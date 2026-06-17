@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import UserMenu from '@/components/layout/UserMenu'
@@ -12,6 +12,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter()
   const pathname = usePathname()
   const { theme, toggle: toggleTheme } = useTheme()
+  const [lastProject, setLastProject] = useState<{ id: string; name: string } | null>(null)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('forge_last_project')
+      if (raw) setLastProject(JSON.parse(raw))
+    } catch { /* ignorar */ }
+  }, [])
 
   useEffect(() => {
     if (!loading && member?.role !== 'admin') router.replace('/')
@@ -82,6 +90,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         })}
 
         <div style={{ flex: 1 }} />
+
+        {lastProject && (
+          <>
+            <Link href={`/projects/${lastProject.id}`} className="admin-back" style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: 11, fontFamily: 'monospace', color: 'var(--text-3)',
+              textDecoration: 'none', transition: 'color 120ms',
+              maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              ← {lastProject.name}
+            </Link>
+            <div style={{ width: 1, height: 16, background: 'var(--line-2)' }} />
+          </>
+        )}
 
         <div className="theme-toggle" role="group" aria-label="Theme">
           <button
