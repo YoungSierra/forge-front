@@ -14,7 +14,7 @@ import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
 import OrthogonalEdge, { type WayPoint } from './OrthogonalEdge'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
-import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, autoRunNode } from '@/lib/api'
+import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, autoRunNode, updateProjectName } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap } from '@/lib/api'
 import type { Project } from '@/lib/types'
@@ -3093,14 +3093,40 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
 
 // ─── BlueprintBar ─────────────────────────────────────────────────────────────
 
-function BlueprintBar({ activeBlueprint, projectId, onLoaded }: {
+function BlueprintBar({ activeBlueprint, projectId, onLoaded, projectName, isOwner, onNameChange }: {
   activeBlueprint: CanvasData['active_blueprint']
   projectId: string
   onLoaded: () => void
+  projectName: string
+  isOwner: boolean
+  onNameChange?: (name: string) => Promise<void>
 }) {
   const [loading,    setLoading]    = useState(false)
   const [blueprints, setBlueprints] = useState<{ id: string; name: string; blueprint_key: string }[]>([])
   const [showPicker, setShowPicker] = useState(false)
+  const [editing,    setEditing]    = useState(false)
+  const [nameVal,    setNameVal]    = useState('')
+  const [saving,     setSaving]     = useState(false)
+  const nameRef = useRef<HTMLInputElement>(null)
+
+  function startEdit() {
+    if (!isOwner || !onNameChange) return
+    setNameVal(projectName)
+    setEditing(true)
+    setTimeout(() => { nameRef.current?.select() }, 0)
+  }
+
+  async function commitEdit() {
+    const trimmed = nameVal.trim()
+    if (!trimmed || trimmed === projectName) { setEditing(false); return }
+    setSaving(true)
+    try { await onNameChange?.(trimmed) } finally { setSaving(false); setEditing(false) }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter')  { e.preventDefault(); commitEdit() }
+    if (e.key === 'Escape') { setEditing(false) }
+  }
 
   async function openPicker() {
     if (!showPicker) {
@@ -3130,19 +3156,62 @@ function BlueprintBar({ activeBlueprint, projectId, onLoaded }: {
 
   return (
     <div style={{ flexShrink: 0, height: 40, borderBottom: '1px solid var(--line-2)', background: 'var(--bg-1)', display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px' }}>
-      {activeBlueprint ? (
-        <>
-          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Blueprint</span>
-          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-1)', fontWeight: 600 }}>{activeBlueprint.name}</span>
-          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-2)', border: '1px solid var(--line-2)', padding: '2px 6px', borderRadius: 3 }}>
-            {activeBlueprint.blueprint_key}
-          </span>
-        </>
-      ) : (
-        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>No blueprint loaded</span>
-      )}
+      {/* Izquierda — info del blueprint */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: '0 1 auto' }}>
+        {activeBlueprint ? (
+          <>
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0 }}>Blueprint</span>
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-1)', fontWeight: 600, whiteSpace: 'nowrap' }}>{activeBlueprint.name}</span>
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-2)', border: '1px solid var(--line-2)', padding: '2px 6px', borderRadius: 3, flexShrink: 0 }}>
+              {activeBlueprint.blueprint_key}
+            </span>
+          </>
+        ) : (
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>No blueprint loaded</span>
+        )}
+      </div>
 
-      <div style={{ flex: 1 }} />
+      {/* Centro — nombre del proyecto */}
+      <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        {editing ? (
+          <input
+            ref={nameRef}
+            value={nameVal}
+            onChange={e => setNameVal(e.target.value)}
+            onKeyDown={onKeyDown}
+            onBlur={() => setEditing(false)}
+            disabled={saving}
+            style={{
+              fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600,
+              color: 'var(--text-0)', background: 'var(--bg-2)',
+              border: '1px solid var(--action)', borderRadius: 4,
+              padding: '3px 8px', outline: 'none', textAlign: 'center',
+              width: Math.max(160, nameVal.length * 8),
+              maxWidth: 360,
+            }}
+          />
+        ) : (
+          <span
+            onClick={isOwner && onNameChange ? startEdit : undefined}
+            title={isOwner && onNameChange ? 'Click to rename' : undefined}
+            style={{
+              fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600,
+              color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden',
+              textOverflow: 'ellipsis', maxWidth: 360,
+              cursor: isOwner && onNameChange ? 'text' : 'default',
+              borderRadius: 4, padding: '3px 8px',
+              transition: 'background 120ms',
+            }}
+            onMouseEnter={e => { if (isOwner && onNameChange) e.currentTarget.style.background = 'var(--bg-2)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+          >
+            {projectName}
+          </span>
+        )}
+      </div>
+
+      {/* Derecha — botón blueprint (ocupa lo mismo que la izquierda para centrar) */}
+      <div style={{ flex: '0 1 auto', display: 'flex', justifyContent: 'flex-end' }}>
 
       <div style={{ position: 'relative' }}>
         <button
@@ -3176,6 +3245,7 @@ function BlueprintBar({ activeBlueprint, projectId, onLoaded }: {
           </>
         )}
       </div>
+      </div>{/* cierra flex: '0 1 auto' derecha */}
     </div>
   )
 }
@@ -3197,6 +3267,7 @@ const DraggingContext = createContext(false)
 const PendingOutputModalContext = createContext<{ nodeId: string | null; outputKey: string | null; clear: () => void }>({ nodeId: null, outputKey: null, clear: () => {} })
 
 function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh: () => void }) {
+  const [localName,         setLocalName]         = useState(project.name)
   const [canvasData,        setCanvasData]        = useState<CanvasData | null>(null)
   const [loading,           setLoading]           = useState(true)
   const [selectedNode,      setSelectedNode]      = useState<CanvasNode | null>(null)
@@ -3247,6 +3318,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const pendingPositionsRef = useRef<Record<string, { x: number; y: number }>>({})
   // Flag: el layout de DB ya se aplicó en este montaje — no repetir en reloads silenciosos
   const dbLayoutAppliedRef  = useRef(false)
+  // Indica que el gate acaba de dispararse — normalizar posiciones al cargar los nodos nuevos
+  const autoNormalizeRef = useRef(false)
 
   const persistEdges = useCallback((edgeList: Edge[]) => {
     // Deduplicar por source+handle+target antes de enviar
@@ -3375,7 +3448,6 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     if (bp.gate_decision)  { console.log('[gate] ✗ gate_decision ya existe:', bp.gate_decision); return false }
     const bpNodes = canvasData!.nodes.filter(n => n.blueprint_id === bp.id && n.node_type === 'forge_node')
     if (bpNodes.length === 0) { console.log('[gate] ✗ sin bpNodes'); return false }
-    const allForgeNodes = canvasData!.nodes.filter(n => n.node_type === 'forge_node')
     const isApproved = (n: CanvasNode) => {
       const gs = n.session?.status
       if (gs === 'approved' || gs === 'auto_approved') return true
@@ -3384,9 +3456,15 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         (s: unknown) => (s as { status: string }).status === 'approved' || (s as { status: string }).status === 'auto_approved'
       )
     }
-    const notReady = allForgeNodes.filter(n => !isApproved(n))
+    const hasSession = (n: CanvasNode) =>
+      !!n.session || Object.keys(n.output_sessions ?? {}).length > 0
+    // Solo bloquean: el nodo gate (siempre obligatorio) + nodos que se ejecutaron pero no se aprobaron.
+    // Nodos sin sesión = el usuario los saltó voluntariamente.
+    const notReady = bpNodes.filter(n =>
+      !isApproved(n) && (n.node?.role === 'gate' || hasSession(n))
+    )
     if (notReady.length > 0) {
-      console.log('[gate] ✗ nodos sin aprobar:', notReady.map(n => ({ key: n.node?.node_key, session: n.session?.status ?? 'null', outSessions: Object.fromEntries(Object.entries(n.output_sessions ?? {}).map(([k, v]) => [k, (v as { status: string }).status])) })))
+      console.log('[gate] ✗ nodos sin aprobar:', notReady.map(n => ({ key: n.node?.node_key, role: n.node?.role, session: n.session?.status ?? 'null' })))
       return false
     }
     console.log('[gate] ✓ gate listo')
@@ -3419,6 +3497,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       })
       // Forzar re-aplicar canvas_layout del DB: el fan-out guarda posiciones nuevas que savedLayout no tiene
       dbLayoutAppliedRef.current = false
+      autoNormalizeRef.current   = true
       await loadCanvas(true)
     } catch (e) {
       console.error('[gate] decision failed', e)
@@ -3438,11 +3517,16 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       return acc
     }, {}) ?? {}
 
+    // Nodos nuevos (sin posición guardada) se colocan a la derecha del último nodo conocido
+    const knownXValues = Object.values(savedPos).map(p => p.x)
+    const baseX = knownXValues.length > 0 ? Math.max(...knownXValues) + NODE_W + NODE_GAP : 0
+    let unsavedForgeIdx = 0
+
     let assetIdx = 0
     let textIdx  = 0
     return [...canvasNodes]
       .sort((a, b) => (a.order_index ?? 999) - (b.order_index ?? 999))
-      .map((cn, i) => {
+      .map((cn) => {
         const pos = pendingPositionsRef.current[cn.project_node_id]
                ?? savedPos[cn.project_node_id]
 
@@ -3484,7 +3568,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           type:      'forgeNode',
           deletable: false,
           zIndex:    1,
-          position:  pos ?? { x: i * (NODE_W + NODE_GAP), y: 0 },
+          position:  pos ?? { x: baseX + unsavedForgeIdx++ * (NODE_W + NODE_GAP), y: 0 },
           data: {
             canvasNode: cn,
             onClick: () => {
@@ -3576,11 +3660,33 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   useEffect(() => {
     if (!canvasData) return
     const newNodes = buildNodes(canvasData.nodes)
-    setNodes(prev => newNodes.map(n => {
-      const existing = prev.find(p => p.id === n.id)
-      return existing ? { ...n, position: existing.position } : n
-    }))
-    pendingPositionsRef.current = {}
+
+    // Post-gate single-lane: conservar posiciones fase 1, colocar nodos nuevos a la derecha
+    if (autoNormalizeRef.current && (canvasData.lanes?.length ?? 0) <= 1) {
+      autoNormalizeRef.current = false
+      setNodes(prev => {
+        const existingForge = prev.filter(n => !n.id.startsWith('lane-'))
+        // Y base = promedio de los nodos actuales para que los nuevos queden alineados
+        const baseY = existingForge.length > 0
+          ? Math.round(existingForge.reduce((s, n) => s + n.position.y, 0) / existingForge.length)
+          : 0
+        const maxX = existingForge.reduce((m, n) => Math.max(m, n.position.x), 0)
+        let newIdx = 0
+        return newNodes.map(n => {
+          const existing = prev.find(p => p.id === n.id)
+          if (existing) return { ...n, position: existing.position }
+          return { ...n, position: { x: maxX + NODE_W + NODE_GAP + newIdx++ * (NODE_W + NODE_GAP), y: baseY } }
+        })
+      })
+      requestAnimationFrame(() => fitView({ padding: 0.3, duration: 300 }))
+      pendingPositionsRef.current = {}
+    } else {
+      setNodes(prev => newNodes.map(n => {
+        const existing = prev.find(p => p.id === n.id)
+        return existing ? { ...n, position: existing.position } : n
+      }))
+      pendingPositionsRef.current = {}
+    }
     const validIds = new Set(newNodes.map(n => n.id))
 
     // Mapa project_node_id → lane_id para reemplazar edges cross-lane con edges virtuales
@@ -3590,6 +3696,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     // Mapa lane_id → color (para pintar los edges virtuales con el color del lane)
     const laneColor = new Map<string, string>()
     for (const lane of (canvasData.lanes ?? [])) laneColor.set(lane.id, lane.color)
+
+    // Con un solo lane no hay cruces de frontera: edges directos, sin LaneGroupNode
+    const singleLane = (canvasData.lanes?.length ?? 0) <= 1
 
     // Reconstruir edges desde DB — edges que cruzan la frontera de un lane quedan hidden;
     // se reemplazan por edges virtuales en los bordes del LaneGroupNode (simétrico: salida e entrada).
@@ -3622,10 +3731,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         const srcLane = laneByNode.get(e.source) ?? null
         const tgtLane = laneByNode.get(e.target) ?? null
 
-        // Sale de un lane hacia fuera (o hacia otro lane)
-        const isOutgoing = srcLane !== null && srcLane !== tgtLane
-        // Entra a un lane desde fuera (o desde otro lane)
-        const isIncoming = tgtLane !== null && srcLane !== tgtLane
+        // Con singleLane: todos los edges son directos, no hay virtualización
+        const isOutgoing = !singleLane && srcLane !== null && srcLane !== tgtLane
+        const isIncoming = !singleLane && tgtLane !== null && srcLane !== tgtLane
 
         if (isOutgoing) {
           const pairKey = `${srcLane}→${e.target}`
@@ -3709,6 +3817,38 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     localStorage.setItem(TEXT_SIZE_KEY, size)
   }
 
+  function resetLayout() {
+    if (!canvasData) return
+
+    // Calcular posiciones limpias
+    const sorted = [...canvasData.nodes].sort((a, b) => (a.order_index ?? 999) - (b.order_index ?? 999))
+    let assetIdx = 0, textIdx = 0, forgeIdx = 0
+    const cleanPositions: { id: string; position: { x: number; y: number } }[] = sorted.map(cn => {
+      let pos: { x: number; y: number }
+      if      (cn.node_type === 'library_asset') pos = { x: assetIdx++ * (ASSET_NODE_W + 20), y: -140 }
+      else if (cn.node_type === 'text_input')    pos = { x: textIdx++  * (TEXT_NODE_W  + 20), y: -280 }
+      else                                        pos = { x: forgeIdx++ * (NODE_W + NODE_GAP), y: 0    }
+      return { id: cn.project_node_id, position: pos }
+    })
+
+    // Persistir al DB inmediatamente para que el fan-out las lea correctas
+    const posMap = Object.fromEntries(cleanPositions.map(p => [p.id, p]))
+    const layoutNodes = cleanPositions.map(p => ({ id: p.id, position: p.position }))
+    saveLayout(project.id, { templateId: canvasData?.active_blueprint?.id ?? null, nodes: layoutNodes as never, edges: [] }, true)
+    setSavedLayout(null)
+
+    setNodes(prev => {
+      const res = sorted.map(cn => {
+        const existing = prev.find(n => n.id === cn.project_node_id)
+        if (!existing) return null
+        return { ...existing, position: posMap[cn.project_node_id].position }
+      }).filter((n): n is NonNullable<typeof n> => n !== null)
+      return res
+    })
+
+    requestAnimationFrame(() => fitView({ padding: 0.3, duration: 300 }))
+  }
+
   function toggleEdgeStyle() {
     setEdgeStyle(prev => {
       const next: EdgeStyle = prev === 'bezier' ? 'orthogonal' : 'bezier'
@@ -3775,6 +3915,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   // Sincroniza posición y tamaño del LaneGroupNode con sus nodos miembro
   const syncLaneNodes = useCallback(() => {
     if (!canvasData?.lanes?.length) return
+    // Un solo lane: no renderizar LaneGroupNode, los edges son directos
+    if (canvasData.lanes.length <= 1) {
+      setNodes(prev => prev.filter(n => !n.id.startsWith('lane-')))
+      return
+    }
     // PADDING.top = PADDING.bottom para margen visual simétrico
     // El header label vive en top:-14 (fuera del box), así que PADDING.top = margen interior real
     const PADDING = { top: 28, right: 18, bottom: 28, left: 18 }
@@ -4133,6 +4278,12 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     return tiers
   }
 
+  async function handleNameChange(name: string) {
+    await updateProjectName(project.id, name)
+    setLocalName(name)
+    localStorage.setItem('forge_last_project', JSON.stringify({ id: project.id, name }))
+  }
+
   async function handleRunAll() {
     if (!canvasData) return
     const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') ?? undefined : undefined
@@ -4264,7 +4415,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   if (loading) {
     return (
       <>
-        <ForgeToolbar project={project} phase="idle" onRefresh={onRefresh} approvedCount={0} totalCount={0} />
+        <ForgeToolbar project={{ ...project, name: localName }} phase="idle" onRefresh={onRefresh} approvedCount={0} totalCount={0} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
           <style>{SPIN_KF}</style>
           <img src="/forgy/forgyi.png" alt="Forge" width={28} height={28} style={{ objectFit: 'contain', animation: 'canvas-spin 2s linear infinite' }} />
@@ -4284,9 +4435,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     <PendingOutputModalContext.Provider value={{ nodeId: pendingOutputModalId, outputKey: pendingOutputModalKey, clear: clearPendingOutputModal }}>
     <>
     <ForgeToolbar
-      project={project}
+      project={{ ...project, name: localName }}
       phase={runPhase}
       onRefresh={onRefresh}
+      onNameChange={handleNameChange}
       onRunPipeline={runPhase === 'idle' ? handleRunAll : undefined}
       onExport={() => setShowExportModal(true)}
       runProgress={runProgress ?? undefined}
@@ -4314,6 +4466,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           activeBlueprint={canvasData?.active_blueprint ?? null}
           projectId={project.id}
           onLoaded={() => loadCanvas(true)}
+          projectName={localName}
+          isOwner={typeof window !== 'undefined' && localStorage.getItem('forge_member_id') === project.owner_member_id}
+          onNameChange={handleNameChange}
         />
 
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -4323,9 +4478,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           {/* Zoom controls */}
           <div style={{ position: 'absolute', bottom: 16, right: 16, zIndex: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-1)', borderRadius: 10, border: '1px solid var(--line-2)', boxShadow: '0 2px 12px rgba(0,0,0,0.22)', padding: '5px 8px' }}>
             {([
-              { label: '+', action: () => zoomIn({ duration: 200 }),                title: 'Zoom in'  },
-              { label: '−', action: () => zoomOut({ duration: 200 }),               title: 'Zoom out' },
-              { label: '⊡', action: () => fitView({ padding: 0.3, duration: 300 }), title: 'Fit view' },
+              { label: '+', action: () => zoomIn({ duration: 200 }),                title: 'Zoom in'     },
+              { label: '−', action: () => zoomOut({ duration: 200 }),               title: 'Zoom out'    },
+              { label: '⊡', action: () => fitView({ padding: 0.3, duration: 300 }), title: 'Fit view'    },
+              { label: '↺', action: () => resetLayout(),                             title: 'Reset layout' },
             ] as const).map(({ label, action, title }) => (
               <button key={label} title={title} onClick={action} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-1)', cursor: 'pointer', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                 {label}

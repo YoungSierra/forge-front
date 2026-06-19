@@ -22,6 +22,7 @@ interface Props {
   onPipelineApply?: (activeNodes: string[]) => void
   onRunPipeline?: () => void
   onExport?: () => void
+  onNameChange?: (name: string) => Promise<void>
   runProgress?: { done: number; total: number }
   nodes?: Node[]
   approvedCount?: number
@@ -269,7 +270,7 @@ function CostChip({ projectId }: { projectId: string }) {
   )
 }
 
-export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, onExport, runProgress, nodes = [], approvedCount: approvedCountProp, totalCount: totalCountProp, runnableCount }: Props) {
+export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, onExport, onNameChange, runProgress, nodes = [], approvedCount: approvedCountProp, totalCount: totalCountProp, runnableCount }: Props) {
   const { user, member } = useAuth()
   const { theme, toggle: toggleTheme } = useTheme()
   const [currentMemberId,       setCurrentMemberId]       = useState<string | null>(null)
@@ -280,6 +281,8 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
     const stored = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
     if (stored) setCurrentMemberId(stored)
   }, [user])
+
+  const isOwner = !!currentMemberId && currentMemberId === project.owner_member_id
 
   const approvable    = nodes.filter(n => {
     if (n.type === 'forgeGroup') return false

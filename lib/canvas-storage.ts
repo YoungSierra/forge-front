@@ -19,16 +19,20 @@ const ctrKey = (projectId: string, containerKey: string) => `forge_canvas_${proj
 
 const dbTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 
-export function saveLayout(projectId: string, layout: CanvasLayout): void {
+export function saveLayout(projectId: string, layout: CanvasLayout, immediate = false): void {
   try {
     localStorage.setItem(key(projectId), JSON.stringify(layout))
   } catch { /* storage full or SSR */ }
 
   if (dbTimers[projectId]) clearTimeout(dbTimers[projectId])
-  dbTimers[projectId] = setTimeout(() => {
+  if (immediate) {
     saveCanvasLayout(projectId, layout).catch(() => {})
-    delete dbTimers[projectId]
-  }, 3000)
+  } else {
+    dbTimers[projectId] = setTimeout(() => {
+      saveCanvasLayout(projectId, layout).catch(() => {})
+      delete dbTimers[projectId]
+    }, 3000)
+  }
 }
 
 export function loadLayout(projectId: string): CanvasLayout | null {
