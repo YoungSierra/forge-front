@@ -51,6 +51,8 @@ interface CanvasNode {
   project_node_id: string
   order_index: number
   blueprint_id: string | null
+  lane_id:         string | null
+  bound_item_ref:  Record<string, unknown> | null
   node_type: 'forge_node' | 'library_asset' | 'text_input'
   text_label:   string | null
   text_content: string | null
@@ -62,14 +64,18 @@ interface CanvasNode {
     phase: string
     purpose: string
     inputs: Array<{ key: string; label: string; accepts: string[]; required: boolean }> | { required?: string[]; optional?: string[]; description?: string } | null
-    outputs: { name: string; format: string; description?: string; optional?: boolean; image_gen?: boolean; image_gen_model?: string }[]
+    outputs: { name: string; key?: string; label?: string; type?: string; format: string; description?: string; optional?: boolean; image_gen?: boolean; image_gen_model?: string }[]
     tools: string[]
     skills: string[]
     executor: { type: string; model?: string; workflow_id?: string } | null
     status: string
+    role?: string
+    default_prompt?: string
+    standalone_prompt?: string
   } | null
   asset: LibraryAsset | null
   session: ForgeSession | null
+  output_sessions: Record<string, ForgeSession>
 }
 
 interface BlueprintGate {
@@ -81,10 +87,19 @@ interface BlueprintGate {
 
 interface DbEdge { id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }
 
+interface ForgeLane {
+  id:             string
+  lane_key:       string
+  label:          string
+  color:          string
+  bound_item_ref: Record<string, unknown>
+}
+
 interface CanvasData {
   success: boolean
   nodes: CanvasNode[]
   edges: DbEdge[]
+  lanes: ForgeLane[]
   canvas_layout: unknown
   active_blueprint: {
     id: string
@@ -113,7 +128,8 @@ interface ForgeNodeCardData extends Record<string, unknown> {
   isRunning?:      boolean
   isStale?:        boolean
   isError?:        boolean
-  onImagesUpdate?: (imgs: OutputImagesMap) => void
+  onImagesUpdate?: (imgs: OutputImagesMap, outputKey?: string) => void
+  onOpenChat?:     (outputKey?: string | null, outputLabel?: string | null) => void
 }
 
 interface AssetNodeCardData extends Record<string, unknown> {
@@ -1200,7 +1216,8 @@ const TextInputCard = React.memo(function TextInputCard({ data }: { data: TextIn
 function extractSection(content: string, sectionName: string, otherKeys: string[] = []): string | null {
   const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
                              .replace(/_/g, '[_\\s]')  // "concept_list" también matchea "concept list"
-  const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
+  // Acepta "## Concept Seeds — subtítulo" además de "## Concept Seeds" exacto
+  const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}(?:\\s*[—\\-–:].+)?\\s*$`, 'im')
   const match   = startRx.exec(content)
   if (!match) return null
   const after = content.slice(match.index + match[0].length)
@@ -1216,11 +1233,32 @@ function extractSection(content: string, sectionName: string, otherKeys: string[
 // ─── ForgeNodeCard ────────────────────────────────────────────────────────────
 
 const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeNodeCardData }) {
-  const { canvasNode, onClick, locked, projectId, onImagesUpdate, isRunning, isStale, isError } = data
+  const { canvasNode, onClick, locked, projectId, onImagesUpdate, isRunning, isStale, isError, onOpenChat } = data
   const { node, session } = canvasNode
-  const scale = useContext(CanvasScaleContext)
+  const outputSessions = canvasNode.output_sessions ?? {}
+  const scale      = useContext(CanvasScaleContext)
+  const isDragging = useContext(DraggingContext)
+  const { nodeId: pendingOutputId, outputKey: pendingOutputKey, clear: clearPendingOutput } = useContext(PendingOutputModalContext)
+  // Abrir output modal cuando el canvas lo solicita (Run Node o panel de contexto)
+  useEffect(() => {
+    if (pendingOutputId === canvasNode.project_node_id) {
+      setOutputOpen(true)
+      if (pendingOutputKey) setOutTab(pendingOutputKey)
+      clearPendingOutput()
+    }
+  }, [pendingOutputId, pendingOutputKey, canvasNode.project_node_id, clearPendingOutput])
   if (!node) return null
-  const status      = session?.status ?? null
+  const isGate = node.role === 'gate'
+  // Si no hay sesión general, verificar si TODOS los outputs tienen per-output session aprobada
+  const allOuts = (node.outputs ?? [])
+  const allOutsApproved = allOuts.length > 0 && allOuts.every((o: { key?: string }) => {
+    const s = outputSessions[(o.key ?? '')]
+    return s?.status === 'approved' || s?.status === 'auto_approved'
+  })
+  const effectiveStatus: string | null = session?.status ?? (allOutsApproved
+    ? (allOuts.some((o: { key?: string }) => outputSessions[(o.key ?? '')]?.status === 'auto_approved') ? 'auto_approved' : 'approved')
+    : null)
+  const status      = effectiveStatus
   const statusColor = locked ? null : isError ? '#EF4444' : isRunning ? '#60A5FA' : (status ? (SESSION_COLOR[status] ?? null) : null)
   const phaseColor  = locked ? '#6B7280' : (PHASE_COLOR[node.phase] ?? '#6B7280')
 
@@ -1240,20 +1278,32 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const cardRef    = useRef<HTMLDivElement>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [deckAnchor, setDeckAnchor] = useState<{ x: number; y: number } | null>(null)
+  // Cerrar deck inmediatamente al iniciar un drag
+  useEffect(() => { if (isDragging) setDeckAnchor(null) }, [isDragging])
   // Mostrar deck cuando hay contenido disponible (aprobado, auto-aprobado, o active con output)
-  const isApproved   = !!session?.has_content
+  const isApproved   = !!session?.has_content || Object.values(outputSessions).some(s => s.has_content)
   const [outputOpen, setOutputOpen] = useState(false)
   const [generatedPdfUrl, setGeneratedPdfUrl] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
-  const [localOutputImages, setLocalOutputImages] = useState<OutputImagesMap>(
-    (session?.output_images as OutputImagesMap) ?? {}
-  )
-  // Sincronizar siempre — incluye el caso session re-ejecutada con output_images = null
+  const [localOutputImages, setLocalOutputImages] = useState<OutputImagesMap>(() => {
+    // Merge images de sesión general + todas las sesiones de output
+    const merged: OutputImagesMap = { ...((canvasNode.session?.output_images as OutputImagesMap) ?? {}) }
+    for (const s of Object.values(canvasNode.output_sessions ?? {})) {
+      Object.assign(merged, (s.output_images as OutputImagesMap) ?? {})
+    }
+    return merged
+  })
+  // Sincronizar cuando session o output_sessions cambian — merge general + todas las por-output
   useEffect(() => {
-    setLocalOutputImages((session?.output_images as OutputImagesMap) ?? {})
-  }, [session?.output_images])
+    const merged: OutputImagesMap = { ...((session?.output_images as OutputImagesMap) ?? {}) }
+    for (const s of Object.values(canvasNode.output_sessions ?? {})) {
+      Object.assign(merged, (s.output_images as OutputImagesMap) ?? {})
+    }
+    setLocalOutputImages(merged)
+  }, [session?.output_images, canvasNode.output_sessions])
   const [generatingImgKey,  setGeneratingImgKey]  = useState<string | null>(null)
   const [zoomUrl,           setZoomUrl]           = useState<string | null>(null)
+  const [ioModal,           setIoModal]           = useState<'in' | 'out' | null>(null)
   const [zoomGallery,       setZoomGallery]       = useState<{ urls: string[]; idx: number } | null>(null)
   // Estado de zoom interno del overlay de imagen
   const [imgScale,          setImgScale]          = useState(1)
@@ -1345,8 +1395,11 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
       window.removeEventListener('mouseup',   onUp)
     }
   }, [zoomUrl, zoomGallery])
+  // outSession: sesión del tab activo en el modal de output
+  const outSession         = outputSessions[outTab] ?? session ?? null
   // Resolución del PDF URL: del asset (ya guardado) o generado on-demand en esta sesión
-  const effectivePdfUrl = session?.output_asset?.storage_url || generatedPdfUrl
+  const effectivePdfUrl    = session?.output_asset?.storage_url || generatedPdfUrl
+  const effectiveOutPdfUrl = outSession?.output_asset?.storage_url || generatedPdfUrl
 
   // ── Drag / Resize / Maximize del modal de output ─────────────────────────
   const OUT_W = 720, OUT_H = 640, OUT_MARGIN = 12
@@ -1370,7 +1423,8 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
     outSizeRef.current = { w, h }
     setOutSize({ w, h })
     setOutPos({ x, y })
-    setOutTab(node.outputs?.[0]?.name ?? '')
+    const firstOut = node.outputs?.[0]
+    setOutTab((firstOut as {key?:string} | undefined)?.key || firstOut?.name || '')
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outputOpen])
 
@@ -1501,7 +1555,6 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
       )}
 
       <div
-        onClick={onClick}
         style={{
           position: 'relative',
           width: NODE_W,
@@ -1509,7 +1562,6 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
           border: `1px solid ${borderColor}`,
           borderRadius: 8,
           boxShadow: glowShadow,
-          cursor: 'pointer',
           transition: 'box-shadow 200ms ease, border-color 200ms ease',
           animation: status === 'active' && !isRunning ? 'canvas-pulse 2s ease-in-out infinite' : 'none',
         }}
@@ -1534,13 +1586,13 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
           if (isApproved) scheduleDeckClose()
         }}
       >
-        {/* Header — borderRadius top para que el bg respete las esquinas sin overflow:hidden */}
+        {/* Header — click target para abrir el panel; IO row y body quedan fuera del area clickable */}
         <div style={{
           background: `color-mix(in srgb, ${phaseColor} 14%, var(--bg-2))`,
           borderBottom: `1px solid color-mix(in srgb, ${phaseColor} 22%, var(--line-2))`,
           borderRadius: '7px 7px 0 0',
-          padding: '8px 10px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          padding: '6px 8px 6px 10px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
@@ -1555,32 +1607,54 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               </span>
             </div>
           </div>
-          {node.executor?.type && (
-            <span style={{
-              flexShrink: 0,
-              fontSize: 8, fontFamily: 'var(--font-mono)',
-              color: `color-mix(in srgb, ${phaseColor} 70%, var(--text-3))`,
-              background: `color-mix(in srgb, ${phaseColor} 8%, var(--bg-3))`,
-              border: `1px solid color-mix(in srgb, ${phaseColor} 18%, var(--line-2))`,
-              padding: '1px 5px', borderRadius: 3,
-            }}>
-              {EXECUTOR_LABEL[node.executor.type] ?? node.executor.type}
-            </span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            {node.executor?.type && (
+              <span style={{
+                fontSize: 8, fontFamily: 'var(--font-mono)',
+                color: `color-mix(in srgb, ${phaseColor} 70%, var(--text-3))`,
+                background: `color-mix(in srgb, ${phaseColor} 8%, var(--bg-3))`,
+                border: `1px solid color-mix(in srgb, ${phaseColor} 18%, var(--line-2))`,
+                padding: '1px 5px', borderRadius: 3,
+              }}>
+                {EXECUTOR_LABEL[node.executor.type] ?? node.executor.type}
+              </span>
+            )}
+            {/* Boton play — abre el panel del nodo */}
+            <button
+              onClick={onClick}
+              title="Open node"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                background: phaseColor, border: 'none', cursor: 'pointer',
+                color: '#000', fontSize: 9, fontWeight: 700, lineHeight: 1,
+                opacity: locked ? 0.4 : 1,
+              }}
+            >&#9654;</button>
+          </div>
         </div>
 
-        {/* Body — ComfyUI style: handles por slot */}
+        {/* Body — handle IN / OUT con modal de descripcion */}
         {(() => {
-          // Soporta nuevo formato array [{key,required}] y legacy {required:[], optional:[]}
+          // Parsea inputs para el modal (soporta v1.3.0 y legacy)
           const rawInputs = node.inputs
-          const allInputs: Array<{ name: string; optional: boolean }> = Array.isArray(rawInputs)
-            ? rawInputs.map(inp => ({ name: inp.key, optional: !inp.required }))
-            : [
-                ...((rawInputs as { required?: string[] } | null)?.required ?? []).map(n => ({ name: n, optional: false })),
-                ...((rawInputs as { optional?: string[] } | null)?.optional ?? []).map(n => ({ name: n, optional: true })),
-              ]
-          const allOutputs = node.outputs ?? []
-          const hasIO = allInputs.length > 0 || allOutputs.length > 0
+          const wiredInputs: Array<{key:string;type?:string;cardinality?:string;required?:boolean}> = (() => {
+            if (Array.isArray(rawInputs)) return (rawInputs as Array<{key:string;required?:boolean}>).map(i => ({ key: i.key, required: i.required }))
+            const v2 = rawInputs as {wired?:Array<{key:string;type?:string;cardinality?:string;required?:boolean}>}|null
+            if (Array.isArray(v2?.wired)) return v2!.wired
+            const leg = rawInputs as {required?:string[];optional?:string[]}|null
+            return [
+              ...(leg?.required ?? []).map(k => ({ key: k, required: true as const })),
+              ...(leg?.optional ?? []).map(k => ({ key: k, required: false as const })),
+            ]
+          })()
+          const directContext = (rawInputs as {direct_context?:string}|null)?.direct_context ?? null
+          // Normaliza outputs: v1.3.0 usa key/label, legacy usa name
+          const allOutputs = (node.outputs ?? []).map(o => ({
+            ...o,
+            _key:   (o as {key?:string}).key   || o.name || '',
+            _label: (o as {label?:string}).label || o.name || '',
+          }))
 
           const hBase: React.CSSProperties = {
             width: 10, height: 10, borderRadius: '50%',
@@ -1590,83 +1664,123 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
 
           return (
             <>
-              {hasIO ? (
-                <div style={{ display: 'flex', borderBottom: '1px solid var(--line-2)' }}>
-                  {/* Columna inputs — handle target por fila */}
-                  <div style={{ flex: 1, minWidth: 0, padding: '5px 0', display: 'flex', flexDirection: 'column' }}>
-                    {allInputs.map((inp, i) => (
-                      <div key={i} style={{ position: 'relative', display: 'flex', alignItems: 'center', height: 20, minWidth: 0 }}>
-                        <Handle
-                          type="target"
-                          position={Position.Left}
-                          id={`in-${inp.name}`}
-                          style={{
-                            ...hBase, left: -6,
-                            background: inp.optional ? 'var(--bg-2)' : phaseColor,
-                            border: inp.optional ? `2px solid ${phaseColor}` : '2px solid var(--bg-0)',
-                          }}
-                        />
-                        <span style={{
-                          paddingLeft: 12, fontSize: 8, fontFamily: 'var(--font-mono)',
-                          color: inp.optional ? 'var(--text-3)' : phaseColor,
-                          fontWeight: inp.optional ? 400 : 600,
-                          flex: 1, minWidth: 0,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        }}>{inp.name}</span>
-                      </div>
-                    ))}
-                    {allInputs.length === 0 && (
-                      <Handle type="target" position={Position.Left}
-                        style={{ ...hBase, left: -6, background: statusColor ?? '#374151', position: 'relative', top: 'auto', transform: 'none', margin: '5px 0 5px -6px' }}
-                      />
-                    )}
-                  </div>
-
-                  {/* Divisor vertical */}
-                  {allInputs.length > 0 && allOutputs.length > 0 && (
-                    <div style={{ width: 1, background: 'var(--line-2)', flexShrink: 0 }} />
+              {/* Fila IN / OUT — handles unicos por nodo */}
+              <div style={{ display: 'flex', borderBottom: '1px solid var(--line-2)', position: 'relative' }}>
+                {/* IN side */}
+                <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px 5px 14px' }}>
+                  <Handle type="target" id="in" position={Position.Left}
+                    style={{ ...hBase, left: -6, background: phaseColor }}
+                  />
+                  <span
+                    style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, color: phaseColor, letterSpacing: '0.06em', cursor: 'pointer', userSelect: 'none', textDecoration: 'underline dotted' }}
+                    onPointerDown={e => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation() }}
+                    onMouseDown={e => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation() }}
+                    onClick={e => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); setIoModal(ioModal === 'in' ? null : 'in') }}
+                  >IN</span>
+                  {wiredInputs.length > 0 && (
+                    <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>{wiredInputs.length}</span>
                   )}
+                </div>
+                <div style={{ width: 1, background: 'var(--line-2)', alignSelf: 'stretch', flexShrink: 0 }} />
+                {/* OUT side */}
+                <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, padding: '5px 14px 5px 10px' }}>
+                  {allOutputs.length > 0 && (
+                    <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>{allOutputs.length}</span>
+                  )}
+                  <span
+                    style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, color: phaseColor, letterSpacing: '0.06em', cursor: 'pointer', userSelect: 'none', textDecoration: 'underline dotted' }}
+                    onPointerDown={e => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation() }}
+                    onMouseDown={e => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation() }}
+                    onClick={e => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); setIoModal(ioModal === 'out' ? null : 'out') }}
+                  >OUT</span>
+                  <Handle type="source" id="out" position={Position.Right}
+                    style={{ ...hBase, right: -6, background: phaseColor }}
+                  />
+                </div>
+              </div>
 
-                  {/* Columna outputs — handle source por fila */}
-                  <div style={{ flex: 1, minWidth: 0, padding: '5px 0', display: 'flex', flexDirection: 'column' }}>
-                    {allOutputs.map((out, i) => (
-                      <div key={i} style={{ position: 'relative', display: 'flex', alignItems: 'center', height: 20, minWidth: 0 }}>
-                        <span style={{
-                          paddingRight: 12, fontSize: 8, fontFamily: 'var(--font-mono)',
-                          color: out.optional ? 'var(--text-3)' : phaseColor,
-                          fontWeight: out.optional ? 400 : 600,
-                          flex: 1, minWidth: 0, textAlign: 'right',
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        }} title={[out.format, out.description].filter(Boolean).join(' · ')}>{out.name}</span>
-                        <Handle
-                          type="source"
-                          position={Position.Right}
-                          id={`out-${out.name}`}
-                          style={{
-                            ...hBase, right: -6,
-                            background: out.optional ? 'var(--bg-2)' : phaseColor,
-                            border: out.optional ? `2px solid ${phaseColor}` : '2px solid var(--bg-0)',
-                          }}
-                        />
+              {/* Modal portal — descripcion de inputs u outputs */}
+              {ioModal && typeof window !== 'undefined' && createPortal(
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  onMouseDown={() => setIoModal(null)}
+                >
+                  <div
+                    style={{
+                      background: 'var(--bg-1)', border: `1px solid ${phaseColor}44`,
+                      borderRadius: 8, padding: 16, minWidth: 260, maxWidth: 380,
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                    }}
+                    onMouseDown={e => e.stopPropagation()}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: phaseColor, fontFamily: 'var(--font-mono)', letterSpacing: '0.06em' }}>
+                        {ioModal === 'in' ? 'INPUTS' : 'OUTPUTS'} &mdash; {node.title}
+                      </span>
+                      <button
+                        onMouseDown={e => e.stopPropagation()}
+                        onClick={() => setIoModal(null)}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 2px' }}
+                      >&#x2715;</button>
+                    </div>
+
+                    {ioModal === 'in' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {wiredInputs.length === 0 && !directContext && (
+                          <span style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic' }}>No wired inputs</span>
+                        )}
+                        {wiredInputs.map((w, i) => (
+                          <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 8px', background: 'var(--bg-2)', borderRadius: 5 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                                background: w.required ? phaseColor : 'transparent',
+                                border: w.required ? 'none' : `1.5px solid ${phaseColor}`,
+                              }} />
+                              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-1)' }}>{w.key}</span>
+                              {w.type && <span style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>{w.type}</span>}
+                              {w.cardinality && <span style={{ fontSize: 9, color: phaseColor, fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>{w.cardinality}</span>}
+                            </div>
+                          </div>
+                        ))}
+                        {directContext && (
+                          <div style={{
+                            marginTop: wiredInputs.length ? 8 : 0,
+                            padding: '6px 8px', background: 'var(--bg-2)', borderRadius: 5,
+                            borderLeft: '2px solid var(--text-3)',
+                          }}>
+                            <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 3, fontWeight: 700 }}>DIRECT</div>
+                            <div style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.4 }}>{directContext}</div>
+                          </div>
+                        )}
                       </div>
-                    ))}
-                    {allOutputs.length === 0 && (
-                      <Handle type="source" position={Position.Right}
-                        style={{ ...hBase, right: -6, background: statusColor ?? '#374151', position: 'relative', top: 'auto', transform: 'none', margin: '5px -6px 5px 0' }}
-                      />
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {allOutputs.length === 0 && (
+                          <span style={{ fontSize: 10, color: 'var(--text-3)', fontStyle: 'italic' }}>No outputs defined</span>
+                        )}
+                        {allOutputs.map((out, i) => {
+                          const outType = (out as {type?:string}).type
+                          const outDesc = (out as {description?:string}).description
+                          return (
+                            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 8px', background: 'var(--bg-2)', borderRadius: 5 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                                  background: out.optional ? 'transparent' : phaseColor,
+                                  border: out.optional ? `1.5px solid ${phaseColor}` : 'none',
+                                }} />
+                                <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-1)' }}>{out._label}</span>
+                                {outType && <span style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', background: 'var(--bg-3)', padding: '1px 4px', borderRadius: 3 }}>{outType}</span>}
+                                {out.format && <span style={{ fontSize: 9, color: phaseColor, fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>{out.format}</span>}
+                              </div>
+                              {outDesc && <div style={{ fontSize: 10, color: 'var(--text-3)', paddingLeft: 12, lineHeight: 1.4 }}>{outDesc}</div>}
+                            </div>
+                          )
+                        })}
+                      </div>
                     )}
                   </div>
-                </div>
-              ) : (
-                // Sin DNA de IO: handles simples en los bordes
-                <>
-                  <Handle type="target" position={Position.Left}
-                    style={{ ...hBase, left: -6, background: statusColor ?? '#374151' }}
-                  />
-                  <Handle type="source" position={Position.Right}
-                    style={{ ...hBase, right: -6, background: statusColor ?? '#374151' }}
-                  />
-                </>
+                </div>,
+                document.body
               )}
 
               {/* Output aprobado */}
@@ -1741,8 +1855,15 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 )
               })()}
 
-              {/* Footer: phase + status / lock */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '5px 10px' }}>
+              {/* Footer: phase + outputs picker + status / lock */}
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '5px 10px' }}>
+                {isGate && (
+                  <span style={{
+                    position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+                    fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    color: '#F59E0B', letterSpacing: '0.08em', pointerEvents: 'none',
+                  }}>◆ GATE</span>
+                )}
                 <span style={{
                   fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 600,
                   color: phaseColor, textTransform: 'uppercase', letterSpacing: '0.08em',
@@ -1750,18 +1871,34 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 }}>
                   {node.phase}
                 </span>
-                {locked ? (
-                  <span style={{ fontSize: 9, color: 'var(--text-4)', letterSpacing: '0.04em', fontFamily: 'var(--font-mono)' }}>
-                    🔒 locked
-                  </span>
-                ) : status && statusColor && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
-                    <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: statusColor, letterSpacing: '0.06em' }}>
-                      {status}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {(node.outputs ?? []).length > 0 && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setOutputOpen(true) }}
+                      title="View outputs"
+                      style={{
+                        border: `1px solid ${isApproved ? 'color-mix(in srgb,#34D399 40%,var(--line-2))' : 'var(--line-2)'}`,
+                        background: isApproved ? 'color-mix(in srgb,#34D399 8%,transparent)' : 'none',
+                        borderRadius: 5, padding: '4px 10px', cursor: 'pointer',
+                        fontFamily: 'var(--font-mono)', fontSize: 9, lineHeight: 1,
+                        color: isApproved ? '#34D399' : 'var(--text-3)',
+                        display: 'flex', alignItems: 'center', gap: 4,
+                      }}
+                    >&#9672; {(node.outputs ?? []).length}</button>
+                  )}
+                  {locked ? (
+                    <span style={{ fontSize: 9, color: 'var(--text-4)', letterSpacing: '0.04em', fontFamily: 'var(--font-mono)' }}>
+                      🔒 locked
                     </span>
-                  </div>
-                )}
+                  ) : status && statusColor && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
+                      <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: statusColor, letterSpacing: '0.06em' }}>
+                        {status}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
             </>
           )
@@ -1781,7 +1918,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
       )}
 
       {/* Modal de output — draggable, resizable, maximizable */}
-      {outputOpen && typeof document !== 'undefined' && (session?.output_asset || Object.values(localOutputImages).some(a => a.some(i => i.variations?.length > 0))) && createPortal(
+      {outputOpen && typeof document !== 'undefined' && (node.outputs ?? []).length > 0 && createPortal(
         <>
           <div
             onMouseDown={e => e.stopPropagation()}
@@ -1805,25 +1942,25 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               style={{ padding: '12px 20px', borderBottom: '1px solid var(--line-2)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, cursor: outMaximized ? 'default' : (outDragging ? 'grabbing' : 'grab') }}
             >
               <span style={{ fontSize: 14, flexShrink: 0 }}>
-                {session?.output_asset ? (effectivePdfUrl ? '📄' : '📝') : '🖼'}
+                {outSession?.output_asset ? (effectiveOutPdfUrl ? '📄' : '📝') : Object.values(localOutputImages).some(a => a.some(i => i.variations?.length > 0)) ? '🖼' : '◈'}
               </span>
               <span style={{ flex: 1, fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {session?.output_asset ? session.output_asset.name : `${node.title} — Image Outputs`}
+                {outSession?.output_asset ? outSession.output_asset.name : Object.values(localOutputImages).some(a => a.some(i => i.variations?.length > 0)) ? `${node.title} — Image Outputs` : `${node.title} — Outputs`}
               </span>
-              {session?.output_asset && (
+              {outSession?.output_asset && (
                 <>
                   <span onMouseDown={e => e.stopPropagation()} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', padding: '2px 6px', borderRadius: 3, flexShrink: 0 }}>
-                    {session.output_asset.format}
+                    {outSession.output_asset.format}
                   </span>
-                  {effectivePdfUrl ? (
+                  {effectiveOutPdfUrl ? (
                     <a
                       onMouseDown={e => e.stopPropagation()}
-                      href={effectivePdfUrl}
+                      href={effectiveOutPdfUrl}
                       target="_blank"
                       rel="noreferrer"
                       style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', textDecoration: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0 }}
-                    >↓ {session.output_asset.format === 'pptx' ? 'PPTX' : 'PDF'}</a>
-                  ) : session.output_asset.content ? (
+                    >↓ {outSession.output_asset.format === 'pptx' ? 'PPTX' : 'PDF'}</a>
+                  ) : outSession.output_asset.content ? (
                     <button
                       onMouseDown={e => e.stopPropagation()}
                       onClick={handleGeneratePdf}
@@ -1864,24 +2001,59 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               <div style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
                 {/* Tabs scrollables */}
                 <div style={{ display: 'flex', overflowX: 'auto', flex: 1 }}>
-                  {(node.outputs ?? []).map(o => (
-                    <button
-                      key={o.name}
-                      onClick={() => { setOutTab(o.name); setViewMode('gallery') }}
-                      style={{
-                        padding: '8px 16px', border: 'none', borderBottom: outTab === o.name ? '2px solid var(--action)' : '2px solid transparent',
-                        marginBottom: -1, background: 'none', cursor: 'pointer',
-                        fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: outTab === o.name ? 700 : 400,
-                        color: outTab === o.name ? 'var(--action)' : 'var(--text-3)',
-                        flexShrink: 0, whiteSpace: 'nowrap', transition: 'color 120ms, border-color 120ms',
-                      }}
-                    >
-                      {o.name.replace(/_/g, ' ')}
-                    </button>
-                  ))}
+                  {(node.outputs ?? []).map(o => {
+                    const oKey    = (o as {key?:string}).key   || o.name || ''
+                    const oLabel  = (o as {label?:string}).label || o.name || ''
+                    const isConn  = (o as {type?:string}).type === 'connection'
+                    const isActive = outTab === oKey
+                    return (
+                      <button
+                        key={oKey}
+                        onClick={() => { setOutTab(oKey); setViewMode('gallery') }}
+                        style={{
+                          padding: '8px 14px', border: 'none', borderBottom: isActive ? '2px solid var(--action)' : '2px solid transparent',
+                          marginBottom: -1, background: 'none', cursor: 'pointer',
+                          fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: isActive ? 700 : 400,
+                          color: isActive ? 'var(--action)' : 'var(--text-3)',
+                          flexShrink: 0, whiteSpace: 'nowrap', transition: 'color 120ms, border-color 120ms',
+                          display: 'flex', alignItems: 'center', gap: 5,
+                        }}
+                      >
+                        {oLabel.replace(/_/g, ' ')}
+                        {isConn && (
+                          <span style={{
+                            fontSize: 7, fontWeight: 700, letterSpacing: '.05em',
+                            color: '#34D399',
+                            background: 'color-mix(in srgb, #34D399 15%, var(--bg-1))',
+                            border: '1px solid color-mix(in srgb, #34D399 35%, transparent)',
+                            borderRadius: 3, padding: '1px 4px', lineHeight: 1.4,
+                          }}>WIRE</span>
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
-                {/* Toggle gallery / list */}
+                {/* Focus output en chat + toggle gallery/list */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '0 8px', borderLeft: '1px solid var(--line-2)', flexShrink: 0 }}>
+                  {onOpenChat && outTab && (
+                    <button
+                      onClick={() => {
+                        const activeO = (node.outputs ?? []).find(o => (o as {key?:string;name:string}).key === outTab || o.name === outTab)
+                        const outKey   = (activeO as {key?:string;name:string} | undefined)?.key || outTab
+                        const outLabel = (activeO as {label?:string;name:string} | undefined)?.label || outTab.replace(/_/g, ' ')
+                        setOutputOpen(false)
+                        onOpenChat(outKey, outLabel)
+                      }}
+                      title={`Focus chat on: ${outTab.replace(/_/g, ' ')}`}
+                      style={{
+                        border: '1px solid color-mix(in srgb, #F59E0B 30%, var(--line-2))',
+                        background: 'color-mix(in srgb, #F59E0B 8%, var(--bg-2))',
+                        borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
+                        color: '#F59E0B', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                        lineHeight: 1, marginRight: 4,
+                      }}
+                    >◆ Focus</button>
+                  )}
                   <button
                     onClick={() => setViewMode('gallery')}
                     title="Gallery view"
@@ -1899,26 +2071,77 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
             {/* Contenido del tab activo */}
             {(() => {
               const outputs    = node.outputs ?? []
-              const activeOut  = outputs.find(o => o.name === outTab) ?? outputs[0]
+              // Buscar por key (v1.3.0) o name (legacy)
+              const activeOut  = outputs.find(o => ((o as {key?:string}).key || o.name) === outTab) ?? outputs[0]
               if (!activeOut) return null
+              const activeOutKey = (activeOut as {key?:string}).key || activeOut.name || ''
 
               const isPureImage = activeOut.format === 'png' || activeOut.format === 'image'
 
-              // Tab de imagen pura
-              if (isPureImage || !session?.output_asset) {
-                const imgs    = (localOutputImages[activeOut.name] ?? []).filter(i => i.variations?.length > 0)
+              // Tab de imagen pura o sin contenido de texto
+              if (isPureImage || !outSession?.output_asset) {
+                const imgs    = (localOutputImages[activeOutKey] ?? []).filter(i => i.variations?.length > 0)
                 const allUrls = imgs.flatMap(item => item.variations.map(v => v.url))
+
+                // Empty state para outputs de texto/markdown sin contenido aún
+                if (!isPureImage && imgs.length === 0) {
+                  const emptyLabel = (activeOut as {label?:string}).label || activeOut.name || activeOutKey
+                  const emptyDesc  = (activeOut as {description?:string}).description
+                  return (
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 28px', gap: 14 }}>
+                      <span style={{ fontSize: 30, opacity: 0.18, fontFamily: 'var(--font-mono)' }}>&#9672;</span>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-2)', marginBottom: 4 }}>{emptyLabel}</div>
+                        {emptyDesc && <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', maxWidth: 260 }}>{emptyDesc}</div>}
+                        <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', marginTop: 6, opacity: 0.7 }}>Not generated yet</div>
+                      </div>
+                      {onOpenChat && (
+                        <button
+                          onClick={() => {
+                            setOutputOpen(false)
+                            onOpenChat(activeOutKey, emptyLabel)
+                          }}
+                          style={{
+                            border: '1px solid color-mix(in srgb, #F59E0B 40%, var(--line-2))',
+                            background: 'color-mix(in srgb, #F59E0B 10%, var(--bg-2))',
+                            borderRadius: 5, padding: '7px 18px', cursor: 'pointer',
+                            color: '#F59E0B', fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '0.04em',
+                          }}
+                        >&#9670; Chat to generate</button>
+                      )}
+                    </div>
+                  )
+                }
+
                 return (
                   <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px' }}>
                     {imgs.length === 0 ? (
-                      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', paddingTop: 8 }}>No images generated yet.</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 14, paddingTop: 40 }}>
+                        <span style={{ fontSize: 30, opacity: 0.18 }}>🖼</span>
+                        <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>No images generated yet.</div>
+                        {onOpenChat && (
+                          <button
+                            onClick={() => {
+                              const lbl = (activeOut as {label?:string}).label || activeOut.name || activeOutKey
+                              setOutputOpen(false)
+                              onOpenChat(activeOutKey, lbl)
+                            }}
+                            style={{
+                              border: '1px solid color-mix(in srgb, #F59E0B 40%, var(--line-2))',
+                              background: 'color-mix(in srgb, #F59E0B 10%, var(--bg-2))',
+                              borderRadius: 5, padding: '7px 18px', cursor: 'pointer',
+                              color: '#F59E0B', fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            }}
+                          >&#9670; Chat to generate</button>
+                        )}
+                      </div>
                     ) : (
                       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                         {imgs.flatMap(item => item.variations.map((v, vi) => (
                           <img
                             key={`${item.index}-${vi}`}
                             src={v.url}
-                            alt={activeOut.name}
+                            alt={activeOutKey}
                             onClick={() => setZoomGallery({ urls: allUrls, idx: allUrls.indexOf(v.url) })}
                             style={{ width: 190, height: 190, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: '1px solid var(--line-2)', display: 'block' }}
                           />
@@ -1930,26 +2153,26 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               }
 
               // Tab de texto/markdown
-              const otherKeys   = outputs.filter(o => o.name !== activeOut.name).map(o => o.name)
-              const section     = session.output_asset.content
-                ? (extractSection(session.output_asset.content, activeOut.name, otherKeys) ?? session.output_asset.content)
+              const otherKeys   = outputs.filter(o => ((o as {key?:string}).key || o.name) !== activeOutKey).map(o => (o as {key?:string}).key || o.name || '')
+              const section     = outSession?.output_asset?.content
+                ? (extractSection(outSession.output_asset.content, activeOutKey, otherKeys) ?? outSession.output_asset.content)
                 : null
 
-              // Detectar si el contenido es una lista estructurada (solo formatos no-prosa)
+              // Gallery solo tiene sentido cuando el output tiene image_gen (para generar imágenes por ítem)
+              // Outputs de texto puro siempre van a vista prosa/markdown
               const PROSE_FORMATS = ['markdown', 'document', 'text', 'pptx', 'pdf']
               const parsedItems = section ? parseOutputItems(section, activeOut.format) : []
-              const isGallery   = parsedItems.length >= 2 && !PROSE_FORMATS.includes(activeOut.format ?? '')
-
+              const isGallery   = parsedItems.length >= 2 && !!activeOut.image_gen && !PROSE_FORMATS.includes(activeOut.format ?? '')
               // Construir image items si el output tiene image_gen
               const imageItems: InlineImageItem[] = []
               imageItemsRef.current = imageItems   // se actualiza en cada render
               if (section && activeOut.image_gen && activeOut.image_gen_model) {
-                const savedItems = localOutputImages[activeOut.name] ?? []
+                const savedItems = localOutputImages[activeOutKey] ?? []
                 for (let idx = 0; idx < parsedItems.length; idx++) {
                   const itemText   = parsedItems[idx]
                   const saved      = savedItems.find(s => s.index === idx)
                   const variations = saved?.variations ?? []
-                  const key        = `${activeOut.name}:${idx}`
+                  const key        = `${activeOutKey}:${idx}`
                   imageItems.push({
                     itemKey:       key,
                     index:         idx,
@@ -1959,13 +2182,13 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                     isGenerating:  generatingImgKey === key,
                     onZoom:        url => setZoomUrl(url),
                     onGenerate:    async (condition?: string) => {
-                      if (!session?.id) return
+                      if (!outSession?.id) return
                       setGeneratingImgKey(key)
                       try {
-                        const r = await generateItemImage(projectId, node.id, session.id, activeOut.name, idx, itemText, condition)
+                        const r = await generateItemImage(projectId, node.id, outSession.id, activeOutKey, idx, itemText, condition)
                         const imgs = r.output_images
                         setLocalOutputImages(imgs)
-                        onImagesUpdate?.(imgs)
+                        onImagesUpdate?.(imgs, activeOutKey)
                       } catch (e) { console.error('[image-gen]', e) }
                       finally { setGeneratingImgKey(null) }
                     },
@@ -2097,14 +2320,24 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                             </div>
                             {/* Texto completo + botones */}
                             <div style={{ padding: '11px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                              <div
-                                onClick={() => setTextModal({ text: item.text, label: `Item ${item.index + 1}` })}
-                                title="Click to read full text"
-                                style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.65, cursor: 'zoom-in', display: 'flex', alignItems: 'flex-start', gap: 4 }}
-                              >
-                                <span style={{ flex: 1 }}>{item.text}</span>
-                                <span style={{ fontSize: 9, color: 'var(--text-4)', flexShrink: 0, paddingTop: 2 }}>⊕</span>
-                              </div>
+                              {(() => {
+                                const lines   = item.text.replace(/[*`]/g, '').split('\n').map(l => l.trim()).filter(Boolean)
+                                const title   = lines[0] ?? `Item ${item.index + 1}`
+                                const preview = lines.slice(1).join(' ').slice(0, 110)
+                                return (
+                                  <div
+                                    onClick={() => setTextModal({ text: item.text, label: title })}
+                                    title="Click to read full text"
+                                    style={{ cursor: 'zoom-in', display: 'flex', alignItems: 'flex-start', gap: 4 }}
+                                  >
+                                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-1)', lineHeight: 1.3 }}>{title}</span>
+                                      {preview && <span style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>{preview}{preview.length >= 110 ? '…' : ''}</span>}
+                                    </div>
+                                    <span style={{ fontSize: 9, color: 'var(--text-4)', flexShrink: 0, paddingTop: 2 }}>⊕</span>
+                                  </div>
+                                )
+                              })()}
                               <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                                 {item.imageUrl ? (
                                   <>
@@ -2129,12 +2362,29 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                             </div>
                           </div>
                         ))
-                        : parsedItems.map((text, i) => (
-                          <div key={i} style={{ flexShrink: 0, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 10, padding: '11px 14px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                            <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', flexShrink: 0, paddingTop: 3 }}>#{i + 1}</span>
-                            <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.65 }}>{text}</div>
-                          </div>
-                        ))
+                        : parsedItems.map((text, i) => {
+                          // Primera línea como título, resto como preview truncada
+                          const lines   = text.replace(/\*+/g, '').split('\n').map(l => l.trim()).filter(Boolean)
+                          const title   = lines[0] ?? `Item ${i + 1}`
+                          const preview = lines.slice(1).join(' ').slice(0, 180)
+                          return (
+                            <div
+                              key={i}
+                              onClick={() => setTextModal({ text, label: title })}
+                              title="Click to read full content"
+                              style={{ flexShrink: 0, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 10, padding: '13px 15px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'zoom-in', minHeight: 90 }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', flexShrink: 0 }}>#{i + 1}</span>
+                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-1)', lineHeight: 1.3 }}>{title}</span>
+                              </div>
+                              {preview && <div style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.55 }}>{preview}{preview.length >= 180 ? '…' : ''}</div>}
+                              {!activeOut.image_gen_model && (
+                                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', marginTop: 2 }}>Set image_gen_model to enable generation</div>
+                              )}
+                            </div>
+                          )
+                        })
                       }
                     </div>
                   </div>
@@ -2149,7 +2399,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                       {section}
                     </ReactMarkdown>
-                  ) : session.output_asset.storage_url ? (
+                  ) : outSession?.output_asset?.storage_url ? (
                     <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
                       This asset is stored as a file. Use the download button above to view it.
                     </div>
@@ -2288,7 +2538,85 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   )
 })
 
-const NODE_TYPES = { forgeNode: ForgeNodeCard, assetNode: AssetNodeCard, textInputNode: TextInputCard }
+// ─── LaneGroupNode ────────────────────────────────────────────────────────────
+// Renderiza el contenedor visual de un lane. Siempre detrás de los nodos miembro (zIndex: -1).
+// El drag del header mueve todos los nodos miembro simultáneamente.
+interface LaneGroupData {
+  lane:          ForgeLane
+  memberNodeIds: string[]   // project_node_ids de los nodos en este lane
+  onDragEnd:     () => void // callback para persistir layout
+}
+
+const LaneGroupNode = React.memo(function LaneGroupNode({ data }: { data: LaneGroupData }) {
+  const { lane } = data
+
+  return (
+    <>
+      {/* Handle en el borde derecho — origen de los edges virtuales salientes */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="lane-out"
+        style={{
+          background:    lane.color,
+          border:        `2px solid ${lane.color}88`,
+          width:         10,
+          height:        10,
+          pointerEvents: 'none',
+        }}
+      />
+      {/* Handle en el borde izquierdo — destino de los edges virtuales entrantes */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="lane-in"
+        style={{
+          background:    lane.color,
+          border:        `2px solid ${lane.color}88`,
+          width:         10,
+          height:        10,
+          pointerEvents: 'none',
+        }}
+      />
+    <div
+      style={{
+        width:         '100%',
+        height:        '100%',
+        border:        `1px solid ${lane.color}33`,
+        borderRadius:  10,
+        background:    `${lane.color}05`,
+        position:      'relative',
+        pointerEvents: 'none',
+      }}
+    >
+      {/* Header — drag handle nativo de React Flow */}
+      <div
+        className="lane-drag-handle"
+        style={{
+          position:      'absolute',
+          top:           -14,
+          left:          12,
+          display:       'flex',
+          alignItems:    'center',
+          gap:           6,
+          background:    'var(--bg-1)',
+          padding:       '0 8px',
+          cursor:        'grab',
+          pointerEvents: 'all',
+          userSelect:    'none',
+        }}
+      >
+        <div style={{ width: 7, height: 7, borderRadius: '50%', background: lane.color, flexShrink: 0 }} />
+        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: lane.color, whiteSpace: 'nowrap' }}>
+          Lane {lane.lane_key} · {lane.label}
+        </span>
+      </div>
+    </div>
+    </>
+  )
+})
+
+const NODE_TYPES = { forgeNode: ForgeNodeCard, assetNode: AssetNodeCard, textInputNode: TextInputCard, laneGroup: LaneGroupNode }
 const EDGE_TYPES = { forgeEdge: ForgeEdge }
 
 // ─── ImportAsOutputButton ─────────────────────────────────────────────────────
@@ -2393,6 +2721,36 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
+function CollapsibleSection({ label, count, children }: { label: string; count?: number; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ border: '1px solid var(--line-2)', borderRadius: 6, overflow: 'hidden' }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '6px 10px', background: 'var(--bg-2)', border: 'none', cursor: 'pointer',
+          fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)',
+          textTransform: 'uppercase', letterSpacing: '0.08em',
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {label}
+          {count != null && count > 0 && (
+            <span style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 3, padding: '0 4px', fontSize: 8, color: 'var(--text-4)' }}>{count}</span>
+          )}
+        </span>
+        <span style={{ fontSize: 8, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{ padding: '8px 10px', background: 'var(--bg-1)' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MonoPair({ k, v, color }: { k: string; v: string; color?: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: 10, gap: 6 }}>
@@ -2464,7 +2822,16 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
 
   const { node, session } = canvasNode
   if (!node) return null
-  const statusColor = session ? (SESSION_COLOR[session.status] ?? 'var(--text-3)') : null
+  // Derivar estado efectivo: si no hay sesión general, verificar si TODOS los outputs tienen per-output session aprobada
+  const _panelAllOuts = (node.outputs ?? [])
+  const _panelAllDone = _panelAllOuts.length > 0 && _panelAllOuts.every((o: { key?: string }) => {
+    const s = (canvasNode.output_sessions ?? {})[(o.key ?? '')]
+    return s?.status === 'approved' || s?.status === 'auto_approved'
+  })
+  const effectiveStatus: string | null = session?.status ?? (_panelAllDone
+    ? (_panelAllOuts.some((o: { key?: string }) => (canvasNode.output_sessions ?? {})[(o.key ?? '')]?.status === 'auto_approved') ? 'auto_approved' : 'approved')
+    : null)
+  const statusColor = effectiveStatus ? (SESSION_COLOR[effectiveStatus] ?? 'var(--text-3)') : null
   const phaseColor  = PHASE_COLOR[node.phase] ?? 'var(--text-3)'
 
   return (
@@ -2519,10 +2886,9 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
             </Section>
           )}
 
-          <Section label="Inputs">
+          <CollapsibleSection label="Inputs">
             {(() => {
               const incomingEdges = edges.filter(e => e.target === canvasNode.project_node_id)
-              // Deduplicar por (source, sourceHandle) — evita mostrar duplicados si hay filas repetidas en DB
               const seenIncoming = new Set<string>()
               const incomingRows = incomingEdges
                 .map(e => ({ edgeId: e.id, sourceHandle: e.sourceHandle, cn: canvasNodes.find(cn => cn.project_node_id === e.source) }))
@@ -2535,7 +2901,7 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
                 }) as { edgeId: string; sourceHandle?: string | null; cn: CanvasNode }[]
               if (incomingRows.length === 0) return (
                 <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', lineHeight: 1.6 }}>
-                  No inputs connected.<br />Drag assets from the library or connect nodes on the canvas.
+                  No inputs connected.
                 </div>
               )
               return (
@@ -2543,33 +2909,22 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
                   {incomingRows.map(({ edgeId, sourceHandle, cn }) => {
                     const isAsset = cn.node_type === 'library_asset'
                     const isText  = cn.node_type === 'text_input'
-                    const icon    = isAsset ? (ASSET_TYPE_ICON[cn.asset?.asset_type ?? 'other'] ?? '📎')
-                                  : isText  ? 'T'
-                                  : '⬡'
-                    const label   = isAsset ? (cn.asset?.display_name ?? '—')
-                                  : isText  ? (cn.text_label ?? 'Text Input')
-                                  : (cn.node?.title ?? '—')
+                    const icon    = isAsset ? (ASSET_TYPE_ICON[cn.asset?.asset_type ?? 'other'] ?? '📎') : isText ? 'T' : '⬡'
+                    const label   = isAsset ? (cn.asset?.display_name ?? '—') : isText ? (cn.text_label ?? 'Text Input') : (cn.node?.title ?? '—')
                     const slotLabel = (() => {
                       if (!sourceHandle?.startsWith('out-')) return null
-                      const handleVal = sourceHandle.slice(4) // "out-concept_brief" → "concept_brief"
-                      const outputs = cn.node?.outputs as { name: string; format: string }[] | undefined
-                      const out = outputs?.find(o => o.name === handleVal)
-                        ?? outputs?.[parseInt(handleVal, 10)]
-                      return out?.name ?? null
+                      const handleVal = sourceHandle.slice(4)
+                      const outputs = cn.node?.outputs as { name: string; label?: string; key?: string; format: string }[] | undefined
+                      const out = outputs?.find(o => (o.key || o.name) === handleVal) ?? outputs?.[parseInt(handleVal, 10)]
+                      return (out as {label?:string})?.label || out?.name || null
                     })()
-                    const sub     = isAsset ? (cn.asset?.asset_type ?? '')
-                                  : isText  ? 'text input'
-                                  : slotLabel ? `${cn.node?.node_key ?? ''} → ${slotLabel}` : (cn.node?.node_key ?? '')
+                    const sub = isAsset ? (cn.asset?.asset_type ?? '') : isText ? 'text input' : slotLabel ? `${cn.node?.node_key ?? ''} → ${slotLabel}` : (cn.node?.node_key ?? '')
                     return (
-                      <div key={edgeId} style={{
-                        display: 'flex', alignItems: 'center', gap: 7,
-                        background: 'var(--bg-2)', border: '1px solid var(--line-2)',
-                        borderRadius: 6, padding: '5px 8px',
-                      }}>
+                      <div key={edgeId} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '5px 8px' }}>
                         <span style={{ fontSize: isText ? 10 : 12, fontFamily: isText ? 'var(--font-mono)' : undefined, fontWeight: isText ? 700 : undefined, color: isText ? ASSET_NODE_CLR : undefined, flexShrink: 0 }}>{icon}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
-                          <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 1 }}>{sub}</div>
+                          {sub && <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 1 }}>{sub}</div>}
                         </div>
                         {isAsset && (
                           <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: ASSET_NODE_CLR, background: `color-mix(in srgb,${ASSET_NODE_CLR} 12%,transparent)`, border: `1px solid color-mix(in srgb,${ASSET_NODE_CLR} 25%,transparent)`, padding: '1px 5px', borderRadius: 3 }}>asset</span>
@@ -2580,49 +2935,54 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
                 </div>
               )
             })()}
-          </Section>
+          </CollapsibleSection>
 
           {Array.isArray(node.outputs) && node.outputs.length > 0 && (
-            <Section label="Outputs">
+            <CollapsibleSection label="Outputs" count={node.outputs.length}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {node.outputs.map((out, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '5px 8px' }}>
-                    <span style={{ fontSize: 8, color: out.optional ? 'var(--text-3)' : '#34D399', flexShrink: 0 }}>→</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: out.optional ? 'var(--text-2)' : 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{out.name}</div>
-                      {(out.format || out.description) && (
-                        <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 1 }}>
-                          {[out.format, out.description].filter(Boolean).join(' · ')}
-                        </div>
+                {node.outputs.map((out, i) => {
+                  const outLabel = (out as {label?:string}).label || (out as {key?:string}).key || out.name || '—'
+                  const outDesc  = (out as {description?:string}).description
+                  const outType  = (out as {type?:string}).type
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '5px 8px' }}>
+                      <span style={{ fontSize: 8, color: out.optional ? 'var(--text-3)' : '#34D399', flexShrink: 0 }}>→</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: out.optional ? 'var(--text-2)' : 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{outLabel}</div>
+                        {(outType || out.format || outDesc) && (
+                          <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 1 }}>
+                            {[outType, out.format, outDesc].filter(Boolean).join(' · ')}
+                          </div>
+                        )}
+                      </div>
+                      {out.optional && (
+                        <span style={{ fontSize: 7, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', padding: '1px 4px', borderRadius: 3, flexShrink: 0 }}>opt</span>
                       )}
                     </div>
-                    {out.optional && (
-                      <span style={{ fontSize: 7, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', padding: '1px 4px', borderRadius: 3, flexShrink: 0 }}>opt</span>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
-            </Section>
+            </CollapsibleSection>
           )}
 
           {node.tools?.length > 0 && (
-            <Section label="Tools">
+            <CollapsibleSection label="Tools" count={node.tools.length}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {node.tools.map((t, i) => (
                   <span key={i} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 3, padding: '2px 7px', color: 'var(--text-2)' }}>{String(t)}</span>
                 ))}
               </div>
-            </Section>
+            </CollapsibleSection>
           )}
 
           {node.skills?.length > 0 && (
-            <Section label="Skills">
+            <CollapsibleSection label="Skills" count={node.skills.length}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {node.skills.map((s, i) => (
                   <span key={i} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 3, padding: '2px 7px', color: 'var(--text-2)' }}>{String(s)}</span>
                 ))}
               </div>
-            </Section>
+            </CollapsibleSection>
           )}
 
           {session && (
@@ -2639,11 +2999,11 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
 
         {/* Footer */}
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--line-2)', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {canvasNode.session?.status !== 'approved' && !locked && (
+          {effectiveStatus !== 'approved' && effectiveStatus !== 'auto_approved' && !locked && (
             <ImportAsOutputButton projectId={projectId} canvasNode={canvasNode} onImported={onImportedAsOutput} />
           )}
           {(() => {
-            const approved = canvasNode.session?.status === 'approved'
+            const approved = effectiveStatus === 'approved' || effectiveStatus === 'auto_approved'
             if (locked) return (
               <button disabled title="Approve the previous node first" style={{
                 width: '100%', height: 32, borderRadius: 5, fontSize: 12, fontWeight: 600,
@@ -2673,7 +3033,7 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
               </button>
             )
           })()}
-          {canvasNode.session?.status === 'approved' ? (
+          {(effectiveStatus === 'approved' || effectiveStatus === 'auto_approved') ? (
             <div style={{
               height: 32, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)',
@@ -2827,6 +3187,10 @@ type TextSize = keyof typeof TEXT_SIZE_SCALES
 
 // Contexto para pasar el scale a los nodos y sidebar sin prop-drilling
 const CanvasScaleContext = createContext(1)
+// Contexto que indica si hay un nodo siendo arrastrado (cierra decks abiertos)
+const DraggingContext = createContext(false)
+// Contexto para pedirle a un ForgeNodeCard específico que abra su output modal (opcionalmente en un tab específico)
+const PendingOutputModalContext = createContext<{ nodeId: string | null; outputKey: string | null; clear: () => void }>({ nodeId: null, outputKey: null, clear: () => {} })
 
 function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh: () => void }) {
   const [canvasData,        setCanvasData]        = useState<CanvasData | null>(null)
@@ -2841,15 +3205,21 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [chatLoading,       setChatLoading]       = useState(false)
   const [chatDocUrl,        setChatDocUrl]        = useState<string | null>(null)
   const [chatDocFormat,     setChatDocFormat]     = useState<string | null>(null)
-  const [chatOutputImages,  setChatOutputImages]  = useState<OutputImagesMap>({})
-  const [chatApprovedAsset, setChatApprovedAsset] = useState<ApprovedAsset | null>(null)
+  const [chatOutputImages,     setChatOutputImages]     = useState<OutputImagesMap>({})
+  const [chatApprovedAsset,    setChatApprovedAsset]    = useState<ApprovedAsset | null>(null)
+  const [chatTargetOutputKey,  setChatTargetOutputKey]  = useState<string | null>(null)
+  const [chatTargetOutputLabel,setChatTargetOutputLabel]= useState<string | null>(null)
   const [collapsedAssets,   setCollapsedAssets]   = useState<Set<string>>(new Set())
   const [runPhase,          setRunPhase]          = useState<'idle' | 'running' | 'error'>('idle')
   const [runProgress,       setRunProgress]       = useState<{ done: number; total: number } | null>(null)
   const [runningNodeIds,    setRunningNodeIds]     = useState<Set<string>>(new Set())
   const [runErrorNodeId,    setRunErrorNodeId]     = useState<string | null>(null)
   const [runErrors,         setRunErrors]          = useState<import('@/lib/api').RunValidateError[]>([])
-  const [draggingNodeId,    setDraggingNodeId]     = useState<string | null>(null)
+  const [draggingNodeId,       setDraggingNodeId]       = useState<string | null>(null)
+  const [pendingOutputModalId,  setPendingOutputModalId]  = useState<string | null>(null)
+  const [pendingOutputModalKey, setPendingOutputModalKey] = useState<string | null>(null)
+  const clearPendingOutputModal = useCallback(() => { setPendingOutputModalId(null); setPendingOutputModalKey(null) }, [])
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
   const [textSize,          setTextSize]           = useState<TextSize>(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem(TEXT_SIZE_KEY) : null
@@ -2947,7 +3317,16 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   )
 
   const approvedNodeIds = useMemo(
-    () => new Set((canvasData?.nodes ?? []).filter(cn => cn.node_type === 'forge_node' && cn.session?.status === 'approved').map(cn => cn.node!.id)),
+    () => new Set((canvasData?.nodes ?? []).filter(cn => {
+      if (cn.node_type !== 'forge_node') return false
+      if (cn.session?.status === 'approved' || cn.session?.status === 'auto_approved') return true
+      const aOuts = (cn.node?.outputs ?? [])
+      if (aOuts.length === 0) return false
+      return aOuts.every((o: { key?: string }) => {
+        const s = (cn.output_sessions ?? {})[(o.key ?? '')]
+        return s?.status === 'approved' || s?.status === 'auto_approved'
+      })
+    }).map(cn => cn.node!.id)),
     [canvasData],
   )
 
@@ -2977,33 +3356,33 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   )
 
 
-  // Nodos bloqueados: secuencial — si el nodo i-1 no está aprobado, todos los siguientes están locked
-  const lockedNodeIds = useMemo(() => {
-    if (!canvasData) return new Set<string>()
-    const sorted = [...canvasData.nodes]
-      .filter(cn => cn.node_type === 'forge_node')
-      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
-    const locked = new Set<string>()
-    for (let i = 1; i < sorted.length; i++) {
-      const prevStatus = sorted[i - 1].session?.status
-      const prevDone   = prevStatus === 'approved' || prevStatus === 'auto_approved'
-      if (!prevDone) {
-        for (let j = i; j < sorted.length; j++) locked.add(sorted[j].project_node_id)
-        break
-      }
-    }
-    return locked
-  }, [canvasData])
+  // v1.3.0: todos los nodos son standalone — ninguno bloquea a otro
+  // El único estado "locked" es sesión aprobada (read-only), manejado en ForgeNodeCard directamente
+  const lockedNodeIds = useMemo(() => new Set<string>(), [])
 
   // Gate listo: todos los nodos del blueprint activo están aprobados y no hay decisión previa
   const gateReady = useMemo(() => {
     const bp = canvasData?.active_blueprint
-    if (!bp?.gate || bp.gate_decision) return false
+    if (!bp?.gate)         { console.log('[gate] ✗ no gate en blueprint'); return false }
+    if (bp.gate_decision)  { console.log('[gate] ✗ gate_decision ya existe:', bp.gate_decision); return false }
     const bpNodes = canvasData!.nodes.filter(n => n.blueprint_id === bp.id && n.node_type === 'forge_node')
-    if (bpNodes.length === 0) return false
-    // Todos los forge_nodes en canvas deben estar aprobados (incluyendo los re-agregados sin blueprint_id)
+    if (bpNodes.length === 0) { console.log('[gate] ✗ sin bpNodes'); return false }
     const allForgeNodes = canvasData!.nodes.filter(n => n.node_type === 'forge_node')
-    return allForgeNodes.every(n => n.session?.status === 'approved' || n.session?.status === 'auto_approved')
+    const isApproved = (n: CanvasNode) => {
+      const gs = n.session?.status
+      if (gs === 'approved' || gs === 'auto_approved') return true
+      // También válido si alguna per-output session está aprobada (chat en Focus mode)
+      return Object.values(n.output_sessions ?? {}).some(
+        (s: unknown) => (s as { status: string }).status === 'approved' || (s as { status: string }).status === 'auto_approved'
+      )
+    }
+    const notReady = allForgeNodes.filter(n => !isApproved(n))
+    if (notReady.length > 0) {
+      console.log('[gate] ✗ nodos sin aprobar:', notReady.map(n => ({ key: n.node?.node_key, session: n.session?.status ?? 'null', outSessions: Object.fromEntries(Object.entries(n.output_sessions ?? {}).map(([k, v]) => [k, (v as { status: string }).status])) })))
+      return false
+    }
+    console.log('[gate] ✓ gate listo')
+    return true
   }, [canvasData])
 
   const [gateLoading,   setGateLoading]   = useState(false)
@@ -3023,11 +3402,15 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
     setGateLoading(true)
     try {
+      // Persistir posiciones actuales antes del fan-out para que el backend ubique el gate correctamente
+      await persistLayout()
       const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
       await canvasFetch(`/api/projects/${project.id}/canvas/gate`, {
         method: 'POST',
         body: JSON.stringify({ decision, blueprint_id: canvasData.active_blueprint.id, member_id: memberId }),
       })
+      // Forzar re-aplicar canvas_layout del DB: el fan-out guarda posiciones nuevas que savedLayout no tiene
+      dbLayoutAppliedRef.current = false
       await loadCanvas(true)
     } catch (e) {
       console.error('[gate] decision failed', e)
@@ -3092,6 +3475,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           id:        cn.project_node_id,
           type:      'forgeNode',
           deletable: false,
+          zIndex:    1,
           position:  pos ?? { x: i * (NODE_W + NODE_GAP), y: 0 },
           data: {
             canvasNode: cn,
@@ -3104,18 +3488,29 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             isStale:   cn.is_stale,
             isError:   false,
             projectId: project.id,
-            onImagesUpdate: (imgs: OutputImagesMap) => {
+            onImagesUpdate: (imgs: OutputImagesMap, outputKey?: string) => {
               // Invalidar caché del deck para que muestre las nuevas variaciones
               invalidateAssetDeckCache(project.id, cn.node?.id ?? '')
               setChatOutputImages(imgs)
               setCanvasData(prev => prev ? {
                 ...prev,
-                nodes: prev.nodes.map(n =>
-                  n.project_node_id === cn.project_node_id && n.session
-                    ? { ...n, session: { ...n.session, output_images: imgs } }
-                    : n
-                ),
+                nodes: prev.nodes.map(n => {
+                  if (n.project_node_id !== cn.project_node_id) return n
+                  // Actualizar per-output session si corresponde
+                  if (outputKey && (n.output_sessions ?? {})[outputKey]) {
+                    const outSess = n.output_sessions![outputKey]
+                    return { ...n, output_sessions: { ...n.output_sessions, [outputKey]: { ...outSess, output_images: imgs } } }
+                  }
+                  // Sesión general
+                  if (n.session) return { ...n, session: { ...n.session, output_images: imgs } }
+                  return n
+                }),
               } : null)
+            },
+            onOpenChat: (outputKey?: string | null, outputLabel?: string | null) => {
+              setChatTargetOutputKey(outputKey ?? null)
+              setChatTargetOutputLabel(outputLabel ?? null)
+              handleRunNode(cn, outputKey)
             },
           } as ForgeNodeCardData,
         }
@@ -3125,7 +3520,12 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   // Edges vienen de savedLayout; el usuario las dibuja manualmente
   const initNodes = useMemo(() => canvasData ? buildNodes(canvasData.nodes) : [], [canvasData, buildNodes])
   // Edges vienen de DB (canvasData); localStorage solo como caché de arranque rápido
-  const initEdges = useMemo(() => savedLayout?.edges ?? [], [savedLayout])
+  // Normaliza handles legacy (out-xxx → out, in-xxx → in) tras el cambio a handle único por nodo
+  const initEdges = useMemo((): Edge[] => (savedLayout?.edges ?? []).map(e => ({
+    ...e,
+    sourceHandle: e.sourceHandle?.startsWith('out-') ? 'out' : (e.sourceHandle ?? undefined),
+    targetHandle: e.targetHandle?.startsWith('in-')  ? 'in'  : (e.targetHandle  ?? undefined),
+  })), [savedLayout])
 
   const [selectedEdgeId,   setSelectedEdgeId]   = useState<string | null>(null)
   const [showExportModal,  setShowExportModal]   = useState(false)
@@ -3170,19 +3570,96 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     pendingPositionsRef.current = {}
     const validIds = new Set(newNodes.map(n => n.id))
 
-    // Reconstruir edges desde DB
+    // Mapa project_node_id → lane_id para reemplazar edges cross-lane con edges virtuales
+    const laneByNode = new Map<string, string | null>()
+    for (const cn of canvasData.nodes) laneByNode.set(cn.project_node_id, cn.lane_id)
+
+    // Mapa lane_id → color (para pintar los edges virtuales con el color del lane)
+    const laneColor = new Map<string, string>()
+    for (const lane of (canvasData.lanes ?? [])) laneColor.set(lane.id, lane.color)
+
+    // Reconstruir edges desde DB — edges que cruzan la frontera de un lane quedan hidden;
+    // se reemplazan por edges virtuales en los bordes del LaneGroupNode (simétrico: salida e entrada).
+    // Salientes: (srcLane → external target) → virtual desde lane-out
+    // Entrantes: (external source → tgtLane)  → virtual hacia lane-in
+    const outgoingLanePairs = new Map<string, { laneGroupId: string; targetId: string; color: string }>()
+    const incomingLanePairs = new Map<string, { sourceId: string; laneGroupId: string; color: string }>()
+
     const dbEdges: Edge[] = (canvasData.edges ?? [])
       .filter(e => validIds.has(e.source) && validIds.has(e.target))
-      .map(e => ({
-        id:           e.id,
-        source:       e.source,
-        target:       e.target,
-        sourceHandle: e.sourceHandle ?? undefined,
-        targetHandle: e.targetHandle ?? undefined,
+      .map(e => {
+        const srcLane = laneByNode.get(e.source) ?? null
+        const tgtLane = laneByNode.get(e.target) ?? null
+
+        // Sale de un lane hacia fuera (o hacia otro lane)
+        const isOutgoing = srcLane !== null && srcLane !== tgtLane
+        // Entra a un lane desde fuera (o desde otro lane)
+        const isIncoming = tgtLane !== null && srcLane !== tgtLane
+
+        if (isOutgoing) {
+          const pairKey = `${srcLane}→${e.target}`
+          if (!outgoingLanePairs.has(pairKey)) {
+            outgoingLanePairs.set(pairKey, {
+              laneGroupId: `lane-${srcLane}`,
+              targetId:    e.target,
+              color:       laneColor.get(srcLane) ?? '#6b7280',
+            })
+          }
+        }
+
+        if (isIncoming) {
+          const pairKey = `${e.source}→${tgtLane}`
+          if (!incomingLanePairs.has(pairKey)) {
+            incomingLanePairs.set(pairKey, {
+              sourceId:    e.source,
+              laneGroupId: `lane-${tgtLane}`,
+              color:       laneColor.get(tgtLane) ?? '#6b7280',
+            })
+          }
+        }
+
+        const isHidden = isOutgoing || isIncoming
+        return {
+          id:           e.id,
+          source:       e.source,
+          target:       e.target,
+          sourceHandle: e.sourceHandle?.startsWith('out-') ? 'out' : (e.sourceHandle ?? undefined),
+          targetHandle: e.targetHandle?.startsWith('in-')  ? 'in'  : (e.targetHandle  ?? undefined),
+          type:         'forgeEdge' as const,
+          deletable:    !isHidden,
+          hidden:       isHidden,
+          data:         { color: '#6b7280', active: false },
+        }
+      })
+
+    // Edges virtuales salientes: uno por (srcLane, target), desde el borde derecho del lane
+    for (const [pairKey, { laneGroupId, targetId, color }] of outgoingLanePairs) {
+      dbEdges.push({
+        id:           `virtual-out-${pairKey}`,
+        source:       laneGroupId,
+        sourceHandle: 'lane-out',
+        target:       targetId,
         type:         'forgeEdge' as const,
-        deletable:    true,
-        data:         { color: '#6b7280', active: false },
-      }))
+        deletable:    false,
+        selectable:   false,
+        data:         { color, active: false },
+      })
+    }
+
+    // Edges virtuales entrantes: uno por (source, tgtLane), hacia el borde izquierdo del lane
+    for (const [pairKey, { sourceId, laneGroupId, color }] of incomingLanePairs) {
+      dbEdges.push({
+        id:           `virtual-in-${pairKey}`,
+        source:       sourceId,
+        sourceHandle: 'out',
+        target:       laneGroupId,
+        targetHandle: 'lane-in',
+        type:         'forgeEdge' as const,
+        deletable:    false,
+        selectable:   false,
+        data:         { color, active: false },
+      })
+    }
 
     // El backend corre auto-wiring al cargar blueprints — los edges ya vienen en dbEdges
     setEdges(dbEdges)
@@ -3229,6 +3706,81 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     })
   }, [project.id, canvasData, getViewport])
 
+  // Ref para que syncLaneNodes siempre use la versión actual de persistLayout
+  const persistLayoutRef = useRef(persistLayout)
+  persistLayoutRef.current = persistLayout
+
+  // Ref para arrastrar lane groups: captura posiciones relativas de nodos miembro al inicio
+  const laneGroupDragRef = useRef<{
+    laneGroupId:       string
+    memberNodeIds:     string[]
+    relativePositions: Record<string, { x: number; y: number }>
+  } | null>(null)
+
+  // Sincroniza posición y tamaño del LaneGroupNode con sus nodos miembro
+  const syncLaneNodes = useCallback(() => {
+    if (!canvasData?.lanes?.length) return
+    // PADDING.top = PADDING.bottom para margen visual simétrico
+    // El header label vive en top:-14 (fuera del box), así que PADDING.top = margen interior real
+    const PADDING = { top: 28, right: 18, bottom: 28, left: 18 }
+    const NODE_W = 240
+    // Altura de fallback para el primer render antes de que React Flow mida los nodos
+    const NODE_H_FALLBACK = 90
+
+    setNodes(prev => {
+      const nodeMap: Record<string, typeof prev[0]> = {}
+      for (const n of prev) if (!n.id.startsWith('lane-')) nodeMap[n.id] = n
+
+      let changed = false
+      const newLaneNodes = canvasData.lanes.map(lane => {
+        const memberIds = canvasData.nodes
+          .filter(cn => cn.lane_id === lane.id)
+          .map(cn => cn.project_node_id)
+        const memberNodes = memberIds.map(id => nodeMap[id]).filter((n): n is typeof prev[0] => !!n)
+        if (!memberNodes.length) return null
+
+        const minX  = Math.min(...memberNodes.map(n => n.position.x))
+        const minY  = Math.min(...memberNodes.map(n => n.position.y))
+        const maxX  = Math.max(...memberNodes.map(n => n.position.x + NODE_W))
+        // Usa la altura real medida por React Flow; fallback si aún no está disponible
+        const maxY  = Math.max(...memberNodes.map(n => n.position.y + (n.height ?? NODE_H_FALLBACK)))
+        const laneId = `lane-${lane.id}`
+        const ex     = prev.find(n => n.id === laneId)
+        const newPos = { x: minX - PADDING.left, y: minY - PADDING.top }
+        const newW   = maxX - minX + PADDING.left + PADDING.right
+        const newH   = maxY - minY + PADDING.top + PADDING.bottom
+
+        if (ex && ex.position.x === newPos.x && ex.position.y === newPos.y &&
+            (ex.style as { width?: number })?.width  === newW &&
+            (ex.style as { height?: number })?.height === newH) return ex
+
+        changed = true
+        return {
+          id: laneId, type: 'laneGroup' as const,
+          draggable: true, selectable: false, zIndex: 0,
+          dragHandle: '.lane-drag-handle',
+          position: newPos, style: { width: newW, height: newH, zIndex: 0 },
+          data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current } as LaneGroupData,
+        }
+      }).filter(Boolean) as typeof prev
+
+      if (!changed) return prev
+      return [...newLaneNodes, ...prev.filter(n => !n.id.startsWith('lane-'))]
+    })
+  }, [canvasData, setNodes])
+
+  // Disparar sync cada vez que cambia canvasData (carga inicial + refetch tras fan-out)
+  useEffect(() => { syncLaneNodes() }, [syncLaneNodes])
+
+  // Re-sincronizar cuando React Flow mide las alturas reales de los nodos por primera vez
+  // o cuando cambian (nodo aprobado agrega la fila de output y crece)
+  const _laneNodeHeightKey = nodes
+    .filter(n => !n.id.startsWith('lane-') && !!n.height)
+    .map(n => `${n.id}:${n.height}`)
+    .join('|')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (_laneNodeHeightKey) syncLaneNodes() }, [_laneNodeHeightKey])
+
   const deleteEdge = useCallback((id: string) => {
     const next = edgesRef.current.filter(e => e.id !== id)
     setEdges(next)
@@ -3242,11 +3794,22 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     if (!canvasData) return new Set<string>()
     return new Set(
       canvasData.nodes
-        .filter(cn =>
-          cn.node_type === 'library_asset' ||
-          cn.node_type === 'text_input'    ||
-          (cn.node_type === 'forge_node' && (cn.session?.status === 'approved' || cn.session?.status === 'auto_approved'))
-        )
+        .filter(cn => {
+          if (cn.node_type === 'library_asset' || cn.node_type === 'text_input') return true
+          if (cn.node_type !== 'forge_node') return false
+          // Sesión general aprobada
+          if (cn.session?.status === 'approved' || cn.session?.status === 'auto_approved') return true
+          // Todos los outputs tipo connection aprobados via per-output sessions
+          const connOuts = (cn.node?.outputs ?? []).filter((o: { type?: string }) => o.type === 'connection')
+          if (connOuts.length > 0) {
+            return connOuts.every((o: { key?: string; name?: string }) => {
+              const k = o.key || o.name || ''
+              const s = (cn.output_sessions ?? {})[k]
+              return s?.status === 'approved' || s?.status === 'auto_approved'
+            })
+          }
+          return false
+        })
         .map(cn => cn.project_node_id)
     )
   }, [canvasData])
@@ -3396,8 +3959,32 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     }
   }
 
+  function nodeHasContent(projectNodeId: string): boolean {
+    const cn = canvasData?.nodes.find(n => n.project_node_id === projectNodeId)
+    if (!cn) return false
+    return !!cn.session?.has_content || Object.values(cn.output_sessions ?? {}).some(s => s.has_content)
+  }
+
+  function nodeIsApproved(projectNodeId: string): boolean {
+    const cn = canvasData?.nodes.find(n => n.project_node_id === projectNodeId)
+    if (!cn) return false
+    const gs = cn.session?.status
+    if (gs === 'approved' || gs === 'auto_approved') return true
+    const aOuts = (cn.node?.outputs ?? [])
+    return aOuts.length > 0 && aOuts.every((o: { key?: string }) => {
+      const s = (cn.output_sessions ?? {})[(o.key ?? '')]?.status
+      return s === 'approved' || s === 'auto_approved'
+    })
+  }
+
   async function handleRemoveNode() {
     if (!selectedNode) return
+    if (nodeIsApproved(selectedNode.project_node_id)) return
+    if (nodeHasContent(selectedNode.project_node_id)) {
+      setPendingRemoveId(selectedNode.project_node_id)
+      setSelectedNode(null)
+      return
+    }
     setRemoving(true)
     setSelectedNode(null)
     try {
@@ -3409,22 +3996,52 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
   const handleNodeDragStart = useCallback((_event: React.MouseEvent, node: import('@xyflow/react').Node) => {
     setDraggingNodeId(node.id)
-  }, [])
+    if (node.type === 'laneGroup') {
+      const laneData = node.data as unknown as LaneGroupData
+      const allNodes = getNodes()
+      const relPos: Record<string, { x: number; y: number }> = {}
+      for (const n of allNodes) {
+        if (laneData.memberNodeIds.includes(n.id)) {
+          relPos[n.id] = { x: n.position.x - node.position.x, y: n.position.y - node.position.y }
+        }
+      }
+      laneGroupDragRef.current = { laneGroupId: node.id, memberNodeIds: laneData.memberNodeIds, relativePositions: relPos }
+    }
+  }, [getNodes])
+
+  const handleNodeDrag = useCallback((_event: React.MouseEvent, node: import('@xyflow/react').Node) => {
+    if (node.type !== 'laneGroup' || !laneGroupDragRef.current) return
+    const { memberNodeIds, relativePositions } = laneGroupDragRef.current
+    setNodes(prev => prev.map(n => {
+      if (!memberNodeIds.includes(n.id)) return n
+      const rel = relativePositions[n.id]
+      if (!rel) return n
+      return { ...n, position: { x: node.position.x + rel.x, y: node.position.y + rel.y } }
+    }))
+  }, [setNodes])
 
   const handleNodeDragStop = useCallback((event: React.MouseEvent, node: import('@xyflow/react').Node) => {
+    laneGroupDragRef.current = null
     persistLayout()
-    if (dropZoneRef.current) {
+    syncLaneNodes()
+    if (node.type !== 'laneGroup' && dropZoneRef.current) {
       // getBoundingClientRect ya devuelve coords de pantalla reales (incluye zoom CSS)
       const rect = dropZoneRef.current.getBoundingClientRect()
       if (
         event.clientX >= rect.left && event.clientX <= rect.right &&
         event.clientY >= rect.top  && event.clientY <= rect.bottom
       ) {
-        removeNodeById(node.id)
+        if (nodeIsApproved(node.id)) {
+          // Nodo aprobado — no se puede eliminar
+        } else if (nodeHasContent(node.id)) {
+          setPendingRemoveId(node.id)
+        } else {
+          removeNodeById(node.id)
+        }
       }
     }
     setDraggingNodeId(null)
-  }, [persistLayout])
+  }, [persistLayout, syncLaneNodes])
 
   // Topological sort: devuelve tiers de project_node_ids en orden de ejecución
   function topoTiers(nodes: CanvasNode[], edges: DbEdge[]): string[][] {
@@ -3563,12 +4180,18 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     await loadCanvas(true)
   }
 
-  // Abre el chat cargando la sesión persistida del nodo; cierra el panel para evitar superposición
-  async function handleRunNode(node: CanvasNode) {
+  // Abre el chat cargando la sesión persistida del nodo (o de un output específico)
+  async function handleRunNode(node: CanvasNode, outputKey?: string | null) {
+    // Si no se especifica output y el nodo ya tiene per-output sessions → abrir output modal
+    if (!outputKey && Object.keys(node.output_sessions ?? {}).length > 0) {
+      setSelectedNode(null)
+      setPendingOutputModalId(node.project_node_id)
+      return
+    }
     setSelectedNode(null)
     setChatLoading(true)
     try {
-      const { session, messages, asset } = await getNodeSession(project.id, node.node!.id)
+      const { session, messages, asset } = await getNodeSession(project.id, node.node!.id, outputKey)
       setChatSessionId(session?.id ?? null)
       setChatMessages(messages)
       setChatOutputImages((session?.output_images as OutputImagesMap) ?? {})
@@ -3602,6 +4225,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
   return (
     <CanvasScaleContext.Provider value={canvasScale}>
+    <DraggingContext.Provider value={draggingNodeId !== null}>
+    <PendingOutputModalContext.Provider value={{ nodeId: pendingOutputModalId, outputKey: pendingOutputModalKey, clear: clearPendingOutputModal }}>
     <>
     <ForgeToolbar
       project={project}
@@ -3624,7 +4249,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         collapsed={sidebarCollapsed}
         onCollapsedChange={setSidebarCollapsed}
         onFocusNode={handleFocusNode}
-        isDroppingNode={!!draggingNodeId}
+        isDroppingNode={!!draggingNodeId && !nodeIsApproved(draggingNodeId)}
         dropZoneRef={dropZoneRef}
       />
 
@@ -3696,6 +4321,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
             onNodeDragStart={handleNodeDragStart}
+            onNodeDrag={handleNodeDrag}
             onNodeDragStop={handleNodeDragStop}
             onMoveEnd={persistLayout}
             onDragOver={handleDragOver}
@@ -3738,22 +4364,43 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           stepLabel={`${chatForgeNode.node_key} — ${chatForgeNode.title}`}
           currentOutput={chatNode.session ?? null}
           project={project}
-          locked={chatNode.session?.status === 'approved'}
+          locked={(() => {
+            // Gate nodes nunca se bloquean — son conversacionales y el usuario siempre puede re-aceptar
+            if (chatForgeNode.role === 'gate') return false
+            // Si el chat está enfocado en un output específico, verificar su per-output session
+            if (chatTargetOutputKey) {
+              const s = (chatNode.output_sessions ?? {})[chatTargetOutputKey]?.status
+              return s === 'approved' || s === 'auto_approved'
+            }
+            // Sin target: verificar sesión general o todos los outputs aprobados
+            const gs = chatNode.session?.status
+            if (gs === 'approved' || gs === 'auto_approved') return true
+            const cOuts = (chatForgeNode.outputs ?? [])
+            return cOuts.length > 0 && cOuts.every((o: { key?: string }) => {
+              const s = (chatNode.output_sessions ?? {})[(o.key ?? '')]?.status
+              return s === 'approved' || s === 'auto_approved'
+            })
+          })()}
           initialMessages={chatMessages}
           onSend={async (msg, file, attachmentUrl) => {
-            const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined, file, attachmentUrl)
+            const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined, file, attachmentUrl, chatTargetOutputKey, chatNode.project_node_id)
             if (r.doc_url) { setChatDocUrl(r.doc_url); setChatDocFormat(r.doc_format ?? null) }
             // Actualizar sesión en el estado local si es nueva
             chatSessionIdRef.current = r.session_id
             if (!chatSessionId) {
               setChatSessionId(r.session_id)
+              const newSess: ForgeSession = { id: r.session_id, node_id: chatForgeNode.id, status: 'active' as const, iteration_count: 1, started_at: new Date().toISOString(), completed_at: null, output_asset_id: null, output_images: null, output_asset: null, has_content: true }
               setCanvasData(prev => prev ? {
                 ...prev,
-                nodes: prev.nodes.map(n =>
-                  n.node?.id === chatForgeNode.id
-                    ? { ...n, session: { id: r.session_id, node_id: chatForgeNode.id, status: 'active' as const, iteration_count: 1, started_at: new Date().toISOString(), completed_at: null, output_asset_id: null, output_images: null, output_asset: null } }
-                    : n
-                ),
+                nodes: prev.nodes.map(n => {
+                  if (n.node?.id !== chatForgeNode.id) return n
+                  if (chatTargetOutputKey) {
+                    // Sesión de output específico — va en output_sessions
+                    return { ...n, output_sessions: { ...(n.output_sessions ?? {}), [chatTargetOutputKey]: newSess } }
+                  }
+                  // Sesión general del nodo
+                  return { ...n, session: newSess }
+                }),
               } : null)
             } else {
               setChatSessionId(r.session_id)
@@ -3780,7 +4427,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             const defs: ImageOutputDef[] = []
             for (const out of (chatForgeNode.outputs ?? [])) {
               if (out.image_gen && out.image_gen_model) {
-                defs.push({ outputKey: out.name, format: out.format, imageGenModel: out.image_gen_model })
+                defs.push({ outputKey: out.key || out.name, format: out.format, imageGenModel: out.image_gen_model })
               }
             }
             return defs.length > 0 ? defs : undefined
@@ -3794,16 +4441,36 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             setChatOutputImages(imgs)
             setCanvasData(prev => prev ? {
               ...prev,
-              nodes: prev.nodes.map(n =>
-                n.node?.id === chatForgeNode.id && n.session
-                  ? { ...n, session: { ...n.session, output_images: imgs } }
-                  : n
-              ),
+              nodes: prev.nodes.map(n => {
+                if (n.node?.id !== chatForgeNode.id) return n
+                // Actualizar per-output session si el chat está enfocado en un output específico
+                if (chatTargetOutputKey && (n.output_sessions ?? {})[chatTargetOutputKey]) {
+                  const outSess = n.output_sessions![chatTargetOutputKey]
+                  return { ...n, output_sessions: { ...n.output_sessions, [chatTargetOutputKey]: { ...outSess, output_images: imgs } } }
+                }
+                if (n.session) return { ...n, session: { ...n.session, output_images: imgs } }
+                return n
+              }),
             } : null)
             return r
           }}
           approvedAsset={chatApprovedAsset ?? undefined}
-          onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); chatSessionIdRef.current = null; setChatDocUrl(null); setChatDocFormat(null); setChatOutputImages({}); setChatApprovedAsset(null) }}
+          isGate={chatForgeNode.role === 'gate'}
+          projectNodeId={chatNode.project_node_id ?? undefined}
+          onOpenOutput={(srcProjectNodeId, outputKey) => {
+            setPendingOutputModalId(srcProjectNodeId)
+            setPendingOutputModalKey(outputKey ?? null)
+          }}
+          targetOutputKey={chatTargetOutputKey}
+          targetOutputLabel={chatTargetOutputLabel}
+          systemPrompt={(() => {
+            if (chatTargetOutputKey) {
+              const targetOut = (chatForgeNode.outputs ?? []).find((o: { key?: string; name?: string }) => (o.key || o.name) === chatTargetOutputKey)
+              return [chatForgeNode.default_prompt, (targetOut as { prompt?: string })?.prompt].filter(Boolean).join('\n\n') || undefined
+            }
+            return (chatForgeNode.default_prompt as string | undefined) || (chatForgeNode.standalone_prompt as string | undefined) || undefined
+          })()}
+          onClose={() => { setChatNode(null); setChatMessages([]); setChatSessionId(null); chatSessionIdRef.current = null; setChatDocUrl(null); setChatDocFormat(null); setChatOutputImages({}); setChatApprovedAsset(null); setChatTargetOutputKey(null); setChatTargetOutputLabel(null) }}
         />
         )
       })()}
@@ -3969,6 +4636,22 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               </div>
             )}
 
+            {/* Barra de progreso mientras se procesa el gate */}
+            {gateLoading && (
+              <div style={{ padding: '0 24px 4px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 6, letterSpacing: '.06em' }}>
+                  Processing decision…
+                </div>
+                <div style={{ height: 3, background: 'var(--line-1)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', width: '40%', background: '#34D399', borderRadius: 2,
+                    animation: 'gateProgress 1.2s ease-in-out infinite alternate',
+                  }} />
+                </div>
+                <style>{`@keyframes gateProgress { from { margin-left: 0; width: 40% } to { margin-left: 60%; width: 40% } }`}</style>
+              </div>
+            )}
+
             {/* Decisión */}
             <div style={{ padding: '18px 24px', display: 'flex', gap: 10 }}>
               <button
@@ -4025,8 +4708,40 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         onRepoSaved={onRefresh}
       />
     )}
+
+    {/* Confirmación de borrado para nodos con contenido generado */}
+    {pendingRemoveId && (
+      <div
+        onClick={() => setPendingRemoveId(null)}
+        style={{ position: 'fixed', inset: 0, zIndex: 15000, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, padding: '28px 32px', width: 360, boxShadow: '0 24px 64px rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', gap: 16 }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#EF4444', letterSpacing: '0.04em' }}>REMOVE NODE</span>
+            <span style={{ fontSize: 13, color: 'var(--text-1)', lineHeight: 1.5 }}>
+              This node has generated content. Removing it will permanently delete all sessions, messages and approved outputs.
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => setPendingRemoveId(null)}
+              style={{ padding: '7px 16px', borderRadius: 7, border: '1px solid var(--line-2)', background: 'none', color: 'var(--text-2)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+            >Cancel</button>
+            <button
+              onClick={async () => { const id = pendingRemoveId; setPendingRemoveId(null); setRemoving(true); try { await removeNodeById(id) } finally { setRemoving(false) } }}
+              style={{ padding: '7px 16px', borderRadius: 7, border: 'none', background: '#EF4444', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+            >Remove anyway</button>
+          </div>
+        </div>
+      </div>
+    )}
     </div>
     </>
+    </PendingOutputModalContext.Provider>
+    </DraggingContext.Provider>
     </CanvasScaleContext.Provider>
   )
 }

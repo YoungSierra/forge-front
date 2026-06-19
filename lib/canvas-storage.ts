@@ -40,7 +40,16 @@ export function loadLayout(projectId: string): CanvasLayout | null {
 
 export function seedLayoutFromDB(projectId: string, layout: CanvasLayout): void {
   try {
-    localStorage.setItem(key(projectId), JSON.stringify(layout))
+    // Normaliza handles legacy (out-xxx → out, in-xxx → in) al sembrar desde DB
+    const normalized: CanvasLayout = {
+      ...layout,
+      edges: (layout.edges ?? []).map(e => ({
+        ...e,
+        sourceHandle: e.sourceHandle?.startsWith('out-') ? 'out' : e.sourceHandle,
+        targetHandle: e.targetHandle?.startsWith('in-')  ? 'in'  : e.targetHandle,
+      })),
+    }
+    localStorage.setItem(key(projectId), JSON.stringify(normalized))
   } catch { /* noop */ }
 }
 

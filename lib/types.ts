@@ -1,3 +1,11 @@
+export type ForgeLane = {
+  id:             string
+  lane_key:       string                 // 'A', 'B', 'C'
+  label:          string                 // título del ítem (seed title, etc.)
+  color:          string                 // hex, p.ej. '#60a5fa'
+  bound_item_ref: Record<string, unknown> // ítem completo del type_registry (JSONB)
+}
+
 export type WizardStep = 1 | 2 | 3 | 4 | 5 | 6
 
 export type StepStatus =

@@ -7,7 +7,7 @@ const FORGYI_CLR = '#F59E0B'
 
 const FORGYI_KF = `
 @keyframes forgyi-flow {
-  from { stroke-dashoffset: 32; }
+  from { stroke-dashoffset: 28; }
   to   { stroke-dashoffset: 0; }
 }
 @keyframes forgyi-pulse {

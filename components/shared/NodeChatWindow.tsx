@@ -4,8 +4,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { chatWithNode } from '@/lib/api'
-import type { ChatMessage, ChatAttachment, ChatToolCall, ApprovedAsset, OutputImageItem, OutputImagesMap } from '@/lib/api'
+import { chatWithNode, getNodeContextInputs } from '@/lib/api'
+import type { ChatMessage, ChatAttachment, ChatToolCall, ApprovedAsset, OutputImageItem, OutputImagesMap, NodeContextInput } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import AttachmentCard from './AttachmentCard'
@@ -43,23 +43,30 @@ export function parseOutputItems(content: string, format: string): string[] {
     .split(/(?=^[A-Za-z]+[ \t]+\d+[:.]\s)/m)
     .map(p => p.trim())
     .filter(p => /^[A-Za-z]+[ \t]+\d+[:.]\s/.test(p))
-  if (labeledParts.length > 0) return labeledParts.map(p => p.slice(0, 900))
+  if (labeledParts.length > 0) return labeledParts
 
-  // Heading con número + descripción subsiguiente (captura bloque completo)
-  // Cada variación = "### Variation N: título\n\ndescripción..."
+  // Heading con número + contenido subsiguiente (bloque completo por ítem)
+  // Soporta: "### Variation 1: título", "### Seed 001", "### **Seed 001:**"
   const richBlocks: string[] = []
   const richRx = /^#{1,4}[ \t]+([^\n]+(?:\n(?!#{1,4}[ \t])[^\n]*)*)/gm
   for (const m of content.matchAll(richRx)) {
     const block = m[1].trim()
-    // Solo incluir bloques que empiecen con "Palabra N:" o "**Palabra N:**" — son ítems de variación
-    if (/^(?:\*{0,2})(?:[A-Za-z]+[ \t]+)?\d+[:.]\s?/.test(block)) {
-      richBlocks.push(block.slice(0, 700))   // máx 700 chars para no saturar el prompt
+    // Incluir si el heading contiene "Palabra(s) NNN" — con o sin delimitador (:)
+    if (/^(?:\*{0,2})(?:[A-Za-z]+[ \t]+)+\d+/.test(block)) {
+      richBlocks.push(block)
     }
   }
   if (richBlocks.length > 0) return richBlocks
 
   const headings = [...content.matchAll(headingRx)].map(m => m[1].trim())
   if (headings.length > 0) return headings
+
+  // Bloques tipo "Seed 001" / "Concept 002" — encabezado plano sin # ni delimitador (:)
+  const seedBlocks = content
+    .split(/(?=^[A-Za-z][A-Za-z ]*[ \t]+\d{1,4}\s*$)/m)
+    .map(p => p.trim())
+    .filter(p => /^[A-Za-z][A-Za-z ]*[ \t]+\d{1,4}/.test(p) && p.length > 40)
+  if (seedBlocks.length > 1) return seedBlocks
 
   // Fallback: líneas no vacías (máx 20)
   return content.split('\n').map(l => l.trim()).filter(l => l.length > 5).slice(0, 20)
@@ -74,6 +81,8 @@ const WINDOW_W = 560
 const WINDOW_H = 820
 // Margen mínimo respecto al borde de pantalla
 const MARGIN   = 12
+// Ancho del panel de contexto (gate nodes)
+const PANEL_W  = 288
 
 // ─── Typing dots ──────────────────────────────────────────────────────────────
 
@@ -270,7 +279,7 @@ export function VariationPanel({ item, onClose }: { item: InlineImageItem; onClo
           {/* Concepto de referencia */}
           <div style={{ padding: '12px 16px 0', flexShrink: 0 }}>
             <div style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 4 }}>CONCEPT</div>
-            <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, background: 'var(--bg-2)', borderRadius: 6, padding: '8px 10px', border: '1px solid var(--line-2)' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, background: 'var(--bg-2)', borderRadius: 6, padding: '8px 10px', border: '1px solid var(--line-2)', maxHeight: 160, overflowY: 'auto' }}>
               {item.text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1')}
             </div>
           </div>
@@ -707,26 +716,45 @@ export interface NodeChatWindowProps {
   imageGenOutputs?:     ImageOutputDef[]
   outputImages?:        OutputImagesMap
   onGenerateItemImage?: (outputKey: string, itemIndex: number, itemText: string, condition?: string) => Promise<{ image_url: string; output_images: OutputImagesMap }>
+  // Output enfocado: el chat trabaja sobre un output específico del nodo
+  targetOutputKey?:     string | null
+  targetOutputLabel?:   string | null
+  // Prompt de sistema que se usará (solo lectura, para referencia del usuario)
+  systemPrompt?:        string
+  // Panel de contexto — solo para nodos gate
+  isGate?:              boolean
+  projectNodeId?:       string | null
+  onOpenOutput?:        (sourceProjectNodeId: string, outputKey?: string | null) => void
 }
 
 export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
   initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, docUrl, docFormat,
   approvedAsset, imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
+  targetOutputKey, targetOutputLabel, systemPrompt,
+  isGate, projectNodeId, onOpenOutput,
 }: NodeChatWindowProps) {
   const [messages,        setMessages]        = useState<ChatMessage[]>(initialMessages ?? [])
   const [input,           setInput]           = useState('')
   const [sending,         setSending]         = useState(false)
   const [applying,        setApplying]        = useState(false)
   const [accepting,       setAccepting]       = useState(false)
+  // Mostrar Accept solo si no había output aprobado al abrir, o si el usuario generó algo nuevo
+  const [hasNewResponse,  setHasNewResponse]  = useState(!approvedAsset)
   const [error,           setError]           = useState<string | null>(null)
   const [expandedContent, setExpandedContent] = useState<{ content: string; imageItems?: InlineImageItem[]; pngImages?: OutputImagesMap } | null>(null)
+  const [promptOpen,      setPromptOpen]      = useState(false)
   const [pendingFile,     setPendingFile]     = useState<File | null>(null)
   const [pendingUrl,      setPendingUrl]      = useState<string | null>(null)
   const [dropTarget,      setDropTarget]      = useState(false)
   const [outputImages,    setOutputImages]    = useState<OutputImagesMap>(outputImagesProp ?? {})
   const [generatingImgKeys, setGeneratingImgKeys] = useState<Set<string>>(new Set())  // set de "outputKey:index" en progreso
   const [zoomImageUrl,    setZoomImageUrl]    = useState<string | null>(null)
+  // Panel de contexto (gate nodes)
+  const [showCtxPanel,   setShowCtxPanel]   = useState(false)
+  const [ctxInputs,      setCtxInputs]      = useState<NodeContextInput[]>([])
+  const [ctxLoading,     setCtxLoading]     = useState(false)
+  const [ctxOpenIdx,     setCtxOpenIdx]     = useState<number | null>(null)
 
   // Posición y tamaño del modal — calculados tras mount para evitar SSR
   const [pos,        setPos]        = useState({ x: 0, y: 0 })
@@ -930,10 +958,12 @@ export default function NodeChatWindow({
             : [...prev]
           return [...updated, { role: 'assistant', content: result.reply }]
         })
+        setHasNewResponse(true)
         triggerAutoImageGen(result.reply)
       } else {
         const res = await chatWithNode(stepKey, messages, text, currentOutput, project.id)
         setMessages(prev => [...prev, { role: 'assistant', content: res.reply }])
+        setHasNewResponse(true)
         triggerAutoImageGen(res.reply)
       }
     } catch (err) {
@@ -1033,6 +1063,21 @@ export default function NodeChatWindow({
     return items.length > 0 ? items : undefined
   }
 
+  const handleToggleCtxPanel = useCallback(async () => {
+    if (showCtxPanel) { setShowCtxPanel(false); return }
+    setShowCtxPanel(true)
+    if (ctxInputs.length > 0 || !projectNodeId) return
+    setCtxLoading(true)
+    try {
+      const inputs = await getNodeContextInputs(project.id, projectNodeId)
+      setCtxInputs(inputs)
+    } catch (e) {
+      console.error('[context-panel]', e)
+    } finally {
+      setCtxLoading(false)
+    }
+  }, [showCtxPanel, ctxInputs.length, projectNodeId, project.id])
+
   if (!positioned) return null
 
   return (
@@ -1083,6 +1128,19 @@ export default function NodeChatWindow({
             <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {stepLabel}
             </div>
+            {targetOutputKey && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                <span style={{
+                  fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                  color: '#F59E0B',
+                  background: 'color-mix(in srgb, #F59E0B 10%, var(--bg-3))',
+                  border: '1px solid color-mix(in srgb, #F59E0B 25%, var(--line-2))',
+                  padding: '1px 6px', borderRadius: 3,
+                }}>
+                  ◆ {targetOutputLabel ?? targetOutputKey}
+                </span>
+              </div>
+            )}
           </div>
           {locked && (
             <span style={{
@@ -1126,6 +1184,70 @@ export default function NodeChatWindow({
             ✕
           </button>
         </div>
+
+        {/* System prompt — colapsable, solo lectura */}
+        {systemPrompt && (
+          <div style={{ borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              {/* Botón panel de contexto — solo para nodos gate */}
+              {isGate && projectNodeId && (
+                <button
+                  onMouseDown={e => e.stopPropagation()}
+                  onClick={handleToggleCtxPanel}
+                  title="View context inputs"
+                  style={{
+                    border: `1px solid ${showCtxPanel ? 'color-mix(in srgb, var(--action) 40%, transparent)' : 'transparent'}`,
+                    background: showCtxPanel ? 'color-mix(in srgb, var(--action) 12%, var(--bg-3))' : 'transparent',
+                    cursor: 'pointer',
+                    color: showCtxPanel ? 'var(--action)' : 'var(--text-3)',
+                    padding: '4px 8px', marginLeft: 6, borderRadius: 6, flexShrink: 0,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 120ms',
+                  }}
+                >
+                  {/* Tres flechas apuntando hacia una barra vertical = inputs confluyendo al nodo */}
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <line x1="1" y1="3"  x2="8" y2="3"  stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    <polyline points="6,1.5 8,3 6,4.5" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" fill="none"/>
+                    <line x1="1" y1="7"  x2="8" y2="7"  stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    <polyline points="6,5.5 8,7 6,8.5" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" fill="none"/>
+                    <line x1="1" y1="11" x2="8" y2="11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    <polyline points="6,9.5 8,11 6,12.5" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" fill="none"/>
+                    <line x1="11" y1="1" x2="11" y2="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              )}
+              <button
+                onClick={() => setPromptOpen(v => !v)}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 14px', border: 'none', background: 'none', cursor: 'pointer',
+                  color: 'var(--text-3)', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                  letterSpacing: '.06em', textTransform: 'uppercase', textAlign: 'right',
+                  justifyContent: 'flex-end',
+                }}
+              >
+                {targetOutputKey && (
+                  <span style={{ color: '#F59E0B', opacity: 0.7 }}>· base + {targetOutputLabel ?? targetOutputKey}</span>
+                )}
+                System Prompt
+                <span style={{ opacity: 0.6, fontSize: 8, lineHeight: 1 }}>{promptOpen ? '▾' : '▸'}</span>
+              </button>
+            </div>
+            {promptOpen && (
+              <div style={{
+                margin: '0 10px 10px',
+                background: 'var(--bg-0)', border: '1px solid var(--line-2)',
+                borderRadius: 6, padding: '10px 12px',
+                fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-2)',
+                lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                maxHeight: 200, overflowY: 'auto',
+              }}>
+                {systemPrompt}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Input de archivo oculto */}
         <input
@@ -1372,8 +1494,8 @@ export default function NodeChatWindow({
           </div>
         )}
 
-        {/* Botón Accept — convierte el último output en forge_asset aprobado */}
-        {onAccept && messages.some(m => m.role === 'assistant') && !locked && (
+        {/* Botón Accept — solo si hay respuesta nueva (no persiste en sesiones ya aprobadas) */}
+        {onAccept && hasNewResponse && messages.some(m => m.role === 'assistant') && !locked && (
           <div style={{ padding: '6px 12px 0', borderTop: docUrl ? 'none' : '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
             <button
               onClick={async () => {
@@ -1553,6 +1675,164 @@ export default function NodeChatWindow({
           </div>
         )}
       </div>
+
+      {/* Panel de contexto — aparece a la izquierda del chat, solo para nodos gate */}
+      {showCtxPanel && !maximized && (
+        <div style={{
+          position:     'fixed',
+          left:         Math.max(MARGIN, pos.x - PANEL_W - 8),
+          top:          pos.y,
+          width:        PANEL_W,
+          height:       size.h,
+          zIndex:       110,
+          background:   'var(--bg-1)',
+          border:       '1px solid var(--line-2)',
+          borderRadius: 14,
+          boxShadow:    '0 24px 64px rgba(0,0,0,0.55)',
+          display:      'flex',
+          flexDirection:'column',
+          overflow:     'hidden',
+        }}>
+          {/* Header del panel */}
+          <div style={{
+            padding: '10px 14px', flexShrink: 0,
+            borderBottom: '1px solid var(--line-2)',
+            background: 'var(--bg-2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <svg width="12" height="12" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.5 }}>
+                <rect x="1" y="2"  width="12" height="2" rx="1" fill="var(--text-2)"/>
+                <rect x="1" y="6"  width="12" height="2" rx="1" fill="var(--text-2)"/>
+                <rect x="1" y="10" width="12" height="2" rx="1" fill="var(--text-2)"/>
+              </svg>
+              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-3)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
+                Context Inputs
+              </span>
+            </div>
+            <button
+              onClick={() => setShowCtxPanel(false)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 14, padding: '2px 6px', lineHeight: 1, borderRadius: 4 }}
+            >✕</button>
+          </div>
+
+          {/* Cuerpo — acordeón de inputs */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+            {ctxLoading && (
+              <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                Loading…
+              </div>
+            )}
+            {!ctxLoading && ctxInputs.length === 0 && (
+              <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                No context inputs found for this node.
+              </div>
+            )}
+            {!ctxLoading && ctxInputs.map((inp, i) => (
+              <div key={i} style={{ borderBottom: i < ctxInputs.length - 1 ? '1px solid var(--line-2)' : 'none' }}>
+                {/* Fila de acordeón */}
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <button
+                    onClick={() => setCtxOpenIdx(ctxOpenIdx === i ? null : i)}
+                    style={{
+                      flex: 1, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0,
+                      padding: '8px 8px 8px 12px', background: 'none', border: 'none',
+                      cursor: 'pointer', textAlign: 'left',
+                    }}
+                  >
+                    <span style={{ fontSize: 8, flexShrink: 0, color: 'var(--text-3)', opacity: 0.7, width: 8 }}>
+                      {ctxOpenIdx === i ? '▾' : '▸'}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 11, fontWeight: 600, color: 'var(--text-0)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {inp.label}
+                    </span>
+                    <span style={{
+                      fontSize: 7, fontFamily: 'var(--font-mono)', fontWeight: 700, flexShrink: 0,
+                      padding: '1px 5px', borderRadius: 3,
+                      textTransform: 'uppercase', letterSpacing: '.05em',
+                      ...(inp.source === 'lane'
+                        ? { background: 'rgba(245,158,11,0.12)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.25)' }
+                        : inp.source === 'library'
+                          ? { background: 'var(--bg-3)', color: 'var(--text-3)', border: '1px solid var(--line-2)' }
+                          : { background: 'color-mix(in srgb, var(--action) 10%, var(--bg-3))', color: 'var(--action)', border: '1px solid color-mix(in srgb, var(--action) 30%, transparent)' }
+                      ),
+                    }}>
+                      {inp.source}
+                    </span>
+                  </button>
+                  {/* Botón "ver en output modal" — solo para edges con project_node_id */}
+                  {onOpenOutput && inp.source_project_node_id && (
+                    <button
+                      onClick={() => onOpenOutput(inp.source_project_node_id!, inp.output_key)}
+                      title="Open in output modal"
+                      style={{
+                        flexShrink: 0, padding: '6px 10px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'var(--text-3)', fontSize: 11, lineHeight: 1,
+                        transition: 'color 120ms',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.color = 'var(--action)')}
+                      onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-3)')}
+                    >
+                      ↗
+                    </button>
+                  )}
+                </div>
+                {/* Contenido expandido */}
+                {ctxOpenIdx === i && (
+                  <div style={{
+                    margin: '0 8px 8px',
+                    padding: inp.isImage ? '6px 8px' : '10px 12px',
+                    borderRadius: 6,
+                    background: 'var(--bg-0)',
+                    border: '1px solid var(--line-2)',
+                    maxHeight: inp.isImage ? 340 : 320,
+                    overflowY: 'auto',
+                  }}>
+                    {inp.isImage ? (
+                      /* Imagen directa — centrada con click to zoom */
+                      <img
+                        src={inp.content.match(/\(([^)]+)\)/)?.[1] ?? inp.content}
+                        alt={inp.label}
+                        onClick={() => {
+                          const url = inp.content.match(/\(([^)]+)\)/)?.[1] ?? inp.content
+                          setZoomImageUrl(url)
+                        }}
+                        style={{
+                          width: '100%', height: 'auto', maxHeight: 300,
+                          objectFit: 'contain', borderRadius: 4,
+                          display: 'block', cursor: 'zoom-in',
+                        }}
+                      />
+                    ) : (
+                      /* Markdown rico — mismos componentes que el output modal */
+                      <div style={{ fontSize: 11, color: 'var(--text-0)', lineHeight: 1.65 }}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                          ...MD_COMPONENTS,
+                          h1: ({ children }) => <h1 style={{ fontSize: 13, fontWeight: 700, margin: '.5em 0 .25em', color: 'var(--text-0)' }}>{children}</h1>,
+                          h2: ({ children }) => <h2 style={{ fontSize: 12, fontWeight: 700, margin: '.5em 0 .2em', color: 'var(--text-0)', borderBottom: '1px solid var(--line-2)', paddingBottom: '.15em' }}>{children}</h2>,
+                          h3: ({ children }) => <h3 style={{ fontSize: 11, fontWeight: 700, margin: '.4em 0 .15em', color: 'var(--text-0)' }}>{children}</h3>,
+                          // Imágenes inline dentro de markdown
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          img: ({ src, alt }: any) => (
+                            <img
+                              src={src} alt={alt ?? ''}
+                              onClick={() => src && setZoomImageUrl(src)}
+                              style={{ maxWidth: '100%', height: 'auto', borderRadius: 4, display: 'block', margin: '6px 0', cursor: 'zoom-in' }}
+                            />
+                          ),
+                        }}>
+                          {inp.content}
+                        </ReactMarkdown>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Modal de lectura expandida */}
       {expandedContent && (

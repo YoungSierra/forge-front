@@ -20,15 +20,40 @@ function adminFetch(path: string, options?: RequestInit) {
 // ─── Tipos ────────────────────────────────────────────────────
 
 interface NodeOutput {
+  // v1.3.0 campos (nuevos)
+  key?:            string
+  label?:          string
+  type?:           'connection' | 'asset'
+  prompt?:         string
+  uses?: {
+    inputs:               string[]
+    siblings_if_present:  string[]
+  }
+  // campos legacy (siguen funcionando)
   name:            string
   format:          string
   description:     string
   optional?:       boolean
   mode?:           string
   image_gen?:      boolean
-  image_gen_model?: string  // formato "provider:model" — ej: comfyui:concept_ref, openai:dall-e-3
+  image_gen_model?: string
 }
 
+// Wired port del nuevo formato v1.3.0
+interface WiredInput {
+  key:         string
+  type:        string      // ej: "list<concept_seed>", "single<positioning>"
+  cardinality: string      // "single" | "one_or_more" | "list"
+  required:    boolean
+}
+
+// Formato v1.3.0 de inputs
+interface NodeInputsV2 {
+  wired:          WiredInput[]
+  direct_context: string
+}
+
+// Formato legacy: array de NodeInput
 interface NodeInput {
   key:      string
   label:    string
@@ -42,9 +67,15 @@ interface NodeExecutor {
   workflow_id?: string | null
 }
 
+// Detecta si el input está en formato v1.3.0 ({wired, direct_context})
+function isInputsV2(raw: unknown): raw is NodeInputsV2 {
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) && 'wired' in raw
+}
+
 // Normaliza el formato legacy {required:[], optional:[]} al nuevo [{key, label, accepts, required}]
-function normalizeInputs(raw: unknown): NodeInput[] {
+function normalizeInputsLegacy(raw: unknown): NodeInput[] {
   if (Array.isArray(raw)) return raw as NodeInput[]
+  if (isInputsV2(raw)) return []  // no convertir v1.3.0 al formato legacy
   const legacy = raw as { required?: string[]; optional?: string[] } | null
   return [
     ...(legacy?.required ?? []).map(key => ({ key, label: key.replace(/_/g, ' '), accepts: ['text'], required: true  })),
@@ -53,25 +84,28 @@ function normalizeInputs(raw: unknown): NodeInput[] {
 }
 
 interface ForgeNode {
-  id:             string
-  node_key:       string
-  title:          string
-  phase:          string
-  status:         string
-  parent_id:      string | null
-  purpose:        string
-  inputs:         NodeInput[]
-  outputs:        NodeOutput[]
-  constraints:    string
-  tools:          string[]
-  skills:         string[]
-  default_prompt: string
-  executor:       NodeExecutor | null
-  created_at:     string
+  id:                string
+  node_key:          string
+  title:             string
+  phase:             string
+  status:            string
+  role:              string
+  parent_id:         string | null
+  purpose:           string
+  inputs:            NodeInput[] | NodeInputsV2
+  outputs:           NodeOutput[]
+  constraints:       string
+  tools:             string[]
+  skills:            string[]
+  default_prompt:    string
+  standalone_prompt: string
+  executor:          NodeExecutor | null
+  created_at:        string
 }
 
 const PHASES   = ['ideation', 'concept', 'pre-production', 'production', 'live-ops']
-const FORMATS  = ['docx', 'pptx', 'png', 'markdown', 'markdown_table', 'json', 'artifact_bundle', 'single_sentence', 'structured']
+const FORMATS            = ['docx', 'pptx', 'png', 'markdown', 'markdown_table', 'json', 'artifact_bundle', 'single_sentence', 'structured']
+const CONNECTION_FORMATS = ['structured', 'text', 'list<concept_seed>', 'gap_analysis', 'positioning', 'concept_data', 'financial_case', 'review_verdict', 'decision']
 const OUTCOMES = ['accept', 'refine', 'kill']
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
@@ -275,6 +309,102 @@ function InputsList({ inputs, onChange }: {
   )
 }
 
+// ─── WiredInputsList — formato v1.3.0 ────────────────────────
+
+const CARDINALITY_OPTIONS = ['single', 'one_or_more', 'list']
+
+// Tipos del type registry v1.3.0
+const WIRED_INPUT_TYPES = [
+  'concept_seed',
+  'gap_analysis',
+  'positioning',
+  'concept_data',
+  'financial_case',
+  'review_verdict',
+  'text',
+  'image_set',
+  'deck',
+  'decision',
+]
+
+function WiredInputsList({ value, onChange }: {
+  value:    NodeInputsV2
+  onChange: (v: NodeInputsV2) => void
+}) {
+  const updateWired = (i: number, field: keyof WiredInput, val: string | boolean) => {
+    const next = value.wired.map((w, idx) => idx === i ? { ...w, [field]: val } : w)
+    onChange({ ...value, wired: next })
+  }
+  const addWired    = () => onChange({ ...value, wired: [...value.wired, { key: '', type: 'text', cardinality: 'single', required: false }] })
+  const removeWired = (i: number) => onChange({ ...value, wired: value.wired.filter((_, idx) => idx !== i) })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* direct_context */}
+      <div>
+        {label('direct context prompt (shown to user when no wired inputs)')}
+        <input style={inputSx} value={value.direct_context || ''}
+          onChange={e => onChange({ ...value, direct_context: e.target.value })}
+          placeholder="Describe your concept, paste a document, or attach any relevant file" />
+      </div>
+
+      {/* wired ports */}
+      <div>
+        {label('wired ports')}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {value.wired.map((w, i) => (
+            <div key={i} style={{
+              background: 'var(--bg-0)', border: '1px solid var(--line-2)',
+              borderRadius: 8, padding: '10px 12px',
+              display: 'grid', gridTemplateColumns: '1fr 1fr 130px 70px 28px', gap: 8, alignItems: 'end',
+            }}>
+              <div>
+                {label('key')}
+                <input style={inputSx} value={w.key}
+                  onChange={e => updateWired(i, 'key', e.target.value)}
+                  placeholder="concept_seeds" />
+              </div>
+              <div>
+                {label('type')}
+                <select style={{ ...inputSx, cursor: 'pointer' }} value={w.type ?? ''}
+                  onChange={e => updateWired(i, 'type', e.target.value)}>
+                  <option value="">— select —</option>
+                  {WIRED_INPUT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                {label('cardinality')}
+                <select style={{ ...inputSx, cursor: 'pointer' }} value={w.cardinality}
+                  onChange={e => updateWired(i, 'cardinality', e.target.value)}>
+                  {CARDINALITY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                {label('required')}
+                <div style={{ height: 32, display: 'flex', alignItems: 'center' }}>
+                  <input type="checkbox" checked={!!w.required}
+                    onChange={e => updateWired(i, 'required', e.target.checked)} />
+                </div>
+              </div>
+              <button type="button" onClick={() => removeWired(i)} style={{
+                border: 'none', background: 'none', cursor: 'pointer',
+                color: 'var(--text-3)', fontSize: 16, alignSelf: 'flex-end', paddingBottom: 6,
+              }}>×</button>
+            </div>
+          ))}
+          <button type="button" onClick={addWired} style={{
+            border: '1px dashed var(--line-2)', background: 'transparent',
+            borderRadius: 8, padding: '6px', cursor: 'pointer',
+            color: 'var(--text-3)', fontSize: 12, fontFamily: 'var(--font-mono)',
+          }}>
+            + Add wired port
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── ImageGenSelector ─────────────────────────────────────────
 
 const IMAGE_GEN_MODELS: Record<string, string[]> = {
@@ -345,7 +475,15 @@ function OutputsList({ outputs, onChange, workflows }: {
     onChange(next)
   }
 
-  const add = () => onChange([...outputs, { name: '', format: 'markdown', description: '', optional: false }])
+  const updateUses = (i: number, field: 'inputs' | 'siblings_if_present', csv: string) => {
+    const arr = csv.split(',').map(s => s.trim()).filter(Boolean)
+    const next = outputs.map((o, idx) => idx === i
+      ? { ...o, uses: { inputs: [], siblings_if_present: [], ...(o.uses ?? {}), [field]: arr } }
+      : o)
+    onChange(next)
+  }
+
+  const add = () => onChange([...outputs, { key: '', name: '', label: '', type: 'asset', format: 'markdown', description: '', optional: false, prompt: '', uses: { inputs: [], siblings_if_present: [] } }])
   const remove = (i: number) => onChange(outputs.filter((_, idx) => idx !== i))
 
   return (
@@ -355,21 +493,38 @@ function OutputsList({ outputs, onChange, workflows }: {
           background: 'var(--bg-0)', border: '1px solid var(--line-2)',
           borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8,
         }}>
+          {/* ── Fila superior: key/name, label, type, format, optional ── */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
             <div style={{ flex: 1 }}>
-              {label('name')}
-              <input style={inputSx} value={out.name}
-                onChange={e => update(i, 'name', e.target.value)}
-                placeholder="concept_document" />
+              {label('key / name')}
+              <input style={inputSx} value={out.key || out.name}
+                onChange={e => update(i, 'key', e.target.value)}
+                placeholder="competitive_scan" />
             </div>
-            <div style={{ width: 140 }}>
+            <div style={{ flex: 1 }}>
+              {label('label (display)')}
+              <input style={inputSx} value={out.label || ''}
+                onChange={e => update(i, 'label', e.target.value)}
+                placeholder="Competitive Scan" />
+            </div>
+            <div style={{ width: 110 }}>
+              {label('type')}
+              <select style={{ ...inputSx, width: '100%', cursor: 'pointer' }} value={out.type || 'asset'}
+                onChange={e => update(i, 'type', e.target.value)}>
+                <option value="asset">asset</option>
+                <option value="connection">connection</option>
+              </select>
+            </div>
+            <div style={{ width: 130 }}>
               {label('format')}
               <select style={{ ...inputSx, width: '100%' }} value={out.format}
                 onChange={e => update(i, 'format', e.target.value)}>
-                {FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
+                {(out.type === 'connection' ? CONNECTION_FORMATS : FORMATS).map(f =>
+                  <option key={f} value={f}>{f}</option>
+                )}
               </select>
             </div>
-            <div style={{ width: 90 }}>
+            <div style={{ width: 70 }}>
               {label('optional')}
               <div style={{ height: 32, display: 'flex', alignItems: 'center' }}>
                 <input type="checkbox" checked={!!out.optional}
@@ -381,13 +536,39 @@ function OutputsList({ outputs, onChange, workflows }: {
               color: 'var(--text-3)', fontSize: 16, padding: '22px 0 0 0',
             }}>×</button>
           </div>
+
           {label('description')}
           <input style={inputSx} value={out.description}
             onChange={e => update(i, 'description', e.target.value)}
-            placeholder="Two-page V57 Concept Treatment…" />
+            placeholder="5-10 comparable titles with revenue and review data" />
+
+          {/* ── Prompt independiente por output (v1.3.0) ── */}
+          {label('output prompt (independent generation)')}
+          <textarea style={{ ...textareaSx, minHeight: 72 }} value={out.prompt || ''}
+            onChange={e => update(i, 'prompt', e.target.value)}
+            placeholder="Produce the competitive scan: markdown table of 5-10 real titles with revenue data, review scores, and platform. Cite sources." />
+
+          {/* ── uses block (v1.4.0) ─────────────────────────────── */}
+          <div style={{ display: 'flex', gap: 8, paddingTop: 4, borderTop: '1px solid var(--line-2)' }}>
+            <div style={{ flex: 1 }}>
+              {label('uses · inputs (comma-separated)')}
+              <input style={inputSx}
+                value={(out.uses?.inputs ?? []).join(', ')}
+                onChange={e => updateUses(i, 'inputs', e.target.value)}
+                placeholder="concept_seeds, market_gap_analysis" />
+            </div>
+            <div style={{ flex: 1 }}>
+              {label('uses · siblings_if_present (comma-separated)')}
+              <input style={inputSx}
+                value={(out.uses?.siblings_if_present ?? []).join(', ')}
+                onChange={e => updateUses(i, 'siblings_if_present', e.target.value)}
+                placeholder="competitive_scan" />
+            </div>
+          </div>
+
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>
-              {label('mode (opcional)')}
+              {label('mode (opcional / legacy)')}
               <input style={inputSx} value={out.mode || ''}
                 onChange={e => update(i, 'mode', e.target.value)}
                 placeholder="concept | ideation | broad_prompt | seed_prompt" />
@@ -522,9 +703,10 @@ function SkillSelector({ values, onChange, skills }: {
 // ─── Formulario de nodo ───────────────────────────────────────
 
 const EMPTY_NODE: Partial<ForgeNode> = {
-  node_key: '', title: '', phase: 'ideation', status: 'active',
-  purpose: '', inputs: [],
-  outputs: [], constraints: '', tools: [], skills: [], default_prompt: '',
+  node_key: '', title: '', phase: 'ideation', status: 'active', role: 'standard',
+  purpose: '', inputs: { wired: [], direct_context: '' } as NodeInputsV2,
+  outputs: [], constraints: '', tools: [], skills: [],
+  default_prompt: '', standalone_prompt: '',
   executor: null,
 }
 
@@ -536,7 +718,12 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders, skill
   availableProviders: Record<string, boolean>
   skillCatalog:       SkillConfig[]
 }) {
-  const [form, setForm] = useState<Partial<ForgeNode>>({ ...node, inputs: normalizeInputs(node.inputs) })
+  const [form, setForm] = useState<Partial<ForgeNode>>(() => {
+    // Preservar formato v1.3.0 si ya es {wired, direct_context}; normalizar legacy a array
+    const rawInputs = node.inputs
+    const inputs = isInputsV2(rawInputs) ? rawInputs : normalizeInputsLegacy(rawInputs)
+    return { ...node, inputs }
+  })
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState('')
 
@@ -564,7 +751,7 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders, skill
 
       {/* ── Identity — siempre visible ── */}
       <div style={{ padding: '12px 0', borderBottom: '1px solid var(--line-2)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 130px', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 130px 110px', gap: 8 }}>
           <div>
             {label('key')}
             <input style={inputSx} value={form.node_key || ''} onChange={e => set('node_key', e.target.value)} placeholder="1.1" />
@@ -577,6 +764,13 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders, skill
             {label('phase')}
             <select style={{ ...inputSx, cursor: 'pointer' }} value={form.phase || 'ideation'} onChange={e => set('phase', e.target.value)}>
               {PHASES.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div>
+            {label('role')}
+            <select style={{ ...inputSx, cursor: 'pointer' }} value={form.role || 'standard'} onChange={e => set('role', e.target.value)}>
+              <option value="standard">standard</option>
+              <option value="gate">◆ gate</option>
             </select>
           </div>
         </div>
@@ -598,20 +792,27 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders, skill
         {
           key: 'inputs',
           title: 'Inputs',
-          summary: ((form.inputs as NodeInput[]) || [])
-            .map((inp: NodeInput) => inp.required ? inp.key : `${inp.key}?`)
-            .join(', ') || '—',
-          content: (
-            <InputsList
-              inputs={(form.inputs as NodeInput[]) || []}
-              onChange={v => set('inputs', v)}
-            />
-          ),
+          summary: isInputsV2(form.inputs)
+            ? `v1.3.0 — ${(form.inputs as NodeInputsV2).wired.length} wired port(s)`
+            : ((form.inputs as NodeInput[]) || []).map((inp: NodeInput) => inp.required ? inp.key : `${inp.key}?`).join(', ') || '—',
+          content: isInputsV2(form.inputs)
+            ? <WiredInputsList value={form.inputs as NodeInputsV2} onChange={v => set('inputs', v)} />
+            : (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                  <button type="button" onClick={() => set('inputs', { wired: [], direct_context: '' } as NodeInputsV2)}
+                    style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '3px 10px', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-3)' }}>
+                    Upgrade to v1.3.0 format
+                  </button>
+                </div>
+                <InputsList inputs={(form.inputs as NodeInput[]) || []} onChange={v => set('inputs', v)} />
+              </div>
+            ),
         },
         {
           key: 'outputs',
           title: 'Outputs',
-          summary: ((form.outputs as NodeOutput[]) || []).map((o: NodeOutput) => o.name).join(', ') || '—',
+          summary: ((form.outputs as NodeOutput[]) || []).map((o: NodeOutput) => o.key || o.name).join(', ') || '—',
           content: <OutputsList outputs={(form.outputs as NodeOutput[]) || []} onChange={v => set('outputs', v)} workflows={workflows} />,
         },
         {
@@ -645,6 +846,22 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders, skill
               value={form.default_prompt || ''}
               onChange={e => set('default_prompt', e.target.value)}
               placeholder="Scan the market for [project]. Produce: (1) competitive scan…" />
+          ),
+        },
+        {
+          key: 'standalone_prompt',
+          title: 'Standalone Prompt',
+          summary: (form.standalone_prompt as string)?.slice(0, 60) || '—',
+          content: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', lineHeight: 1.5 }}>
+                Shown to the LLM when the node runs without wired inputs. Describes how to extract context from direct chat or attachments.
+              </div>
+              <textarea style={{ ...textareaSx, minHeight: 80 }}
+                value={form.standalone_prompt || ''}
+                onChange={e => set('standalone_prompt', e.target.value)}
+                placeholder="This node can start from a direct description. Extract the concept seed from the user's message or attached document." />
+            </div>
           ),
         },
         {
@@ -933,6 +1150,9 @@ export default function AdminNodesPage() {
                   <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-1)', flex: 1 }}>
                     {n.title}
                   </span>
+                  {n.role === 'gate' && (
+                    <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#F59E0B', padding: '1px 5px', borderRadius: 3, border: '1px solid color-mix(in srgb, #F59E0B 30%, transparent)', background: 'color-mix(in srgb, #F59E0B 10%, var(--bg-2))' }}>◆ GATE</span>
+                  )}
                   {n.parent_id && (
                     <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>variant</span>
                   )}

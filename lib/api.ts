@@ -1325,12 +1325,14 @@ export async function chatWithNode(
 // ─── Forge NodeDNA — chat con sesión persistida ───────────────
 
 export async function chatWithForgeNode(
-  projectId:     string,
-  nodeId:        string,
-  userMessage:   string,
-  sessionId?:    string,
-  file?:         File | null,
-  attachmentUrl?: string,
+  projectId:        string,
+  nodeId:           string,
+  userMessage:      string,
+  sessionId?:       string,
+  file?:            File | null,
+  attachmentUrl?:   string,
+  targetOutputKey?: string | null,
+  projectNodeId?:   string | null,
 ): Promise<{ reply: string; session_id: string; doc_url?: string; doc_format?: string; attachment?: ChatAttachment }> {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
 
@@ -1340,13 +1342,15 @@ export async function chatWithForgeNode(
   if (file) {
     const fd = new FormData()
     fd.append('user_message', userMessage)
-    if (sessionId)  fd.append('session_id', sessionId)
-    if (memberId)   fd.append('member_id',  memberId)
+    if (sessionId)       fd.append('session_id',          sessionId)
+    if (memberId)        fd.append('member_id',           memberId)
+    if (targetOutputKey) fd.append('target_output_key',   targetOutputKey)
+    if (projectNodeId)   fd.append('project_node_id',     projectNodeId)
     fd.append('attachment', file)
     body = fd
     // Sin Content-Type — el browser lo pone con el boundary correcto
   } else {
-    body    = JSON.stringify({ user_message: userMessage, session_id: sessionId, member_id: memberId, attachment_url: attachmentUrl || undefined })
+    body    = JSON.stringify({ user_message: userMessage, session_id: sessionId, member_id: memberId, attachment_url: attachmentUrl || undefined, target_output_key: targetOutputKey || undefined, project_node_id: projectNodeId || undefined })
     headers['Content-Type'] = 'application/json'
   }
 
@@ -1367,6 +1371,22 @@ export async function chatWithForgeNode(
   }
 
   return res.json()
+}
+
+export type NodeContextInput = {
+  label:                  string
+  content:                string
+  source:                 'lane' | 'edge' | 'library'
+  isImage?:               boolean
+  source_project_node_id?: string | null
+  output_key?:             string | null
+}
+
+export async function getNodeContextInputs(projectId: string, projectNodeId: string): Promise<NodeContextInput[]> {
+  const res = await request<{ success: boolean; inputs: NodeContextInput[] }>(
+    `/api/projects/${projectId}/canvas/nodes/${projectNodeId}/context-inputs`
+  )
+  return res.inputs ?? []
 }
 
 export async function acceptNodeOutput(
@@ -1414,11 +1434,13 @@ export async function generateItemImage(
 }
 
 export async function getNodeSession(
-  projectId: string,
-  nodeId:    string,
+  projectId:  string,
+  nodeId:     string,
+  outputKey?: string | null,
 ): Promise<{ session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: ApprovedAsset | null }> {
+  const qs = outputKey ? `?output_key=${encodeURIComponent(outputKey)}` : ''
   return request<{ success: boolean; session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: ApprovedAsset | null }>(
-    `/api/projects/${projectId}/canvas/nodes/${nodeId}/session`,
+    `/api/projects/${projectId}/canvas/nodes/${nodeId}/session${qs}`,
   )
 }
 
