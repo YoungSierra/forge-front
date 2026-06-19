@@ -12,6 +12,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
+import OrthogonalEdge, { type WayPoint } from './OrthogonalEdge'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
 import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, autoRunNode } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
@@ -2617,7 +2618,7 @@ const LaneGroupNode = React.memo(function LaneGroupNode({ data }: { data: LaneGr
 })
 
 const NODE_TYPES = { forgeNode: ForgeNodeCard, assetNode: AssetNodeCard, textInputNode: TextInputCard, laneGroup: LaneGroupNode }
-const EDGE_TYPES = { forgeEdge: ForgeEdge }
+const EDGE_TYPES = { forgeEdge: ForgeEdge, orthogonalEdge: OrthogonalEdge }
 
 // ─── ImportAsOutputButton ─────────────────────────────────────────────────────
 
@@ -3185,6 +3186,9 @@ const TEXT_SIZE_KEY    = 'forge_canvas_text_size'
 const TEXT_SIZE_SCALES = { sm: 0.88, md: 1.0, lg: 1.22 } as const
 type TextSize = keyof typeof TEXT_SIZE_SCALES
 
+const EDGE_STYLE_KEY = 'forge_canvas_edge_style'
+type EdgeStyle = 'bezier' | 'orthogonal'
+
 // Contexto para pasar el scale a los nodos y sidebar sin prop-drilling
 const CanvasScaleContext = createContext(1)
 // Contexto que indica si hay un nodo siendo arrastrado (cierra decks abiertos)
@@ -3221,9 +3225,13 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const clearPendingOutputModal = useCallback(() => { setPendingOutputModalId(null); setPendingOutputModalKey(null) }, [])
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
-  const [textSize,          setTextSize]           = useState<TextSize>(() => {
+  const [textSize,   setTextSize]  = useState<TextSize>(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem(TEXT_SIZE_KEY) : null
     return (saved as TextSize | null) ?? 'md'
+  })
+  const [edgeStyle,  setEdgeStyle] = useState<EdgeStyle>(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(EDGE_STYLE_KEY) : null
+    return (saved as EdgeStyle | null) ?? 'bezier'
   })
 
   // Expone ancho del sidebar como CSS var para que FeedbackWidget calcule su posición
@@ -3537,6 +3545,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   nodesRef.current = nodes
   edgesRef.current = edges
 
+  // Refs para el useEffect de construcción de edges (evitan dependencias circulares)
+  const edgeStyleRef         = useRef<EdgeStyle>(edgeStyle)
+  edgeStyleRef.current       = edgeStyle
+  const waypointsCallbackRef = useRef<((id: string, wps: WayPoint[]) => void) | null>(null)
+
   const onEdgeClick = useCallback((_: React.MouseEvent, edge: Edge) => {
     setSelectedEdgeId(prev => prev === edge.id ? null : edge.id)
   }, [])
@@ -3585,6 +3598,24 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     const outgoingLanePairs = new Map<string, { laneGroupId: string; targetId: string; color: string }>()
     const incomingLanePairs = new Map<string, { sourceId: string; laneGroupId: string; color: string }>()
 
+    // Waypoints guardados en canvas_layout (localStorage) por edge id
+    const savedLayout    = loadLayout(project.id)
+    const savedWaypoints = new Map<string, WayPoint[]>()
+    for (const se of savedLayout?.edges ?? []) {
+      const wp = (se.data as { waypoints?: WayPoint[] })?.waypoints
+      if (wp?.length) savedWaypoints.set(se.id, wp)
+    }
+
+    const currentEdgeStyle = edgeStyleRef.current
+    const edgeType = currentEdgeStyle === 'orthogonal' ? 'orthogonalEdge' : 'forgeEdge'
+
+    const makeEdgeData = (color: string, extra?: Record<string, unknown>) => ({
+      color,
+      active: false,
+      onWaypointsChange: waypointsCallbackRef.current ?? undefined,
+      ...extra,
+    })
+
     const dbEdges: Edge[] = (canvasData.edges ?? [])
       .filter(e => validIds.has(e.source) && validIds.has(e.target))
       .map(e => {
@@ -3619,45 +3650,50 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         }
 
         const isHidden = isOutgoing || isIncoming
+        const waypoints = savedWaypoints.get(e.id)
         return {
           id:           e.id,
           source:       e.source,
           target:       e.target,
           sourceHandle: e.sourceHandle?.startsWith('out-') ? 'out' : (e.sourceHandle ?? undefined),
           targetHandle: e.targetHandle?.startsWith('in-')  ? 'in'  : (e.targetHandle  ?? undefined),
-          type:         'forgeEdge' as const,
+          type:         isHidden ? 'forgeEdge' : edgeType,
           deletable:    !isHidden,
           hidden:       isHidden,
-          data:         { color: '#6b7280', active: false },
+          data:         makeEdgeData('#6b7280', waypoints ? { waypoints } : {}),
         }
       })
 
     // Edges virtuales salientes: uno por (srcLane, target), desde el borde derecho del lane
     for (const [pairKey, { laneGroupId, targetId, color }] of outgoingLanePairs) {
+      const eid = `virtual-out-${pairKey}`
+      const waypoints = savedWaypoints.get(eid)
       dbEdges.push({
-        id:           `virtual-out-${pairKey}`,
+        id:           eid,
         source:       laneGroupId,
         sourceHandle: 'lane-out',
         target:       targetId,
-        type:         'forgeEdge' as const,
+        type:         edgeType,
         deletable:    false,
         selectable:   false,
-        data:         { color, active: false },
+        data:         makeEdgeData(color, waypoints ? { waypoints } : {}),
       })
     }
 
     // Edges virtuales entrantes: uno por (source, tgtLane), hacia el borde izquierdo del lane
     for (const [pairKey, { sourceId, laneGroupId, color }] of incomingLanePairs) {
+      const eid = `virtual-in-${pairKey}`
+      const waypoints = savedWaypoints.get(eid)
       dbEdges.push({
-        id:           `virtual-in-${pairKey}`,
+        id:           eid,
         source:       sourceId,
         sourceHandle: 'out',
         target:       laneGroupId,
         targetHandle: 'lane-in',
-        type:         'forgeEdge' as const,
+        type:         edgeType,
         deletable:    false,
         selectable:   false,
-        data:         { color, active: false },
+        data:         makeEdgeData(color, waypoints ? { waypoints } : {}),
       })
     }
 
@@ -3672,6 +3708,25 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     setTextSize(size)
     localStorage.setItem(TEXT_SIZE_KEY, size)
   }
+
+  function toggleEdgeStyle() {
+    setEdgeStyle(prev => {
+      const next: EdgeStyle = prev === 'bezier' ? 'orthogonal' : 'bezier'
+      localStorage.setItem(EDGE_STYLE_KEY, next)
+      const nextType = next === 'orthogonal' ? 'orthogonalEdge' : 'forgeEdge'
+      setEdges(es => es.map(e => ({ ...e, type: nextType })))
+      return next
+    })
+  }
+
+  // Callback estable que los OrthogonalEdge llaman al mover waypoints
+  const handleWaypointsChange = useCallback((edgeId: string, waypoints: WayPoint[]) => {
+    setEdges(prev => prev.map(e =>
+      e.id === edgeId ? { ...e, data: { ...e.data, waypoints } } : e
+    ))
+    persistLayoutRef.current()
+  }, [setEdges])
+  waypointsCallbackRef.current = handleWaypointsChange
 
   const handleFocusNode = useCallback((forgeNodeId: string) => {
     const cn = canvasData?.nodes.find(n => n.node?.id === forgeNodeId)
@@ -4300,6 +4355,23 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', minWidth: 32, textAlign: 'right' }}>
               {Math.round(zoom * 100)}%
             </span>
+            {/* Separador */}
+            <div style={{ width: 1, height: 16, background: 'var(--line-2)', margin: '0 2px', flexShrink: 0 }} />
+            {/* Toggle estilo de edge */}
+            <button
+              title={edgeStyle === 'bezier' ? 'Switch to orthogonal edges' : 'Switch to bezier edges'}
+              onClick={toggleEdgeStyle}
+              style={{
+                padding: '3px 8px', borderRadius: 6, cursor: 'pointer',
+                border: `1px solid ${edgeStyle === 'orthogonal' ? 'var(--accent, #7c6af7)' : 'var(--line-2)'}`,
+                background: edgeStyle === 'orthogonal' ? 'color-mix(in srgb, var(--accent, #7c6af7) 15%, var(--bg-2))' : 'var(--bg-2)',
+                color: edgeStyle === 'orthogonal' ? 'var(--accent, #7c6af7)' : 'var(--text-2)',
+                fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, lineHeight: 1,
+                transition: 'all 150ms',
+              }}
+            >
+              {edgeStyle === 'bezier' ? '~' : '⌐'}
+            </button>
           </div>
 
           {/* Estado vacío */}
