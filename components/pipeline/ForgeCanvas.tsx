@@ -2544,75 +2544,134 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
 // El drag del header mueve todos los nodos miembro simultáneamente.
 interface LaneGroupData {
   lane:          ForgeLane
-  memberNodeIds: string[]   // project_node_ids de los nodos en este lane
-  onDragEnd:     () => void // callback para persistir layout
+  memberNodeIds: string[]
+  onDragEnd:     () => void
+  collapsed:     boolean
+  onToggle:      () => void
+  onDismiss:     () => void
 }
 
 const LaneGroupNode = React.memo(function LaneGroupNode({ data }: { data: LaneGroupData }) {
-  const { lane } = data
+  const { lane, collapsed, onToggle, onDismiss } = data
+  const [confirming, setConfirming] = React.useState(false)
+
+  const handleStyle = {
+    background:    lane.color,
+    border:        `2px solid ${lane.color}88`,
+    width:         10,
+    height:        10,
+    pointerEvents: 'none' as const,
+  }
+
+  const dismissBtn = confirming ? (
+    /* Confirmación inline */
+    <span style={{ display: 'flex', alignItems: 'center', gap: 4, pointerEvents: 'all' }}>
+      <button
+        onClick={e => { e.stopPropagation(); onDismiss() }}
+        style={{ background: '#e53e3e', border: 'none', borderRadius: 3, cursor: 'pointer', padding: '1px 5px', color: '#fff', fontSize: 9, lineHeight: 1, pointerEvents: 'all' }}
+      >
+        Delete
+      </button>
+      <button
+        onClick={e => { e.stopPropagation(); setConfirming(false) }}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: '#888', fontSize: 9, lineHeight: 1, pointerEvents: 'all' }}
+      >
+        Cancel
+      </button>
+    </span>
+  ) : (
+    <button
+      onClick={e => { e.stopPropagation(); setConfirming(true) }}
+      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: '#555', fontSize: 11, lineHeight: 1, pointerEvents: 'all', display: 'flex', alignItems: 'center' }}
+      title="Remove lane"
+    >
+      ✕
+    </button>
+  )
+
+  const toggleBtn = (
+    <button
+      onClick={e => { e.stopPropagation(); setConfirming(false); onToggle() }}
+      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: lane.color, fontSize: 9, lineHeight: 1, pointerEvents: 'all', display: 'flex', alignItems: 'center' }}
+    >
+      {collapsed ? '▶' : '▼'}
+    </button>
+  )
 
   return (
     <>
-      {/* Handle en el borde derecho — origen de los edges virtuales salientes */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="lane-out"
-        style={{
-          background:    lane.color,
-          border:        `2px solid ${lane.color}88`,
-          width:         10,
-          height:        10,
-          pointerEvents: 'none',
-        }}
-      />
-      {/* Handle en el borde izquierdo — destino de los edges virtuales entrantes */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="lane-in"
-        style={{
-          background:    lane.color,
-          border:        `2px solid ${lane.color}88`,
-          width:         10,
-          height:        10,
-          pointerEvents: 'none',
-        }}
-      />
-    <div
-      style={{
-        width:         '100%',
-        height:        '100%',
-        border:        `1px solid ${lane.color}33`,
-        borderRadius:  10,
-        background:    `${lane.color}05`,
-        position:      'relative',
-        pointerEvents: 'none',
-      }}
-    >
-      {/* Header — drag handle nativo de React Flow */}
-      <div
-        className="lane-drag-handle"
-        style={{
-          position:      'absolute',
-          top:           -14,
-          left:          12,
-          display:       'flex',
-          alignItems:    'center',
-          gap:           6,
-          background:    'var(--bg-1)',
-          padding:       '0 8px',
-          cursor:        'grab',
-          pointerEvents: 'all',
-          userSelect:    'none',
-        }}
-      >
-        <div style={{ width: 7, height: 7, borderRadius: '50%', background: lane.color, flexShrink: 0 }} />
-        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: lane.color, whiteSpace: 'nowrap' }}>
-          Lane {lane.lane_key} · {lane.label}
-        </span>
-      </div>
-    </div>
+      <Handle type="source" position={Position.Right} id="lane-out" style={handleStyle} />
+      <Handle type="target" position={Position.Left}  id="lane-in"  style={handleStyle} />
+
+      {collapsed ? (
+        /* Colapsado: strip horizontal con X al extremo derecho */
+        <div
+          className="lane-drag-handle"
+          style={{
+            width:         '100%',
+            height:        '100%',
+            background:    'var(--bg-1)',
+            border:        `1px solid ${lane.color}44`,
+            borderRadius:  6,
+            display:       'flex',
+            alignItems:    'center',
+            gap:           6,
+            padding:       '0 8px',
+            cursor:        'grab',
+            pointerEvents: 'all',
+            userSelect:    'none',
+            boxSizing:     'border-box',
+          }}
+        >
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: lane.color, flexShrink: 0 }} />
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: lane.color, whiteSpace: 'nowrap' }}>
+            Lane {lane.lane_key} · {lane.label}
+          </span>
+          {toggleBtn}
+          <span style={{ flex: 1 }} />
+          {dismissBtn}
+        </div>
+      ) : (
+        /* Expandido: contenedor con header flotante (▼) y X en esquina superior derecha */
+        <div
+          style={{
+            width:         '100%',
+            height:        '100%',
+            border:        `1px solid ${lane.color}33`,
+            borderRadius:  10,
+            background:    `${lane.color}05`,
+            position:      'relative',
+            pointerEvents: 'none',
+          }}
+        >
+          <div
+            className="lane-drag-handle"
+            style={{
+              position:      'absolute',
+              top:           -14,
+              left:          12,
+              display:       'flex',
+              alignItems:    'center',
+              gap:           6,
+              background:    'var(--bg-1)',
+              padding:       '0 8px',
+              cursor:        'grab',
+              pointerEvents: 'all',
+              userSelect:    'none',
+            }}
+          >
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: lane.color, flexShrink: 0 }} />
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: lane.color, whiteSpace: 'nowrap' }}>
+              Lane {lane.lane_key} · {lane.label}
+            </span>
+            {toggleBtn}
+          </div>
+          {/* X en esquina superior derecha del contenedor */}
+          <div style={{ position: 'absolute', top: 6, right: 8, pointerEvents: 'all' }}>
+            {dismissBtn}
+          </div>
+        </div>
+      )}
     </>
   )
 })
@@ -3285,6 +3344,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [chatTargetOutputKey,  setChatTargetOutputKey]  = useState<string | null>(null)
   const [chatTargetOutputLabel,setChatTargetOutputLabel]= useState<string | null>(null)
   const [collapsedAssets,   setCollapsedAssets]   = useState<Set<string>>(new Set())
+  const [collapsedLanes,    setCollapsedLanes]    = useState<Set<string>>(new Set())
   const [runPhase,          setRunPhase]          = useState<'idle' | 'running' | 'error'>('idle')
   const [runProgress,       setRunProgress]       = useState<{ done: number; total: number } | null>(null)
   const [runningNodeIds,    setRunningNodeIds]     = useState<Set<string>>(new Set())
@@ -3320,6 +3380,15 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const dbLayoutAppliedRef  = useRef(false)
   // Indica que el gate acaba de dispararse — normalizar posiciones al cargar los nodos nuevos
   const autoNormalizeRef = useRef(false)
+
+  const toggleLane = useCallback((laneId: string) => {
+    setCollapsedLanes(prev => {
+      const next = new Set(prev)
+      if (next.has(laneId)) next.delete(laneId)
+      else next.add(laneId)
+      return next
+    })
+  }, [])
 
   const persistEdges = useCallback((edgeList: Edge[]) => {
     // Deduplicar por source+handle+target antes de enviar
@@ -3371,6 +3440,16 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       if (!silent) setLoading(false)
     }
   }, [project.id])
+
+  const dismissLane = useCallback(async (laneId: string) => {
+    try {
+      await canvasFetch(`/api/projects/${project.id}/canvas/lanes/${laneId}`, { method: 'DELETE' })
+      setCollapsedLanes(prev => { const next = new Set(prev); next.delete(laneId); return next })
+      loadCanvas(true)
+    } catch (e) {
+      console.error('[forge-canvas] lane dismiss failed', e)
+    }
+  }, [project.id, loadCanvas])
 
   const handleRemoveAssetNode = useCallback(async (projectNodeId: string) => {
     try {
@@ -3920,12 +3999,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       setNodes(prev => prev.filter(n => !n.id.startsWith('lane-')))
       return
     }
-    // PADDING.top = PADDING.bottom para margen visual simétrico
-    // El header label vive en top:-14 (fuera del box), así que PADDING.top = margen interior real
-    const PADDING = { top: 28, right: 18, bottom: 28, left: 18 }
-    const NODE_W = 240
-    // Altura de fallback para el primer render antes de que React Flow mida los nodos
+    const PADDING     = { top: 28, right: 18, bottom: 28, left: 18 }
+    const NODE_W      = 240
     const NODE_H_FALLBACK = 90
+    const COLLAPSED_H = 28
 
     setNodes(prev => {
       const nodeMap: Record<string, typeof prev[0]> = {}
@@ -3939,20 +4016,45 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         const memberNodes = memberIds.map(id => nodeMap[id]).filter((n): n is typeof prev[0] => !!n)
         if (!memberNodes.length) return null
 
-        const minX  = Math.min(...memberNodes.map(n => n.position.x))
-        const minY  = Math.min(...memberNodes.map(n => n.position.y))
-        const maxX  = Math.max(...memberNodes.map(n => n.position.x + NODE_W))
-        // Usa la altura real medida por React Flow; fallback si aún no está disponible
-        const maxY  = Math.max(...memberNodes.map(n => n.position.y + (n.height ?? NODE_H_FALLBACK)))
-        const laneId = `lane-${lane.id}`
-        const ex     = prev.find(n => n.id === laneId)
+        const laneId     = `lane-${lane.id}`
+        const ex         = prev.find(n => n.id === laneId)
+        const isCollapsed = collapsedLanes.has(lane.id)
+
+        const minX = Math.min(...memberNodes.map(n => n.position.x))
+        const minY = Math.min(...memberNodes.map(n => n.position.y))
+        const maxX = Math.max(...memberNodes.map(n => n.position.x + NODE_W))
+
+        if (isCollapsed) {
+          // Posición y ancho del node existente; fallback al bounding box de miembros
+          const colPos = ex?.position ?? { x: minX - PADDING.left, y: minY - PADDING.top }
+          const colW   = (ex?.style as { width?: number } | undefined)?.width
+                        ?? maxX - minX + PADDING.left + PADDING.right
+
+          if (ex && ex.position.x === colPos.x && ex.position.y === colPos.y &&
+              (ex.style as { width?: number })?.width  === colW &&
+              (ex.style as { height?: number })?.height === COLLAPSED_H &&
+              (ex.data as unknown as LaneGroupData).collapsed === true) return ex
+
+          changed = true
+          return {
+            id: laneId, type: 'laneGroup' as const,
+            draggable: true, selectable: false, zIndex: 0,
+            dragHandle: '.lane-drag-handle',
+            position: colPos, style: { width: colW, height: COLLAPSED_H, zIndex: 0 },
+            data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current, collapsed: true, onToggle: () => toggleLane(lane.id), onDismiss: () => dismissLane(lane.id) } as LaneGroupData,
+          }
+        }
+
+        // Expandido: calcular bounding box desde nodos miembro
+        const maxY   = Math.max(...memberNodes.map(n => n.position.y + (n.height ?? NODE_H_FALLBACK)))
         const newPos = { x: minX - PADDING.left, y: minY - PADDING.top }
         const newW   = maxX - minX + PADDING.left + PADDING.right
         const newH   = maxY - minY + PADDING.top + PADDING.bottom
 
         if (ex && ex.position.x === newPos.x && ex.position.y === newPos.y &&
             (ex.style as { width?: number })?.width  === newW &&
-            (ex.style as { height?: number })?.height === newH) return ex
+            (ex.style as { height?: number })?.height === newH &&
+            (ex.data as unknown as LaneGroupData).collapsed === false) return ex
 
         changed = true
         return {
@@ -3960,14 +4062,30 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           draggable: true, selectable: false, zIndex: 0,
           dragHandle: '.lane-drag-handle',
           position: newPos, style: { width: newW, height: newH, zIndex: 0 },
-          data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current } as LaneGroupData,
+          data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current, collapsed: false, onToggle: () => toggleLane(lane.id), onDismiss: () => dismissLane(lane.id) } as LaneGroupData,
         }
       }).filter(Boolean) as typeof prev
 
+      // Ocultar nodos miembro de lanes colapsados
+      const hiddenIds = new Set<string>(
+        canvasData.lanes
+          .filter(l => collapsedLanes.has(l.id))
+          .flatMap(l => canvasData.nodes.filter(cn => cn.lane_id === l.id).map(cn => cn.project_node_id))
+      )
+
+      const updatedMembers = prev
+        .filter(n => !n.id.startsWith('lane-'))
+        .map(n => {
+          const shouldHide = hiddenIds.has(n.id)
+          if (!!n.hidden === shouldHide) return n
+          changed = true
+          return { ...n, hidden: shouldHide }
+        })
+
       if (!changed) return prev
-      return [...newLaneNodes, ...prev.filter(n => !n.id.startsWith('lane-'))]
+      return [...newLaneNodes, ...updatedMembers]
     })
-  }, [canvasData, setNodes])
+  }, [canvasData, setNodes, collapsedLanes, toggleLane, dismissLane])
 
   // Disparar sync cada vez que cambia canvasData (carga inicial + refetch tras fan-out)
   useEffect(() => { syncLaneNodes() }, [syncLaneNodes])
@@ -4195,7 +4313,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   }
 
   const handleNodeDragStart = useCallback((_event: React.MouseEvent, node: import('@xyflow/react').Node) => {
-    setDraggingNodeId(node.id)
+    if (node.type !== 'laneGroup') setDraggingNodeId(node.id)
     if (node.type === 'laneGroup') {
       const laneData = node.data as unknown as LaneGroupData
       const allNodes = getNodes()
