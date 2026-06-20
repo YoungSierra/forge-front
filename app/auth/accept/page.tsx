@@ -19,6 +19,16 @@ export default function AcceptInvitePage() {
     const supabase = createClient()
 
     async function init() {
+      // Detectar errores en el hash (ej: otp_expired) antes de cualquier otra lógica
+      const hashParams = new URLSearchParams(window.location.hash.slice(1))
+      const hashError  = hashParams.get('error')
+      if (hashError) {
+        const desc = hashParams.get('error_description')?.replace(/\+/g, ' ') ?? hashError
+        setError(desc)
+        setReady(true)
+        return
+      }
+
       const params = new URLSearchParams(window.location.search)
       const code   = params.get('code')
 
@@ -44,14 +54,19 @@ export default function AcceptInvitePage() {
 
       // Direct hash redirect from Supabase (production): Supabase already processed
       // the hash tokens on page load via detectSessionInUrl — just read the session.
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session?.user?.email) {
-        resolve(session.user.email)
-        return
+      // Solo usar la sesión existente si hay tokens en el hash (no caer al admin logueado).
+      const atHash = hashParams.get('access_token')
+      if (atHash) {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.user?.email) {
+          resolve(session.user.email)
+          return
+        }
       }
 
-      // No invite tokens — user refreshed after already accepting, just go home
-      router.replace('/')
+      // Sin tokens válidos — link expirado o ya usado
+      setError('This invite link has expired or was already used. Please ask for a new invite.')
+      setReady(true)
     }
 
     function resolve(userEmail: string) {
@@ -118,6 +133,18 @@ export default function AcceptInvitePage() {
           <div style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--text-3)', textAlign: 'center', padding: '20px 0' }}>
             Setting up your account...
           </div>
+        ) : error && !email ? (
+          // Token expirado o inválido — mostrar error sin form
+          <>
+            <div className="login-title">Invite link expired</div>
+            <div className="login-error" style={{ marginTop: 8 }}>{error}</div>
+            <button
+              type="button" className="login-btn" style={{ marginTop: 20 }}
+              onClick={() => router.replace('/login')}
+            >
+              Back to login
+            </button>
+          </>
         ) : (
           <>
             <div className="login-title">Welcome to Forge</div>

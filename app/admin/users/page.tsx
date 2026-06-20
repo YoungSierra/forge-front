@@ -168,13 +168,13 @@ export default function UsersAdminPage() {
           ) : createMode === 'create' ? (
             <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {([
-                { label: 'Display name', value: createName, set: setCreateName, type: 'text' },
-                { label: 'Email',        value: email,       set: setEmail,       type: 'email' },
-                { label: 'Password',     value: password,    set: setPassword,    type: 'password' },
-              ] as { label: string; value: string; set: (v: string) => void; type: string }[]).map(({ label, value, set, type }) => (
+                { label: 'Display name', value: createName, set: setCreateName, type: 'text',     ac: 'off' },
+                { label: 'Email',        value: email,       set: setEmail,       type: 'email',    ac: 'off' },
+                { label: 'Password',     value: password,    set: setPassword,    type: 'password', ac: 'new-password' },
+              ] as { label: string; value: string; set: (v: string) => void; type: string; ac: string }[]).map(({ label, value, set, type, ac }) => (
                 <div key={label}>
                   <label style={labelStyle}>{label}</label>
-                  <input type={type} value={value} onChange={e => set(e.target.value)} required style={inputStyle} />
+                  <input type={type} value={value} onChange={e => set(e.target.value)} required autoComplete={ac} style={inputStyle} />
                 </div>
               ))}
               <RoleSelector value={createRole} onChange={setCreateRole} />

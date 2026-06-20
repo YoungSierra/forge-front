@@ -1,28 +1,48 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { updateAdminUser } from '@/lib/api'
 
-// Capture hash at module-load time (before Supabase's GoTrueClient clears it).
-// Only runs in the browser; on the server this stays ''.
+// Captura el hash antes de que Supabase lo borre
 const _rawHash = typeof window !== 'undefined' ? window.location.hash : ''
-// Prevent re-triggering invite flow when the component remounts (e.g. after sign-out).
 let _inviteConsumed = false
 
-export default function LoginPage() {
-  const router = useRouter()
+type Mode = 'login' | 'forgot' | 'reset'
 
-  // ── Normal login state ──────────────────────────────────────
+export default function LoginPage() {
+  const router       = useRouter()
+  const searchParams = useSearchParams()
+
+  // ── Login state ─────────────────────────────────────────────
   const [email, setEmail]               = useState('')
   const [password, setPassword]         = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading]           = useState(false)
   const [error, setError]               = useState<string | null>(null)
 
-  // ── Invite-accept state ─────────────────────────────────────
-  // Starts null to match SSR (avoids hydration mismatch); set in useEffect.
+  // ── Mode — inicializar en 'reset' si viene de /auth/callback ─
+  const [mode, setMode] = useState<Mode>(() =>
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('recovery') === '1'
+      ? 'reset'
+      : 'login'
+  )
+
+  // ── Forgot password state ────────────────────────────────────
+  const [forgotEmail, setForgotEmail]   = useState('')
+  const [forgotSent, setForgotSent]     = useState(false)
+  const [forgotLoading, setForgotLoading] = useState(false)
+  const [forgotError, setForgotError]   = useState('')
+
+  // ── Reset password state ─────────────────────────────────────
+  const [resetPw, setResetPw]           = useState('')
+  const [resetPwC, setResetPwC]         = useState('')
+  const [resetSaving, setResetSaving]   = useState(false)
+  const [resetError, setResetError]     = useState('')
+  const [resetDone, setResetDone]       = useState(false)
+
+  // ── Invite-accept state ──────────────────────────────────────
   const [invite, setInvite]             = useState<{ at: string; rt: string } | null>(null)
   const [inviteReady, setInviteReady]   = useState(false)
   const [inviteEmail, setInviteEmail]   = useState('')
@@ -32,7 +52,7 @@ export default function LoginPage() {
   const [inviteSaving, setInviteSaving] = useState(false)
   const [inviteError, setInviteError]   = useState('')
 
-  // Forzar dark mode en el login independientemente del tema del usuario
+  // Forzar dark mode en el login
   useEffect(() => {
     const html = document.documentElement
     const prev = html.getAttribute('data-theme')
@@ -43,27 +63,95 @@ export default function LoginPage() {
     }
   }, [])
 
+  // Detectar flujo de recovery via onAuthStateChange (PKCE) o hash (implicit)
   useEffect(() => {
-    if (_inviteConsumed) return
-    if (!_rawHash.includes('access_token') || !_rawHash.includes('type=invite')) return
-    const p = new URLSearchParams(_rawHash.replace(/^#/, ''))
-    const at = p.get('access_token')
-    const rt = p.get('refresh_token') ?? ''
-    if (!at) return
-    _inviteConsumed = true
-    const tokens = { at, rt }
-    setInvite(tokens)
-    // Establish the invite session to get the user's email
     const supabase = createClient()
-    supabase.auth.setSession({ access_token: at, refresh_token: rt })
-      .then(({ data, error }) => {
-        if (error || !data.session?.user?.email) return
-        const e = data.session.user.email
-        setInviteEmail(e)
-        setDisplayName(e.split('@')[0])
-        setInviteReady(true)
-      })
+
+    // PKCE: el cliente de @supabase/ssr procesa ?code= automáticamente y emite PASSWORD_RECOVERY
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') setMode('reset')
+    })
+
+    // Implicit fallback: hash con access_token (flujo invite / legacy)
+    if (_rawHash.includes('access_token')) {
+      const p = new URLSearchParams(_rawHash.replace(/^#/, ''))
+      const at = p.get('access_token')
+      const rt = p.get('refresh_token') ?? ''
+      const type = p.get('type')
+
+      if (at && type === 'recovery') {
+        supabase.auth.setSession({ access_token: at, refresh_token: rt })
+          .then(() => setMode('reset'))
+      } else if (at && type === 'invite' && !_inviteConsumed) {
+        _inviteConsumed = true
+        setInvite({ at, rt })
+        supabase.auth.setSession({ access_token: at, refresh_token: rt })
+          .then(({ data, error }) => {
+            if (error || !data.session?.user?.email) return
+            const e = data.session.user.email
+            setInviteEmail(e)
+            setDisplayName(e.split('@')[0])
+            setInviteReady(true)
+          })
+      }
+    }
+
+    return () => subscription.unsubscribe()
   }, [])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true); setError(null)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) {
+        if (error.message.includes('Invalid login credentials')) setError('Incorrect email or password')
+        else if (error.message.includes('Email not confirmed'))  setError('Confirm your email first')
+        else setError(error.message)
+      } else {
+        router.push('/')
+      }
+    } catch {
+      setError('Connection error. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleForgot(e: React.FormEvent) {
+    e.preventDefault()
+    setForgotLoading(true); setForgotError('')
+    try {
+      const supabase = createClient()
+      const redirectTo = `${window.location.origin}/auth/callback`
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, { redirectTo })
+      if (error) throw error
+      setForgotSent(true)
+    } catch (err: unknown) {
+      setForgotError(err instanceof Error ? err.message : 'Error sending email')
+    } finally {
+      setForgotLoading(false)
+    }
+  }
+
+  async function handleReset(e: React.FormEvent) {
+    e.preventDefault()
+    if (resetPw !== resetPwC)   { setResetError('Passwords do not match'); return }
+    if (resetPw.length < 6)     { setResetError('Password must be at least 6 characters'); return }
+    setResetSaving(true); setResetError('')
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.auth.updateUser({ password: resetPw })
+      if (error) throw error
+      setResetDone(true)
+      setTimeout(() => router.replace('/'), 2000)
+    } catch (err: unknown) {
+      setResetError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setResetSaving(false)
+    }
+  }
 
   async function handleInviteSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -83,26 +171,6 @@ export default function LoginPage() {
     } catch (err: unknown) {
       setInviteError(err instanceof Error ? err.message : 'Unknown error')
       setInviteSaving(false)
-    }
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true); setError(null)
-    try {
-      const supabase = createClient()
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) {
-        if (error.message.includes('Invalid login credentials')) setError('Incorrect email or password')
-        else if (error.message.includes('Email not confirmed'))  setError('Confirm your email first')
-        else setError(error.message)
-      } else {
-        router.push('/')
-      }
-    } catch {
-      setError('Connection error. Please try again.')
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -126,6 +194,12 @@ export default function LoginPage() {
 
   const labelStyle: React.CSSProperties = {
     fontFamily: 'var(--font-mono)', fontSize: 12, color: '#50505e',
+  }
+
+  const linkBtn: React.CSSProperties = {
+    background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+    fontFamily: 'var(--font-mono)', fontSize: 11, color: '#50505e',
+    textDecoration: 'underline', textUnderlineOffset: 3,
   }
 
   return (
@@ -212,6 +286,97 @@ export default function LoginPage() {
               </form>
             </>
           )
+
+        /* ── Reset password mode ─────────────────────────── */
+        ) : mode === 'reset' ? (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#f0f0f2', marginBottom: 3 }}>Set new password</div>
+            <div style={{ fontSize: 12, color: '#50505e', marginBottom: 20 }}>Choose a new password for your account.</div>
+
+            {resetDone ? (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#4ade80', padding: '12px 14px', borderRadius: 5, background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)', textAlign: 'center' }}>
+                Password updated. Redirecting…
+              </div>
+            ) : (
+              <form onSubmit={handleReset} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <label style={labelStyle}>New password</label>
+                  <input type="password" value={resetPw} onChange={e => setResetPw(e.target.value)} required autoFocus
+                    style={inputStyle}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
+                    onBlur={e =>  { e.currentTarget.style.borderColor = 'var(--line-2)' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <label style={labelStyle}>Confirm new password</label>
+                  <input type="password" value={resetPwC} onChange={e => setResetPwC(e.target.value)} required
+                    style={inputStyle}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--action)' }}
+                    onBlur={e =>  { e.currentTarget.style.borderColor = 'var(--line-2)' }}
+                  />
+                </div>
+                {resetError && (
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#f87171', padding: '7px 10px', borderRadius: 4, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)' }}>
+                    {resetError}
+                  </div>
+                )}
+                <button type="submit" disabled={resetSaving} style={{
+                  height: 38, borderRadius: 5, border: 'none', marginTop: 4,
+                  background: resetSaving ? 'var(--action-hover)' : 'var(--action)',
+                  color: 'var(--action-fg)', fontSize: 13, fontWeight: 600,
+                  cursor: resetSaving ? 'wait' : 'pointer', width: '100%',
+                }}>
+                  {resetSaving ? 'Updating…' : 'Update password'}
+                </button>
+              </form>
+            )}
+          </>
+
+        /* ── Forgot password mode ────────────────────────── */
+        ) : mode === 'forgot' ? (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#f0f0f2', marginBottom: 3 }}>Reset password</div>
+            <div style={{ fontSize: 12, color: '#50505e', marginBottom: 20 }}>Enter your email and we&apos;ll send you a reset link.</div>
+
+            {forgotSent ? (
+              <>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#4ade80', padding: '12px 14px', borderRadius: 5, background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)', textAlign: 'center', marginBottom: 16 }}>
+                  Check your inbox — link sent to {forgotEmail}
+                </div>
+                <button style={linkBtn} onClick={() => { setMode('login'); setForgotSent(false); setForgotEmail('') }}>
+                  ← Back to sign in
+                </button>
+              </>
+            ) : (
+              <form onSubmit={handleForgot} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <label style={labelStyle}>Email</label>
+                  <input type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} required autoFocus
+                    placeholder="you@studio.com" style={inputStyle}
+                    onFocus={e => { e.currentTarget.style.borderColor = '#ff8a3d' }}
+                    onBlur={e =>  { e.currentTarget.style.borderColor = 'var(--line-2)' }}
+                  />
+                </div>
+                {forgotError && (
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#f87171', padding: '7px 10px', borderRadius: 4, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)' }}>
+                    {forgotError}
+                  </div>
+                )}
+                <button type="submit" disabled={forgotLoading} style={{
+                  height: 38, borderRadius: 5, border: 'none', marginTop: 4,
+                  background: forgotLoading ? 'var(--action-hover)' : 'var(--action)',
+                  color: 'var(--action-fg)', fontSize: 13, fontWeight: 600,
+                  cursor: forgotLoading ? 'wait' : 'pointer', width: '100%',
+                }}>
+                  {forgotLoading ? 'Sending…' : 'Send reset link'}
+                </button>
+                <button type="button" style={{ ...linkBtn, textAlign: 'center' }} onClick={() => setMode('login')}>
+                  ← Back to sign in
+                </button>
+              </form>
+            )}
+          </>
+
         ) : (
           /* ── Normal login ───────────────────────────────── */
           <>
@@ -229,7 +394,12 @@ export default function LoginPage() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                <label htmlFor="password" style={labelStyle}>Password</label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label htmlFor="password" style={labelStyle}>Password</label>
+                  <button type="button" style={linkBtn} onClick={() => { setMode('forgot'); setForgotEmail(email) }}>
+                    Forgot password?
+                  </button>
+                </div>
                 <div style={{ position: 'relative' }}>
                   <input id="password" value={password} required
                     type={showPassword ? 'text' : 'password'}
