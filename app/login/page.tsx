@@ -22,11 +22,7 @@ export default function LoginPage() {
   const [error, setError]               = useState<string | null>(null)
 
   // ── Mode — inicializar en 'reset' si viene de /auth/callback ─
-  const [mode, setMode] = useState<Mode>(() =>
-    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('recovery') === '1'
-      ? 'reset'
-      : 'login'
-  )
+  const [mode, setMode] = useState<Mode>('login')
 
   // ── Forgot password state ────────────────────────────────────
   const [forgotEmail, setForgotEmail]   = useState('')
@@ -59,6 +55,13 @@ export default function LoginPage() {
     return () => {
       if (prev) html.setAttribute('data-theme', prev)
       else html.removeAttribute('data-theme')
+    }
+  }, [])
+
+  // Detectar ?recovery=1 en el cliente (el useState no puede leer window en SSR)
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('recovery') === '1') {
+      setMode('reset')
     }
   }, [])
 
