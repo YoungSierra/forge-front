@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { updateAdminUser } from '@/lib/api'
+import { updateOwnProfile } from '@/lib/api'
 
 // Captura el hash antes de que Supabase lo borre
 const _rawHash = typeof window !== 'undefined' ? window.location.hash : ''
@@ -165,7 +165,7 @@ export default function LoginPage() {
       })
       if (ue) throw ue
       if (!user) throw new Error('No user returned')
-      await updateAdminUser(user.id, { display_name: displayName })
+      await updateOwnProfile(user.id, displayName)
       router.replace('/')
     } catch (err: unknown) {
       setInviteError(err instanceof Error ? err.message : 'Unknown error')

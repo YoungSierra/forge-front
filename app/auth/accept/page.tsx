@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { updateAdminUser } from '@/lib/api'
+import { updateOwnProfile } from '@/lib/api'
 
 export default function AcceptInvitePage() {
   const router = useRouter()
@@ -94,7 +94,7 @@ export default function AcceptInvitePage() {
       if (updateError) throw updateError
       if (!user) throw new Error('No user returned')
 
-      await updateAdminUser(user.id, { display_name: displayName })
+      await updateOwnProfile(user.id, displayName)
 
       router.replace('/')
     } catch (err: unknown) {

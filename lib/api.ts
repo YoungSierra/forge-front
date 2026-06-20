@@ -545,6 +545,15 @@ export async function updateAdminUser(auth_id: string, payload: { display_name?:
   return data.member
 }
 
+// Sin requireAdmin — el propio usuario actualiza su display_name al aceptar invite
+export async function updateOwnProfile(auth_user_id: string, display_name: string): Promise<void> {
+  await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/members/profile`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ auth_user_id, display_name }),
+  })
+}
+
 export async function createAdminUser(payload: {
   email: string; password: string; display_name: string; role: 'member' | 'admin'
 }): Promise<AdminUser> {
