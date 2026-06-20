@@ -52,16 +52,15 @@ export default function AcceptInvitePage() {
         return
       }
 
-      // Direct hash redirect from Supabase (production): Supabase already processed
-      // the hash tokens on page load via detectSessionInUrl — just read the session.
-      // Solo usar la sesión existente si hay tokens en el hash (no caer al admin logueado).
+      // Hash invite directo (flujo implicit): establecer sesión explícitamente
+      // sin confiar en detectSessionInUrl que puede devolver la sesión del admin activo
       const atHash = hashParams.get('access_token')
       if (atHash) {
-        const { data: { session } } = await supabase.auth.getSession()
-        if (session?.user?.email) {
-          resolve(session.user.email)
-          return
-        }
+        const rtHash = hashParams.get('refresh_token') ?? ''
+        const { data, error } = await supabase.auth.setSession({ access_token: atHash, refresh_token: rtHash })
+        if (error || !data.session) { router.replace('/login'); return }
+        resolve(data.session.user.email ?? '')
+        return
       }
 
       // Sin tokens válidos — link expirado o ya usado
