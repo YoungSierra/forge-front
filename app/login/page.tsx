@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { updateAdminUser } from '@/lib/api'
 
@@ -12,8 +12,7 @@ let _inviteConsumed = false
 type Mode = 'login' | 'forgot' | 'reset'
 
 export default function LoginPage() {
-  const router       = useRouter()
-  const searchParams = useSearchParams()
+  const router = useRouter()
 
   // ── Login state ─────────────────────────────────────────────
   const [email, setEmail]               = useState('')
