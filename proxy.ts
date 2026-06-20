@@ -28,6 +28,7 @@ export async function proxy(request: NextRequest) {
   const isLoginPage = request.nextUrl.pathname === '/login'
   const isPublicPath = request.nextUrl.pathname.startsWith('/_next') ||
                        request.nextUrl.pathname.startsWith('/api') ||
+                       request.nextUrl.pathname.startsWith('/auth/') ||
                        request.nextUrl.pathname.includes('.')
 
   if (!user && !isLoginPage && !isPublicPath) {
