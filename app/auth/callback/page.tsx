@@ -11,20 +11,18 @@ export default function AuthCallbackPage() {
 
   useEffect(() => {
     const supabase = createClient()
+    const params   = new URLSearchParams(window.location.search)
+    const code     = params.get('code')
+    const type     = params.get('type')
 
-    // Listener primero, luego intercambiar — para no perder el evento
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') router.replace('/login?recovery=1')
-      else if (event === 'SIGNED_IN') router.replace('/')
+    if (!code) { router.replace('/login'); return }
+
+    // PKCE: intercambiar el code y redirigir según el tipo de flujo
+    supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+      if (error) { router.replace('/login'); return }
+      if (type === 'recovery') router.replace('/login?recovery=1')
+      else router.replace('/')
     })
-
-    // PKCE: el verify de Supabase manda ?code= — hay que intercambiarlo explícitamente
-    const code = new URLSearchParams(window.location.search).get('code')
-    if (code) {
-      supabase.auth.exchangeCodeForSession(code).catch(() => router.replace('/login'))
-    }
-
-    return () => subscription.unsubscribe()
   }, [router])
 
   return (

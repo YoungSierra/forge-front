@@ -123,7 +123,7 @@ export default function LoginPage() {
     setForgotLoading(true); setForgotError('')
     try {
       const supabase = createClient()
-      const redirectTo = `${window.location.origin}/auth/callback`
+      const redirectTo = `${window.location.origin}/auth/callback?type=recovery`
       const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, { redirectTo })
       if (error) throw error
       setForgotSent(true)
