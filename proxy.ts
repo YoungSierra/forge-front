@@ -25,11 +25,12 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const isLoginPage = request.nextUrl.pathname === '/login'
-  const isPublicPath = request.nextUrl.pathname.startsWith('/_next') ||
-                       request.nextUrl.pathname.startsWith('/api') ||
-                       request.nextUrl.pathname.startsWith('/auth/') ||
-                       request.nextUrl.pathname.includes('.')
+  const isLoginPage    = request.nextUrl.pathname === '/login'
+  const isRecoveryFlow = isLoginPage && request.nextUrl.searchParams.get('recovery') === '1'
+  const isPublicPath   = request.nextUrl.pathname.startsWith('/_next') ||
+                         request.nextUrl.pathname.startsWith('/api') ||
+                         request.nextUrl.pathname.startsWith('/auth/') ||
+                         request.nextUrl.pathname.includes('.')
 
   if (!user && !isLoginPage && !isPublicPath) {
     const url = request.nextUrl.clone()
@@ -37,7 +38,8 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  if (user && isLoginPage) {
+  // No redirigir al home si el usuario viene del flujo de recovery
+  if (user && isLoginPage && !isRecoveryFlow) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)
