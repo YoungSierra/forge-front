@@ -2,6 +2,19 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function proxy(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+
+  // Rutas estáticas y de auth: pasar sin ningún procesamiento de sesión.
+  // getUser() en /auth/* interfiere con el PKCE code verifier almacenado en cookies.
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/auth/') ||
+    pathname.startsWith('/api') ||
+    pathname.includes('.')
+  ) {
+    return NextResponse.next({ request })
+  }
+
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
