@@ -15,13 +15,19 @@ export default function AuthCallbackPage() {
     const code     = params.get('code')
     const type     = params.get('type')
 
+    const dest = type === 'recovery' ? '/login?recovery=1' : '/'
+
     if (!code) { router.replace('/login'); return }
 
-    // PKCE: intercambiar el code y redirigir según el tipo de flujo
-    supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-      if (error) { router.replace('/login'); return }
-      if (type === 'recovery') router.replace('/login?recovery=1')
-      else router.replace('/')
+    supabase.auth.exchangeCodeForSession(code).then(async ({ error }) => {
+      if (error) {
+        // detectSessionInUrl puede haber consumido el code antes que nosotros —
+        // si ya hay sesión activa, igual redirigimos al destino correcto
+        const { data: { session } } = await supabase.auth.getSession()
+        router.replace(session ? dest : '/login')
+        return
+      }
+      router.replace(dest)
     })
   }, [router])
 
