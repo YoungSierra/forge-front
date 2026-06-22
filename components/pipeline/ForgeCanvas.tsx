@@ -3391,16 +3391,25 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   }, [])
 
   const persistEdges = useCallback((edgeList: Edge[]) => {
+    // Excluir edges virtuales de lane (source/target = "lane-<uuid>", id "virtual-*").
+    // No representan conexiones reales nodo→nodo: el backend los reconstruye al cargar.
+    // Si se enviaran, el PUT borra todos los edges y luego falla al insertar el uuid
+    // inválido "lane-...", dejando el proyecto con 0 edges (los reales hidden ya van aparte).
+    const real = edgeList.filter(e =>
+      !e.id.startsWith('virtual-') &&
+      !e.source.startsWith('lane-') &&
+      !e.target.startsWith('lane-')
+    )
     // Deduplicar por source+handle+target antes de enviar
     const seen = new Set<string>()
-    const unique = edgeList.filter(e => {
+    const unique = real.filter(e => {
       const key = `${e.source}|${e.sourceHandle ?? ''}|${e.target}|${e.targetHandle ?? ''}`
       if (seen.has(key)) return false
       seen.add(key)
       return true
     })
     console.log(`[forge-canvas] persistEdges called — ${unique.length} edges (${edgeList.length} raw)`, new Error().stack?.split('\n')[2]?.trim())
-    canvasFetch(`/api/projects/${project.id}/canvas/edges`, {
+    return canvasFetch(`/api/projects/${project.id}/canvas/edges`, {
       method: 'PUT',
       body: JSON.stringify({
         edges: unique.map(e => ({
@@ -4246,12 +4255,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               deletable: true,
               data:      { color: '#6b7280', active: false },
             }
-            await canvasFetch(`/api/projects/${project.id}/canvas/edges`, {
-              method: 'PUT',
-              body: JSON.stringify({
-                edges: [...edgesRef.current, newEdge].map(e => ({ source: e.source, target: e.target })),
-              }),
-            })
+            // persistEdges filtra los edges virtuales de lane y conserva los handles
+            await persistEdges([...edgesRef.current, newEdge])
           }
         }
 
@@ -4260,7 +4265,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     } catch (err) {
       console.error('[forge-canvas] drop failed', err)
     }
-  }, [project.id, screenToFlowPosition, loadCanvas, getNodes])
+  }, [project.id, screenToFlowPosition, loadCanvas, getNodes, persistEdges])
 
   async function removeNodeById(projectNodeId: string) {
     try {
