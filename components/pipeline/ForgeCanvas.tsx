@@ -14,14 +14,14 @@ import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
 import OrthogonalEdge, { type WayPoint } from './OrthogonalEdge'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
-import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, autoRunNode, updateProjectName } from '@/lib/api'
+import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
-import type { ChatMessage, OutputImageItem, OutputImagesMap } from '@/lib/api'
-import type { Project } from '@/lib/types'
+import type { ChatMessage, OutputImageItem, OutputImagesMap, RunPlan, GateAuthMode } from '@/lib/api'
+import type { Project, RunScope } from '@/lib/types'
 import NodeChatWindow, { parseOutputItems, buildImageGenComponents, ImageThumbnailRow, VariationPanel } from '@/components/shared/NodeChatWindow'
 import type { ImageOutputDef, InlineImageItem } from '@/components/shared/NodeChatWindow'
 import AssetCardDeck, { invalidateAssetDeckCache } from './AssetCardDeck'
-import ForgeToolbar from './ForgeToolbar'
+import ForgeToolbar, { type RunMenuItem } from './ForgeToolbar'
 import ExportModal from '@/components/shared/ExportModal'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -52,6 +52,7 @@ interface CanvasNode {
   project_node_id: string
   order_index: number
   blueprint_id: string | null
+  sealed?:         boolean        // blueprint sellado (gate ACCEPT) — no re-ejecutable
   lane_id:         string | null
   bound_item_ref:  Record<string, unknown> | null
   node_type: 'forge_node' | 'library_asset' | 'text_input'
@@ -77,6 +78,28 @@ interface CanvasNode {
   asset: LibraryAsset | null
   session: ForgeSession | null
   output_sessions: Record<string, ForgeSession>
+}
+
+// ¿El nodo está pendiente de correr? No aprobado, o auto_approved pero stale.
+// Fuente única de verdad — usada por runnableCount, runScope y el menú de run.
+function isNodeRunnable(n: CanvasNode): boolean {
+  if (n.node_type !== 'forge_node') return false
+  if (n.sealed) return false  // fase sellada (gate ACCEPT) — bloqueada, el backend la rechaza
+  const s = n.session?.status
+  if (s === 'approved') return false
+  if (s === 'auto_approved' && !n.is_stale) return false
+  // Modelo per-output: un nodo cuya sesión general sigue 'active' pero con TODOS sus outputs
+  // aprobados ya está hecho. Mismo criterio que approvedNodeIds (toolbar) — evita contarlo
+  // como pendiente. Si está stale, sí se vuelve a correr.
+  const outs = n.node?.outputs ?? []
+  if (outs.length > 0 && !n.is_stale) {
+    const allOutputsApproved = outs.every(o => {
+      const os = (n.output_sessions ?? {})[o.key ?? '']
+      return os?.status === 'approved' || os?.status === 'auto_approved'
+    })
+    if (allOutputsApproved) return false
+  }
+  return true
 }
 
 interface BlueprintGate {
@@ -110,6 +133,29 @@ interface CanvasData {
     gate: BlueprintGate | null
     gate_decision: string | null
   } | null
+}
+
+// ¿El gate de la fase viva está listo? Todos los nodos del blueprint activo aprobados
+// y sin decisión previa. Fuente única — usada por el UI (gateReady) y el loop de pipeline (#5).
+function isGateReady(data: CanvasData | null): boolean {
+  const bp = data?.active_blueprint
+  if (!bp?.gate) return false
+  if (bp.gate_decision) return false
+  const bpNodes = data!.nodes.filter(n => n.blueprint_id === bp.id && n.node_type === 'forge_node')
+  if (bpNodes.length === 0) return false
+  const isApproved = (n: CanvasNode) => {
+    const gs = n.session?.status
+    if (gs === 'approved' || gs === 'auto_approved') return true
+    return Object.values(n.output_sessions ?? {}).some(
+      (s) => s.status === 'approved' || s.status === 'auto_approved',
+    )
+  }
+  const hasSession = (n: CanvasNode) =>
+    !!n.session || Object.keys(n.output_sessions ?? {}).length > 0
+  // Solo bloquean: el nodo gate (obligatorio) y nodos ejecutados pero no aprobados.
+  // Nodos sin sesión = el usuario los saltó voluntariamente.
+  const notReady = bpNodes.filter(n => !isApproved(n) && (n.node?.role === 'gate' || hasSession(n)))
+  return notReady.length === 0
 }
 
 interface CatalogNode {
@@ -1262,9 +1308,11 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const status      = effectiveStatus
   const statusColor = locked ? null : isError ? '#EF4444' : isRunning ? '#60A5FA' : (status ? (SESSION_COLOR[status] ?? null) : null)
   const phaseColor  = locked ? '#6B7280' : (PHASE_COLOR[node.phase] ?? '#6B7280')
+  // Stale solo es relevante si el nodo ya produjo output (status no nulo); idle = pendiente, no stale
+  const showStale   = isStale && !!status
 
   // Borde y glow reactivos al estado de sesión
-  const borderColor = isStale  ? '#F59E0B'
+  const borderColor = showStale ? '#F59E0B'
                     : isError  ? '#EF4444'
                     : isRunning? 'transparent'
                     : locked   ? 'var(--line-2)'
@@ -1542,8 +1590,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
         }}>↻</div>
       )}
 
-      {/* Badge de stale / error */}
-      {!isRunning && (isStale || isError) && (
+      {/* Badge de stale / error — el ⚠ de stale solo aplica si el nodo YA produjo output
+          (showStale); un nodo idle nunca corrió, así que no puede estar "desactualizado" */}
+      {!isRunning && (showStale || isError) && (
         <div style={{
           position: 'absolute', top: -8, right: -8, zIndex: 10,
           width: 18, height: 18, borderRadius: '50%',
@@ -2549,10 +2598,11 @@ interface LaneGroupData {
   collapsed:     boolean
   onToggle:      () => void
   onDismiss:     () => void
+  onRun:         () => void
 }
 
 const LaneGroupNode = React.memo(function LaneGroupNode({ data }: { data: LaneGroupData }) {
-  const { lane, collapsed, onToggle, onDismiss } = data
+  const { lane, collapsed, onToggle, onDismiss, onRun } = data
   const [confirming, setConfirming] = React.useState(false)
 
   const handleStyle = {
@@ -2598,6 +2648,17 @@ const LaneGroupNode = React.memo(function LaneGroupNode({ data }: { data: LaneGr
     </button>
   )
 
+  // Botón ▶ Run — ejecuta solo los nodos de este lane
+  const runBtn = (
+    <button
+      onClick={e => { e.stopPropagation(); setConfirming(false); onRun() }}
+      style={{ background: 'none', border: `1px solid ${lane.color}66`, borderRadius: 3, cursor: 'pointer', padding: '0 4px', color: lane.color, fontSize: 8, fontWeight: 700, letterSpacing: '.04em', lineHeight: 1.6, pointerEvents: 'all', display: 'flex', alignItems: 'center', gap: 2 }}
+      title={`Run lane ${lane.lane_key}`}
+    >
+      ▶ Run
+    </button>
+  )
+
   return (
     <>
       <Handle type="source" position={Position.Right} id="lane-out" style={handleStyle} />
@@ -2628,6 +2689,7 @@ const LaneGroupNode = React.memo(function LaneGroupNode({ data }: { data: LaneGr
             Lane {lane.lane_key} · {lane.label}
           </span>
           {toggleBtn}
+          {runBtn}
           <span style={{ flex: 1 }} />
           {dismissBtn}
         </div>
@@ -2665,6 +2727,7 @@ const LaneGroupNode = React.memo(function LaneGroupNode({ data }: { data: LaneGr
               Lane {lane.lane_key} · {lane.label}
             </span>
             {toggleBtn}
+            {runBtn}
           </div>
           {/* X en esquina superior derecha del contenedor */}
           <div style={{ position: 'absolute', top: 6, right: 8, pointerEvents: 'all' }}>
@@ -3350,6 +3413,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [runningNodeIds,    setRunningNodeIds]     = useState<Set<string>>(new Set())
   const [runErrorNodeId,    setRunErrorNodeId]     = useState<string | null>(null)
   const [runErrors,         setRunErrors]          = useState<import('@/lib/api').RunValidateError[]>([])
+  // Autorización de gates para Run de pipeline (#4) — modal + decisión
+  const [runPlanModal,      setRunPlanModal]       = useState<{ plan: RunPlan; scope: RunScope } | null>(null)
+  const [gateMode,          setGateMode]           = useState<GateAuthMode>('pause')
+  const [gateRemember,      setGateRemember]       = useState(false)
   const [draggingNodeId,       setDraggingNodeId]       = useState<string | null>(null)
   const [pendingOutputModalId,  setPendingOutputModalId]  = useState<string | null>(null)
   const [pendingOutputModalKey, setPendingOutputModalKey] = useState<string | null>(null)
@@ -3514,15 +3581,34 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   // - auto_approved + is_stale (output desactualizado)
   // Excluye: approved (sellado) y auto_approved sin stale (ya tiene draft)
   const runnableCount = useMemo(
-    () => (canvasData?.nodes ?? []).filter(cn => {
-      if (cn.node_type !== 'forge_node') return false
-      const s = cn.session?.status
-      if (s === 'approved') return false
-      if (s === 'auto_approved' && !cn.is_stale) return false
-      return true
-    }).length,
+    () => (canvasData?.nodes ?? []).filter(isNodeRunnable).length,
     [canvasData],
   )
+
+  // Menú de runs por alcance — pipeline completo + fase (blueprint activo) + cada lane.
+  // count = nodos pendientes dentro de ese scope (para mostrar y deshabilitar items vacíos).
+  const runMenu = useMemo<RunMenuItem[]>(() => {
+    if (!canvasData) return []
+    const items: RunMenuItem[] = [
+      { scope: { type: 'pipeline' }, label: 'Run all', count: canvasData.nodes.filter(isNodeRunnable).length },
+    ]
+    const bp = canvasData.active_blueprint
+    if (bp) {
+      items.push({
+        scope: { type: 'blueprint', blueprint_id: bp.id },
+        label: `Run phase · ${bp.name}`,
+        count: canvasData.nodes.filter(n => n.blueprint_id === bp.id && isNodeRunnable(n)).length,
+      })
+    }
+    for (const lane of canvasData.lanes ?? []) {
+      items.push({
+        scope: { type: 'lane', lane_id: lane.id },
+        label: `Run lane ${lane.lane_key} · ${lane.label}`,
+        count: canvasData.nodes.filter(n => n.lane_id === lane.id && isNodeRunnable(n)).length,
+      })
+    }
+    return items
+  }, [canvasData])
 
 
   // v1.3.0: todos los nodos son standalone — ninguno bloquea a otro
@@ -3530,34 +3616,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const lockedNodeIds = useMemo(() => new Set<string>(), [])
 
   // Gate listo: todos los nodos del blueprint activo están aprobados y no hay decisión previa
-  const gateReady = useMemo(() => {
-    const bp = canvasData?.active_blueprint
-    if (!bp?.gate)         { console.log('[gate] ✗ no gate en blueprint'); return false }
-    if (bp.gate_decision)  { console.log('[gate] ✗ gate_decision ya existe:', bp.gate_decision); return false }
-    const bpNodes = canvasData!.nodes.filter(n => n.blueprint_id === bp.id && n.node_type === 'forge_node')
-    if (bpNodes.length === 0) { console.log('[gate] ✗ sin bpNodes'); return false }
-    const isApproved = (n: CanvasNode) => {
-      const gs = n.session?.status
-      if (gs === 'approved' || gs === 'auto_approved') return true
-      // También válido si alguna per-output session está aprobada (chat en Focus mode)
-      return Object.values(n.output_sessions ?? {}).some(
-        (s: unknown) => (s as { status: string }).status === 'approved' || (s as { status: string }).status === 'auto_approved'
-      )
-    }
-    const hasSession = (n: CanvasNode) =>
-      !!n.session || Object.keys(n.output_sessions ?? {}).length > 0
-    // Solo bloquean: el nodo gate (siempre obligatorio) + nodos que se ejecutaron pero no se aprobaron.
-    // Nodos sin sesión = el usuario los saltó voluntariamente.
-    const notReady = bpNodes.filter(n =>
-      !isApproved(n) && (n.node?.role === 'gate' || hasSession(n))
-    )
-    if (notReady.length > 0) {
-      console.log('[gate] ✗ nodos sin aprobar:', notReady.map(n => ({ key: n.node?.node_key, role: n.node?.role, session: n.session?.status ?? 'null' })))
-      return false
-    }
-    console.log('[gate] ✓ gate listo')
-    return true
-  }, [canvasData])
+  const gateReady = useMemo(() => isGateReady(canvasData), [canvasData])
 
   const [gateLoading,   setGateLoading]   = useState(false)
   const [gateDismissed, setGateDismissed] = useState(false)
@@ -3576,16 +3635,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
     setGateLoading(true)
     try {
-      // Persistir posiciones actuales antes del fan-out para que el backend ubique el gate correctamente
-      await persistLayout()
-      const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
-      await canvasFetch(`/api/projects/${project.id}/canvas/gate`, {
-        method: 'POST',
-        body: JSON.stringify({ decision, blueprint_id: canvasData.active_blueprint.id, member_id: memberId }),
-      })
-      // Forzar re-aplicar canvas_layout del DB: el fan-out guarda posiciones nuevas que savedLayout no tiene
-      dbLayoutAppliedRef.current = false
-      autoNormalizeRef.current   = true
+      await acceptGateCore(canvasData.active_blueprint.id)
       await loadCanvas(true)
     } catch (e) {
       console.error('[gate] decision failed', e)
@@ -3993,6 +4043,13 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const persistLayoutRef = useRef(persistLayout)
   persistLayoutRef.current = persistLayout
 
+  // Ref a runScope para que el botón ▶ del LaneGroupNode no quede con un closure stale
+  const runScopeRef = useRef(runScope)
+  runScopeRef.current = runScope
+
+  // Lock real del Run (evita la trampa de estado async de runPhase en el loop de pipeline #5)
+  const runLockRef = useRef(false)
+
   // Ref para arrastrar lane groups: captura posiciones relativas de nodos miembro al inicio
   const laneGroupDragRef = useRef<{
     laneGroupId:       string
@@ -4050,7 +4107,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             draggable: true, selectable: false, zIndex: 0,
             dragHandle: '.lane-drag-handle',
             position: colPos, style: { width: colW, height: COLLAPSED_H, zIndex: 0 },
-            data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current, collapsed: true, onToggle: () => toggleLane(lane.id), onDismiss: () => dismissLane(lane.id) } as LaneGroupData,
+            data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current, collapsed: true, onToggle: () => toggleLane(lane.id), onDismiss: () => dismissLane(lane.id), onRun: () => runScopeRef.current({ type: 'lane', lane_id: lane.id }) } as LaneGroupData,
           }
         }
 
@@ -4071,7 +4128,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           draggable: true, selectable: false, zIndex: 0,
           dragHandle: '.lane-drag-handle',
           position: newPos, style: { width: newW, height: newH, zIndex: 0 },
-          data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current, collapsed: false, onToggle: () => toggleLane(lane.id), onDismiss: () => dismissLane(lane.id) } as LaneGroupData,
+          data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current, collapsed: false, onToggle: () => toggleLane(lane.id), onDismiss: () => dismissLane(lane.id), onRun: () => runScopeRef.current({ type: 'lane', lane_id: lane.id }) } as LaneGroupData,
         }
       }).filter(Boolean) as typeof prev
 
@@ -4407,38 +4464,144 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     localStorage.setItem('forge_last_project', JSON.stringify({ id: project.id, name }))
   }
 
+  // Corre el pipeline completo — alias del scope 'pipeline'
   async function handleRunAll() {
+    return runScope({ type: 'pipeline' })
+  }
+
+  // ¿Un nodo pertenece al alcance del run? pipeline = todos; lane/blueprint = solo los suyos
+  function nodeInScope(n: CanvasNode, scope: RunScope): boolean {
+    if (scope.type === 'pipeline')  return true
+    if (scope.type === 'lane')      return n.lane_id === scope.lane_id
+    return n.blueprint_id === scope.blueprint_id
+  }
+
+  // Entrada del Run por alcance. El pipeline cruza gates → pide autorización (modal #4)
+  // salvo que el usuario ya la haya recordado en run_config. lane/blueprint corren directo.
+  async function runScope(scope: RunScope) {
     if (!canvasData) return
+    if (runLockRef.current) return  // ya hay un run en curso — evitar solapes
+
+    if (scope.type === 'pipeline') {
+      let mode: GateAuthMode = 'pause'
+      try {
+        const plan = await runPlan(project.id, scope)
+        if (plan.requires_authorization) {
+          if (plan.remembered) {
+            mode = plan.remembered.mode  // decisión recordada — sin modal
+          } else {
+            setGateMode('pause')
+            setGateRemember(false)
+            setRunPlanModal({ plan, scope })
+            return  // espera la decisión del usuario en el modal
+          }
+        }
+      } catch (e) {
+        // El plan es best-effort — si falla, continuar con el run igual (modo pause)
+        console.error('[run-plan] failed:', e)
+      }
+      return runPipeline(mode)
+    }
+
+    // lane / blueprint — un solo alcance, no cruzan gates
+    runLockRef.current = true
+    try { await executeRunScope(scope) }
+    finally { runLockRef.current = false }
+  }
+
+  // Confirmación del modal de autorización: persiste la decisión (si remember) y arranca el loop.
+  async function confirmRunPlan() {
+    const ctx = runPlanModal
+    if (!ctx) return
+    const mode = gateMode
+    if (gateRemember) {
+      try { await saveRunConfig(project.id, { mode, remember: true }) } catch { /* no bloquear el run */ }
+    }
+    setRunPlanModal(null)
+    await runPipeline(mode)
+  }
+
+  // Loop full-pipeline gate-crossing (#5): corre fase → evalúa gate → [auto-accept|pausa] →
+  // recarga (fan-out incluido) → recomputa tiers. Consume el modo de autorización (#4).
+  async function runPipeline(mode: GateAuthMode) {
+    if (runLockRef.current) return
+    runLockRef.current = true
+    try {
+      let data: CanvasData | null = canvasData
+      const MAX_PHASES = 8  // cota de seguridad contra loops infinitos
+      for (let i = 0; i < MAX_PHASES; i++) {
+        // 1. Correr los runnable del pipeline (excluye sellados) con el estado más fresco
+        data = await executeRunScope({ type: 'pipeline' }, data)
+        if (!data) return  // error de validación/ejecución — executeRunScope ya lo reportó
+
+        // 2. ¿El gate de la fase viva quedó listo?
+        if (!isGateReady(data)) break
+
+        // 3. Modo pause → el gate UI aparece solo (gateOpen); el usuario decide manualmente
+        if (mode === 'pause') break
+
+        // 4. Modo auto_accept → cruzar el gate (sella + carga siguiente + fan-out)
+        const bpId = data.active_blueprint?.id
+        if (!bpId) break
+        const next = await acceptGateCore(bpId)
+        if (!next?.next_blueprint) break  // última fase o sin siguiente blueprint
+
+        // 5. Recargar canvas (nueva fase + lanes) y recomputar en la próxima vuelta
+        data = await loadCanvas(true)
+        if (!data) break
+      }
+    } finally {
+      runLockRef.current = false
+    }
+  }
+
+  // Núcleo del gate ACCEPT — persiste layout, postea la decisión y devuelve la respuesta.
+  // Compartido por el botón manual (handleGateDecision) y el loop de pipeline (#5).
+  async function acceptGateCore(blueprintId: string): Promise<{ next_blueprint: { id: string; name: string; phase: string } | null } | null> {
+    // Persistir posiciones antes del fan-out para que el backend ubique las lanes correctamente
+    await persistLayout()
+    const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+    const resp = await canvasFetch<{ success: boolean; decision: string; next_blueprint: { id: string; name: string; phase: string } | null }>(
+      `/api/projects/${project.id}/canvas/gate`,
+      { method: 'POST', body: JSON.stringify({ decision: 'ACCEPT', blueprint_id: blueprintId, member_id: memberId }) },
+    )
+    // Forzar re-aplicar canvas_layout del DB: el fan-out guarda posiciones nuevas
+    dbLayoutAppliedRef.current = false
+    autoNormalizeRef.current   = true
+    return resp
+  }
+
+  // Motor de ejecución automática parametrizado por alcance (pipeline / lane / blueprint).
+  // lane y blueprint NO cruzan gates ni re-ejecutan upstream fuera del scope (locked).
+  // Acepta datos frescos (dataOverride) para el loop de pipeline (#5) y devuelve el estado
+  // recargado tras correr (o null si hubo error/validación fallida).
+  async function executeRunScope(scope: RunScope, dataOverride?: CanvasData | null): Promise<CanvasData | null> {
+    const data = dataOverride ?? canvasData
+    if (!data) return null
     const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') ?? undefined : undefined
 
-    // Validar inputs
-    const validation = await runValidate(project.id)
+    // Validar inputs — scope-aware
+    const validation = await runValidate(project.id, scope)
     if (!validation.valid) {
       setRunErrors(validation.errors)
       setRunPhase('error')
-      return
+      return null
     }
 
-    const nodes = canvasData.nodes
-    const edges = canvasData.edges as DbEdge[]
+    const nodes = data.nodes
+    const edges = data.edges as DbEdge[]
 
-    // Determinar qué nodos correr — misma lógica que runnableCount
+    // Determinar qué nodos correr — pendientes dentro del scope
     const runnable = new Set(
       nodes
-        .filter(n => n.node_type === 'forge_node')
-        .filter(n => {
-          const s = n.session?.status
-          if (s === 'approved') return false
-          if (s === 'auto_approved' && !n.is_stale) return false
-          return true
-        })
+        .filter(n => nodeInScope(n, scope) && isNodeRunnable(n))
         .map(n => n.project_node_id)
     )
 
     const tiers = topoTiers(nodes, edges).map(tier => tier.filter(id => runnable.has(id))).filter(t => t.length > 0)
     const total = tiers.flat().length
 
-    if (total === 0) return
+    if (total === 0) return data  // nada que correr — devuelve estado actual para evaluar el gate
 
     setRunPhase('running')
     setRunProgress({ done: 0, total })
@@ -4487,7 +4650,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         const errorId = failed[0].id
         const reason  = (failed[0].r as PromiseRejectedResult).reason?.message ?? 'Unknown error'
         setRunErrorNodeId(errorId)
-        const failedNode = canvasData?.nodes.find(n => n.project_node_id === errorId)
+        const failedNode = data.nodes.find(n => n.project_node_id === errorId)
         setRunErrors([{
           projectNodeId: errorId,
           nodeTitle:     failedNode?.node?.title ?? errorId,
@@ -4497,7 +4660,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         }])
         setRunPhase('error')
         await loadCanvas(true)
-        return
+        return null
       }
 
       done += tier.length
@@ -4506,7 +4669,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
     setRunPhase('idle')
     setRunProgress(null)
-    await loadCanvas(true)
+    return await loadCanvas(true)
   }
 
   // Abre el chat cargando la sesión persistida del nodo (o de un output específico)
@@ -4563,6 +4726,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       onRefresh={onRefresh}
       onNameChange={handleNameChange}
       onRunPipeline={runPhase === 'idle' ? handleRunAll : undefined}
+      onRunScope={runPhase === 'idle' ? runScope : undefined}
+      runMenu={runMenu}
       onExport={() => setShowExportModal(true)}
       runProgress={runProgress ?? undefined}
       approvedCount={approvedNodeIds.size}
@@ -4876,6 +5041,113 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           </button>
         </div>
       )}
+
+      {/* ── Modal de autorización de gates (Run de pipeline #4) ── */}
+      {runPlanModal && (() => {
+        const { plan } = runPlanModal
+        const est = plan.estimated
+        return (
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 9500, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            onClick={() => setRunPlanModal(null)}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{ width: 440, maxWidth: '90vw', maxHeight: '82vh', overflowY: 'auto', background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: '0 16px 48px rgba(0,0,0,.4)', padding: 20 }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-1)', flex: 1 }}>
+                  Run pipeline — authorize gates
+                </span>
+                <button
+                  onClick={() => setRunPlanModal(null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 14, padding: 0 }}
+                >✕</button>
+              </div>
+              <p style={{ fontFamily: 'var(--font-sans)', fontSize: 11, color: 'var(--text-3)', margin: '0 0 14px' }}>
+                This run crosses {plan.gates.length} gate{plan.gates.length === 1 ? '' : 's'}. Choose how each gate is handled.
+              </p>
+
+              {/* Fases del plan */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+                {plan.phases.map((ph, i) => (
+                  <div key={ph.blueprint_id + i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 5, background: 'var(--bg-2)', border: '1px solid var(--line)' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-1)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {ph.is_current ? '▶ ' : ''}{ph.name}
+                    </span>
+                    {ph.sealed
+                      ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)' }}>sealed</span>
+                      : <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-3)' }}>{ph.node_count} node{ph.node_count === 1 ? '' : 's'}</span>}
+                  </div>
+                ))}
+              </div>
+
+              {/* Gates con fan-out detectado */}
+              {plan.gates.some(g => g.will_fan_out) && (
+                <div style={{ marginBottom: 12 }}>
+                  {plan.gates.filter(g => g.will_fan_out).map((g, i) => (
+                    <div key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--accent, #6366F1)', padding: '2px 0' }}>
+                      ⤳ {g.name}: fans out into {g.item_count} {g.item_type || 'item'}{g.item_count === 1 ? '' : 's'}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Estimación de costo */}
+              {est && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, background: 'var(--bg-2)', border: '1px solid var(--line)', marginBottom: 14 }}>
+                  <span style={{ fontFamily: 'var(--font-sans)', fontSize: 10, color: 'var(--text-3)', flex: 1 }}>
+                    ~{est.node_runs} node run{est.node_runs === 1 ? '' : 's'} · estimated cost
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--text-1)' }}>
+                    ${est.cost_usd.toFixed(2)}
+                  </span>
+                </div>
+              )}
+
+              {/* Modo de autorización */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                {([
+                  { value: 'pause' as GateAuthMode,       label: 'Pause at each gate',  desc: 'Stop for manual review before crossing' },
+                  { value: 'auto_accept' as GateAuthMode, label: 'Auto-accept gates',    desc: 'Cross gates automatically and keep running' },
+                ]).map(opt => (
+                  <label
+                    key={opt.value}
+                    style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', borderRadius: 6, cursor: 'pointer',
+                      background: gateMode === opt.value ? 'color-mix(in srgb, var(--accent, #6366F1) 12%, var(--bg-2))' : 'var(--bg-2)',
+                      border: `1px solid ${gateMode === opt.value ? 'var(--accent, #6366F1)' : 'var(--line)'}` }}
+                  >
+                    <input type="radio" name="gate-mode" checked={gateMode === opt.value} onChange={() => setGateMode(opt.value)} style={{ marginTop: 2 }} />
+                    <div>
+                      <div style={{ fontFamily: 'var(--font-sans)', fontSize: 11, fontWeight: 600, color: 'var(--text-1)' }}>{opt.label}</div>
+                      <div style={{ fontFamily: 'var(--font-sans)', fontSize: 10, color: 'var(--text-3)' }}>{opt.desc}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              {/* Remember */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, cursor: 'pointer' }}>
+                <input type="checkbox" checked={gateRemember} onChange={e => setGateRemember(e.target.checked)} />
+                <span style={{ fontFamily: 'var(--font-sans)', fontSize: 10, color: 'var(--text-3)' }}>Remember this choice for this project</span>
+              </label>
+
+              {/* Acciones */}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => setRunPlanModal(null)}
+                  style={{ fontFamily: 'var(--font-sans)', fontSize: 11, padding: '7px 14px', borderRadius: 6, border: '1px solid var(--line)', background: 'none', color: 'var(--text-2)', cursor: 'pointer' }}
+                >Cancel</button>
+                <button
+                  onClick={confirmRunPlan}
+                  className="tb-btn primary"
+                  style={{ fontSize: 11, padding: '7px 16px' }}
+                >Run pipeline ▶</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Banner de error Run All ── */}
       {runPhase === 'error' && runErrors.length > 0 && (

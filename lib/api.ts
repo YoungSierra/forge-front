@@ -1,4 +1,4 @@
-import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser, StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig, PromptConfig, RepoConfig, ActionInstance, ActionType } from './types'
+import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser, StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig, PromptConfig, RepoConfig, ActionInstance, ActionType, ChangelogEntry, ChangelogType } from './types'
 import type { InputContext } from './nodeExecutionContext'
 
 export type { ScriptFile, CodeGenerationResult }
@@ -833,6 +833,7 @@ export async function saveRefinedImageReference(project_id: string, image_url: s
 }
 
 import type { CharacterRenderStatus, AssetVersion, ModelingCharacterStatus } from './types'
+import type { RunScope } from './types'
 
 export async function getCharatersStatus(project_id: string): Promise<CharacterRenderStatus[]> {
   const data = await request<{ success: boolean; characters: CharacterRenderStatus[] }>(`/api/projects/${project_id}/charaters/status`)
@@ -1454,7 +1455,7 @@ export async function getNodeSession(
 }
 
 export interface RunValidateError {
-  type?:         'unreviewed_session' | 'missing_input' | 'empty_source'
+  type?:         'unreviewed_session' | 'missing_input' | 'empty_source' | 'gate_sealed'
   projectNodeId: string
   nodeId?:       string
   nodeKey:       string
@@ -1464,19 +1465,76 @@ export interface RunValidateError {
 
 export async function runValidate(
   projectId: string,
+  scope:     RunScope = { type: 'pipeline' },
 ): Promise<{ valid: boolean; errors: RunValidateError[] }> {
   return request<{ success: boolean; valid: boolean; errors: RunValidateError[] }>(
     `/api/projects/${projectId}/canvas/run-validate`,
-    { method: 'POST' },
+    { method: 'POST', body: JSON.stringify(scope) },
   )
 }
 
+// ── Run plan (#4): gates a cruzar + fan-out + costo estimado para un Run de pipeline ──
+export type GateAuthMode = 'pause' | 'auto_accept'
+
+export interface RunPlanPhase {
+  blueprint_id: string
+  name:         string
+  phase:        string
+  node_count:   number
+  is_current:   boolean
+  sealed:       boolean
+}
+
+export interface RunPlanGate {
+  blueprint_id: string
+  name:         string
+  will_fan_out: boolean
+  configured:   boolean
+  item_count:   number | null
+  item_type:    string | null
+}
+
+export interface RunPlan {
+  requires_authorization: boolean
+  phases:                 RunPlanPhase[]
+  gates:                  RunPlanGate[]
+  estimated: {
+    node_runs:         number
+    avg_cost_per_node: number
+    cost_usd:          number
+    is_estimated:      boolean
+  } | null
+  remembered: { mode: GateAuthMode } | null
+}
+
+export async function runPlan(
+  projectId: string,
+  scope:     RunScope = { type: 'pipeline' },
+): Promise<RunPlan> {
+  return request<{ success: boolean } & RunPlan>(
+    `/api/projects/${projectId}/canvas/run-plan`,
+    { method: 'POST', body: JSON.stringify(scope) },
+  )
+}
+
+export async function saveRunConfig(
+  projectId:         string,
+  gate_authorization: { mode: GateAuthMode; remember: boolean },
+): Promise<void> {
+  await request(
+    `/api/projects/${projectId}/canvas/run-config`,
+    { method: 'PATCH', body: JSON.stringify({ gate_authorization }) },
+  )
+}
+
+// Run per-output (bug A): corre solo los outputs pendientes del nodo.
+// `ran` = output_keys ejecutados; `skipped` = true si el nodo ya estaba satisfecho.
 export async function autoRunNode(
   projectId:     string,
   projectNodeId: string,
   memberId?:     string,
-): Promise<{ session_id: string; reply: string; doc_url?: string; doc_format?: string }> {
-  return request<{ success: boolean; session_id: string; reply: string; doc_url?: string; doc_format?: string }>(
+): Promise<{ ran?: string[]; skipped?: boolean; session_id?: string; reply?: string; doc_url?: string; doc_format?: string }> {
+  return request<{ success: boolean; ran?: string[]; skipped?: boolean; session_id?: string; reply?: string; doc_url?: string; doc_format?: string }>(
     `/api/projects/${projectId}/canvas/nodes/${projectNodeId}/auto-run`,
     { method: 'POST', body: JSON.stringify({ member_id: memberId }) },
   )
@@ -1570,4 +1628,45 @@ export async function runActionInstance(
   instanceId: string,
 ): Promise<{ instance_id: string; artifact_url: string; action_type: ActionType; ext: string }> {
   return request(`/api/projects/${projectId}/action-instances/${instanceId}/run`, { method: 'POST' })
+}
+
+// ─── Changelog / What's New ───────────────────────────────────────────────────
+
+// Público: solo entradas publicadas (para el panel "What's New"), paginadas
+export async function getChangelog(opts?: { limit?: number; offset?: number }): Promise<{ entries: ChangelogEntry[]; hasMore: boolean }> {
+  const limit  = opts?.limit  ?? 25
+  const offset = opts?.offset ?? 0
+  const data = await request<{ success: boolean; entries: ChangelogEntry[]; has_more: boolean }>(
+    `/api/changelog?limit=${limit}&offset=${offset}`,
+  )
+  return { entries: data.entries, hasMore: data.has_more }
+}
+
+// Admin: todas las entradas (borradores + publicadas)
+export async function getAdminChangelog(): Promise<ChangelogEntry[]> {
+  const data = await request<{ success: boolean; entries: ChangelogEntry[] }>('/api/admin/changelog')
+  return data.entries
+}
+
+export async function createChangelogEntry(payload: {
+  version: string; type: ChangelogType; title: string; items: string[]; source?: 'seed' | 'manual'; published?: boolean
+}): Promise<ChangelogEntry> {
+  const data = await request<{ success: boolean; entry: ChangelogEntry }>('/api/admin/changelog', {
+    method: 'POST', body: JSON.stringify(payload),
+  })
+  return data.entry
+}
+
+export async function updateChangelogEntry(
+  id: string,
+  patch: Partial<{ version: string; type: ChangelogType; title: string; items: string[]; published: boolean }>,
+): Promise<ChangelogEntry> {
+  const data = await request<{ success: boolean; entry: ChangelogEntry }>(`/api/admin/changelog/${id}`, {
+    method: 'PATCH', body: JSON.stringify(patch),
+  })
+  return data.entry
+}
+
+export async function deleteChangelogEntry(id: string): Promise<void> {
+  await request<{ success: boolean }>(`/api/admin/changelog/${id}`, { method: 'DELETE' })
 }

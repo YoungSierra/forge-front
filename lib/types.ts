@@ -6,6 +6,13 @@ export type ForgeLane = {
   bound_item_ref: Record<string, unknown> // ítem completo del type_registry (JSONB)
 }
 
+// Alcance de un Run automático: pipeline completo, un lane o un blueprint.
+// lane/blueprint NO cruzan gates ni re-ejecutan upstream fuera del scope.
+export type RunScope =
+  | { type: 'pipeline' }
+  | { type: 'lane';      lane_id: string }
+  | { type: 'blueprint'; blueprint_id: string }
+
 export type WizardStep = 1 | 2 | 3 | 4 | 5 | 6
 
 export type StepStatus =
@@ -299,6 +306,21 @@ export type Feedback = {
   members?: Member
   resolver?: { id: string; display_name: string }
   projects?: { id: string; name: string }
+}
+
+// Changelog / What's New
+export type ChangelogType = 'bug_fix' | 'new_feature' | 'improvement'
+
+export type ChangelogEntry = {
+  id:           string
+  version:      string
+  type:         ChangelogType
+  title:        string
+  items:        string[]
+  source?:      'seed' | 'manual'
+  published?:   boolean
+  released_at?: string | null
+  created_at?:  string
 }
 
 export type InjectPoint = { node: string; field: string }

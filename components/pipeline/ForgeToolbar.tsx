@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import type { Node } from '@xyflow/react'
-import type { Project, ProjectMember } from '@/lib/types'
+import type { Project, ProjectMember, RunScope } from '@/lib/types'
 import type { ForgeNodeData } from './ForgeNode'
 import UserMenu from '@/components/layout/UserMenu'
 import ReviewBadge from '@/components/layout/ReviewBadge'
@@ -15,12 +15,21 @@ import { useTheme } from '@/lib/theme'
 
 type PipelinePhase = 'idle' | 'running' | 'error'
 
+// Ítem del menú de runs por alcance (pipeline / fase / lane)
+export interface RunMenuItem {
+  scope: RunScope
+  label: string
+  count: number
+}
+
 interface Props {
   project: Project
   phase: PipelinePhase
   onRefresh: () => void
   onPipelineApply?: (activeNodes: string[]) => void
   onRunPipeline?: () => void
+  onRunScope?: (scope: RunScope) => void
+  runMenu?: RunMenuItem[]
   onExport?: () => void
   onNameChange?: (name: string) => Promise<void>
   runProgress?: { done: number; total: number }
@@ -270,11 +279,23 @@ function CostChip({ projectId }: { projectId: string }) {
   )
 }
 
-export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, onExport, onNameChange, runProgress, nodes = [], approvedCount: approvedCountProp, totalCount: totalCountProp, runnableCount }: Props) {
+export default function ForgeToolbar({ project, phase, onRefresh, onPipelineApply, onRunPipeline, onRunScope, runMenu, onExport, onNameChange, runProgress, nodes = [], approvedCount: approvedCountProp, totalCount: totalCountProp, runnableCount }: Props) {
   const { user, member } = useAuth()
   const { theme, toggle: toggleTheme } = useTheme()
   const [currentMemberId,       setCurrentMemberId]       = useState<string | null>(null)
   const [showPipelineModal,     setShowPipelineModal]     = useState(false)
+  const [showRunMenu,           setShowRunMenu]           = useState(false)
+  const runMenuRef = useRef<HTMLDivElement>(null)
+
+  /* Cerrar el dropdown de run al hacer click fuera */
+  useEffect(() => {
+    if (!showRunMenu) return
+    const onDocClick = (e: MouseEvent) => {
+      if (runMenuRef.current && !runMenuRef.current.contains(e.target as HTMLElement)) setShowRunMenu(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [showRunMenu])
 
   /* Carga el memberId del usuario actual desde localStorage (ya guardado por AuthProvider) */
   useEffect(() => {
@@ -337,7 +358,50 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
         </button>
       )}
 
-      {/* Botón Run All — oculto temporalmente */}
+      {/* Run por alcance — pipeline / fase / lane */}
+      {hasProject && runMenu && onRunScope && runMenu.length > 0 && (
+        <div ref={runMenuRef} style={{ position: 'relative' }}>
+          <button
+            className="tb-btn primary"
+            onClick={() => setShowRunMenu(v => !v)}
+            disabled={phase === 'running'}
+            title="Run nodes"
+          >
+            ▶ Run{runnableCount ? ` (${runnableCount})` : ''} ▾
+          </button>
+          {showRunMenu && (
+            <div
+              style={{
+                position: 'absolute', top: '100%', left: 0, marginTop: 4,
+                background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 6,
+                boxShadow: '0 4px 16px rgba(0,0,0,.28)', zIndex: 50, minWidth: 210, padding: 4,
+              }}
+            >
+              {runMenu.map((item, i) => {
+                const disabled = item.count === 0
+                return (
+                  <button
+                    key={i}
+                    onClick={() => { if (!disabled) { setShowRunMenu(false); onRunScope(item.scope) } }}
+                    disabled={disabled}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                      width: '100%', background: 'none', border: 'none', borderRadius: 4, padding: '6px 8px',
+                      cursor: disabled ? 'default' : 'pointer', color: disabled ? 'var(--text-3)' : 'var(--text-1)',
+                      fontFamily: 'var(--font-sans)', fontSize: 11, textAlign: 'left',
+                    }}
+                    onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = 'var(--bg-3)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+                  >
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>{item.count}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="tb-spacer" />
 
