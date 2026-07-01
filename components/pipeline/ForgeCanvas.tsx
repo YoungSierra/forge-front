@@ -165,6 +165,7 @@ interface CatalogNode {
   phase: string
   purpose: string
   executor: { type: string } | null
+  metadata?: { preview?: boolean } | null
 }
 
 interface ForgeNodeCardData extends Record<string, unknown> {
@@ -217,10 +218,11 @@ const EXECUTOR_LABEL: Record<string, string> = {
 }
 
 const PHASE_COLOR: Record<string, string> = {
-  ideation:   '#60A5FA',
-  concept:    '#A78BFA',
-  preprod:    '#34D399',
-  production: '#FBBF24',
+  ideation:          '#60A5FA',
+  concept:           '#A78BFA',
+  'pre-production':  '#34D399',
+  production:        '#FBBF24',
+  'live-ops':        '#F87171',
 }
 
 const PULSE_KF      = `@keyframes canvas-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`
@@ -692,14 +694,30 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded
   const [query,     setQuery]     = useState('')
   const [adding,    setAdding]    = useState<string | null>(null)
   const [tab,       setTab]       = useState<'nodes' | 'library'>('nodes')
+  const [showPreview, setShowPreview] = useState(false)   // nodos en desarrollo (archived+preview) — atajo oculto
   const setCollapsed = onCollapsedChange
 
+  // Ctrl+Alt+P: revela/oculta los nodos preview. Atajo no descubrible (todos los users son admin);
+  // efímero — se resetea al recargar. No es seguridad, es no-descubribilidad.
   useEffect(() => {
-    canvasFetch<{ success: boolean; nodes: CatalogNode[] }>(`/api/projects/${projectId}/canvas/nodes-catalog`)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && (e.code === 'KeyP' || e.key.toLowerCase() === 'p')) {
+        e.preventDefault()
+        setShowPreview(v => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    setLoading(true)
+    const url = `/api/projects/${projectId}/canvas/nodes-catalog${showPreview ? '?include_preview=1' : ''}`
+    canvasFetch<{ success: boolean; nodes: CatalogNode[] }>(url)
       .then(res => setCatalog(res.nodes ?? []))
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [projectId])
+  }, [projectId, showPreview])
 
   async function addNode(nodeId: string) {
     setAdding(nodeId)
@@ -942,8 +960,13 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded
                       lineHeight: 1,
                     }}>✓</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
                         {n.node_key}
+                        {n.metadata?.preview && (
+                          <span style={{ fontSize: 7, fontWeight: 700, color: 'var(--action)', border: '1px solid var(--action)', borderRadius: 3, padding: '0 3px', letterSpacing: '0.05em', flexShrink: 0 }}>
+                            PREVIEW
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: 10, color: 'var(--text-1)', fontWeight: 500, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {n.title}
@@ -1906,22 +1929,22 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               })()}
 
               {/* Footer: phase + outputs picker + status / lock */}
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '5px 10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px' }}>
+                <span style={{
+                  fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                  color: phaseColor, textTransform: 'uppercase', letterSpacing: '0.08em',
+                  opacity: locked ? 0.4 : 1, flexShrink: 0,
+                }}>
+                  {node.phase}
+                </span>
                 {isGate && (
                   <span style={{
-                    position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+                    flex: 1, textAlign: 'center', whiteSpace: 'nowrap',
                     fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700,
                     color: '#F59E0B', letterSpacing: '0.08em', pointerEvents: 'none',
                   }}>◆ GATE</span>
                 )}
-                <span style={{
-                  fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                  color: phaseColor, textTransform: 'uppercase', letterSpacing: '0.08em',
-                  opacity: locked ? 0.4 : 1,
-                }}>
-                  {node.phase}
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: isGate ? undefined : 'auto', flexShrink: 0 }}>
                   {(node.outputs ?? []).length > 0 && (
                     <button
                       onClick={e => { e.stopPropagation(); setOutputOpen(true) }}
