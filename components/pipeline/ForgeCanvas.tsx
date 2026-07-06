@@ -695,7 +695,14 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded
   const [adding,    setAdding]    = useState<string | null>(null)
   const [tab,       setTab]       = useState<'nodes' | 'library'>('nodes')
   const [showPreview, setShowPreview] = useState(false)   // nodos en desarrollo (archived+preview) — atajo oculto
+  const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set())  // fases colapsadas en el sidebar
   const setCollapsed = onCollapsedChange
+
+  const togglePhase = (phase: string) => setCollapsedPhases(prev => {
+    const next = new Set(prev)
+    if (next.has(phase)) next.delete(phase); else next.add(phase)
+    return next
+  })
 
   // Ctrl+Alt+P: revela/oculta los nodos preview. Atajo no descubrible (todos los users son admin);
   // efímero — se resetea al recargar. No es seguridad, es no-descubribilidad.
@@ -920,15 +927,21 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded
         ) : (
           sortedPhases.map(([phase, nodes]) => (
             <div key={phase}>
-              <div style={{
-                padding: '9px 12px 4px',
-                fontSize: 8, fontFamily: 'var(--font-mono)', color: PHASE_COLOR[phase] ?? 'var(--text-4)',
-                textTransform: 'uppercase', letterSpacing: '0.1em',
-                borderBottom: '1px solid var(--line-2)',
-              }}>
-                {phase}
+              <div
+                onClick={() => togglePhase(phase)}
+                style={{
+                  padding: '9px 12px', display: 'flex', alignItems: 'center', gap: 5,
+                  fontSize: 8, fontFamily: 'var(--font-mono)', color: PHASE_COLOR[phase] ?? 'var(--text-4)',
+                  textTransform: 'uppercase', letterSpacing: '0.1em',
+                  borderBottom: '1px solid var(--line-2)',
+                  cursor: 'pointer', userSelect: 'none',
+                }}
+              >
+                <span style={{ fontSize: 7, width: 6, flexShrink: 0, opacity: 0.85 }}>{collapsedPhases.has(phase) ? '▸' : '▾'}</span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{phase}</span>
+                <span style={{ opacity: 0.55, flexShrink: 0 }}>{nodes.length}</span>
               </div>
-              {nodes.map(n => {
+              {!collapsedPhases.has(phase) && nodes.map(n => {
                 const inCanvas  = canvasNodeIds.has(n.id)
                 const approved  = approvedNodeIds.has(n.id)
                 const isAdding  = adding === n.id
