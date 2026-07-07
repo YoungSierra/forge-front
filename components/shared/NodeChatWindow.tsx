@@ -13,15 +13,40 @@ import { Paperclip } from 'lucide-react'
 
 // ─── Utilidad — parsear items de un output para image gen ────────────────────
 
+// Extrae un array JSON del contenido (con o sin fences ```json) y devuelve un ítem
+// legible por objeto (prioriza title/one_liner). null si no hay array parseable.
+function parseJsonArrayItems(content: string): string[] | null {
+  const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const text  = fence ? fence[1] : content
+  const start = text.indexOf('[')
+  const end   = text.lastIndexOf(']')
+  if (start === -1 || end <= start) return null
+  let arr: unknown
+  try { arr = JSON.parse(text.slice(start, end + 1)) } catch { return null }
+  if (!Array.isArray(arr) || arr.length === 0) return null
+
+  const PREF = ['title', 'name', 'one_liner', 'oneLiner', 'summary', 'description', 'label']
+  const items = arr.map(el => {
+    if (el && typeof el === 'object') {
+      const o = el as Record<string, unknown>
+      const picked = PREF.map(k => o[k]).filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      if (picked.length) return picked.join(' — ')
+      const vals = Object.values(o).filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      return vals.length ? vals.join(' — ') : JSON.stringify(el)
+    }
+    return String(el)
+  }).filter(s => s.trim().length > 0)
+  return items.length ? items : null
+}
+
 export function parseOutputItems(content: string, format: string): string[] {
   // Outputs de imagen: el contenido completo es el prompt — una sola imagen por output
   if (format === 'png' || format === 'image') return [content.trim().slice(0, 700)]
 
-  if (format === 'json') {
-    try {
-      const parsed = JSON.parse(content)
-      if (Array.isArray(parsed)) return parsed.map(String).filter(s => s.trim().length > 0)
-    } catch { /* continúa */ }
+  // Estructurados (json / list<...>): un ítem por objeto del array JSON, no por línea
+  if (format === 'json' || /^list</.test(format ?? '')) {
+    const items = parseJsonArrayItems(content)
+    if (items) return items
   }
   // Bullet list: "- item", "* item", "• item"
   const bulletRx   = /^[ \t]*[-*•][ \t]+(.+)$/gm
