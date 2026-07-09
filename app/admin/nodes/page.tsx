@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { BACKEND_URL, getAdminWorkflows, getAdminSkillConfigs, getModelsConfig } from '@/lib/api'
 import type { SkillConfig } from '@/lib/api'
 import type { ComfyUIWorkflow } from '@/lib/types'
+import { compareNodeKey } from '@/lib/node-order'
 
 function adminFetch(path: string, options?: RequestInit) {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
@@ -105,7 +106,25 @@ interface ForgeNode {
 
 const PHASES   = ['ideation', 'concept', 'pre-production', 'production', 'live-ops']
 const FORMATS            = ['docx', 'pptx', 'png', 'markdown', 'markdown_table', 'json', 'artifact_bundle', 'single_sentence', 'structured']
-const CONNECTION_FORMATS = ['structured', 'text', 'list<concept_seed>', 'gap_analysis', 'positioning', 'concept_data', 'financial_case', 'review_verdict', 'decision']
+// Formats de outputs connection (= el `type` de la connection en el ADN). Cubre Concept y
+// Pre-Producción v2.6.0. El motor cablea por KEY, no por este format — pero completar la lista
+// evita pisar el tipo al editar un output pre-prod en el NMS.
+const CONNECTION_FORMATS = [
+  // Genéricos / Concept
+  'structured', 'text', 'decision', 'list<concept_seed>', 'gap_analysis', 'positioning',
+  'concept_data', 'financial_case', 'review_verdict',
+  // Pre-Producción — Diseño (3.1–3.7)
+  'design_pillars', 'feel_statement', 'core_loop', 'list<mechanic_spec>', 'progression_sys',
+  'economy_design', 'player_stats', 'item_catalog', 'world_lore', 'environments_x4', 'faction_map',
+  'narrative_arc', 'dialogue_system', 'level_map', 'encounter_design', 'char_profiles',
+  'char_abilities', 'hud_layout', 'menu_tree', 'control_map', 'feedback_system',
+  // Pre-Producción — Assembly / Art / Tech / Scope (3.8–3.15)
+  'gdd_ref', 'style_guide', 'color_palette', 'visual_targets', 'art_bible_intake', 'list<asset_brief>',
+  'audio_direction', 'revenue_model', 'tech_stack', 'custom_systems', 'project_identity',
+  'dependency_graph', 'vs_spec', 'production_plan', 'product_scope',
+  // Pre-Producción — Prototipado (3.16–3.22)
+  'prototype_spec', 'build_result', 'playtest_result',
+]
 const OUTCOMES = ['accept', 'refine', 'kill']
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
@@ -314,17 +333,27 @@ function InputsList({ inputs, onChange }: {
 const CARDINALITY_OPTIONS = ['single', 'one_or_more', 'list']
 
 // Tipos del type registry v1.3.0
+// Tipos de connection (input.type / output.type) de todo el pipeline. La lista alimenta el
+// selector del NMS. Debe cubrir Concept (1.x/2.x) Y Pre-Producción (3.x v2.6.0) — el ADN de
+// pre-prod se insertó vía importador/SQL, así que estos tipos ya viven en la DB aunque no
+// se hayan agregado nunca por la UI. El auto-wire matchea por KEY, no por esta lista; pero
+// sin estos tipos, editar un input pre-prod en el NMS pisaría el tipo correcto.
 const WIRED_INPUT_TYPES = [
-  'concept_seed',
-  'gap_analysis',
-  'positioning',
-  'concept_data',
-  'financial_case',
-  'review_verdict',
-  'text',
-  'image_set',
-  'deck',
-  'decision',
+  // Genéricos
+  'text', 'image_set', 'deck', 'decision',
+  // Concept (1.x / 2.x)
+  'concept_seed', 'gap_analysis', 'positioning', 'concept_data', 'financial_case', 'review_verdict',
+  // Pre-Producción — Diseño (3.1–3.7)
+  'design_pillars', 'feel_statement', 'core_loop', 'mechanic_spec', 'progression_sys', 'economy_design',
+  'player_stats', 'item_catalog', 'world_lore', 'environments_x4', 'faction_map', 'narrative_arc',
+  'dialogue_system', 'level_map', 'encounter_design', 'char_profiles', 'char_abilities',
+  'hud_layout', 'menu_tree', 'control_map', 'feedback_system',
+  // Pre-Producción — Assembly / Art / Tech / Scope (3.8–3.15)
+  'gdd_ref', 'style_guide', 'color_palette', 'visual_targets', 'art_bible_intake', 'asset_brief',
+  'audio_direction', 'revenue_model', 'tech_stack', 'custom_systems', 'project_identity',
+  'dependency_graph', 'vs_spec', 'production_plan', 'product_scope',
+  // Pre-Producción — Prototipado (3.16–3.22)
+  'prototype_spec', 'build_result', 'playtest_result',
 ]
 
 function WiredInputsList({ value, onChange }: {
@@ -1027,9 +1056,8 @@ export default function AdminNodesPage() {
       const res = await adminFetch(`/api/admin/forge/nodes${qs}`)
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
-      const sorted = [...json.nodes].sort((a: ForgeNode, b: ForgeNode) =>
-        parseFloat(a.node_key) - parseFloat(b.node_key)
-      )
+      // Orden jerárquico por segmentos: "3.10" va después de "3.2" (no como decimal)
+      const sorted = [...json.nodes].sort((a: ForgeNode, b: ForgeNode) => compareNodeKey(a.node_key, b.node_key))
       setNodes(sorted)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar nodos')

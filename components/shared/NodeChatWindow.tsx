@@ -8,6 +8,7 @@ import { chatWithNode, getNodeContextInputs } from '@/lib/api'
 import type { ChatMessage, ChatAttachment, ChatToolCall, ApprovedAsset, OutputImageItem, OutputImagesMap, NodeContextInput } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import { MD_COMPONENTS } from '@/lib/md-components'
+import { jsonToMarkdown } from '@/lib/json-display'
 import AttachmentCard from './AttachmentCard'
 import { Paperclip } from 'lucide-react'
 
@@ -43,8 +44,10 @@ export function parseOutputItems(content: string, format: string): string[] {
   // Outputs de imagen: el contenido completo es el prompt — una sola imagen por output
   if (format === 'png' || format === 'image') return [content.trim().slice(0, 700)]
 
-  // Estructurados (json / list<...>): un ítem por objeto del array JSON, no por línea
-  if (format === 'json' || /^list</.test(format ?? '')) {
+  // Estructurados (json / structured / list<...>): un ítem por objeto del array JSON, no por
+  // línea. 'structured' se incluye porque 027 cambió concept_seeds a ese format; sin él, el
+  // parser caía al split por bullets y generaba una celda por campo en vez de una por seed.
+  if (format === 'json' || format === 'structured' || /^list</.test(format ?? '')) {
     const items = parseJsonArrayItems(content)
     if (items) return items
   }
@@ -668,7 +671,7 @@ function MessageBubble({ msg, onExpand }: {
             ) : (
               <div style={{ fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65 }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                  {msg.content}
+                  {jsonToMarkdown(msg.content) ?? msg.content}
                 </ReactMarkdown>
               </div>
             )}
@@ -717,6 +720,29 @@ export interface ImageOutputDef {
   outputKey:      string
   format:         string
   imageGenModel:  string  // "provider:model" — ej: comfyui:concept_ref, openai:dall-e-3
+}
+
+// Deriva el doc_url del último mensaje del asistente con un doc_gen tool_call. Necesario para
+// que el botón de descarga reaparezca al reabrir el chat sin haber aceptado: el prop docUrl es
+// transitorio, pero el tool_call (con su result.url) SÍ persiste en el mensaje de la sesión.
+function docFromMessages(msgs: ChatMessage[]): { url: string; format?: string } | null {
+  // Solo el ÚLTIMO mensaje del asistente: si la respuesta actual no generó doc (ej. una connection
+  // como feel_statement), NO mostrar un botón viejo de una respuesta anterior del historial.
+  const last = [...msgs].reverse().find(m => m.role === 'assistant')
+  for (const tc of (last?.tool_calls ?? [])) {
+    if (tc.tool !== 'doc_gen_docx' && tc.tool !== 'doc_gen_pptx') continue
+    const r = tc.result as unknown
+    let url: string | undefined
+    let format: string | undefined
+    if (r && typeof r === 'object') {
+      url    = (r as { url?: string }).url
+      format = (r as { format?: string }).format
+    } else if (typeof r === 'string') {
+      url = r.match(/https?:\/\/\S+/)?.[0]
+    }
+    if (url) return { url, format: format ?? (tc.tool === 'doc_gen_pptx' ? 'pptx' : 'pdf') }
+  }
+  return null
 }
 
 export interface NodeChatWindowProps {
@@ -821,9 +847,20 @@ export default function NodeChatWindow({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages])
 
+  // Enfocar el input al abrir el chat, al cambiar de nodo/output (focus / chat-to-generate /
+  // run-node), al desbloquearse, y al terminar un envío — SOLO si es chateable (no locked).
+  // El delay cubre el render/animación de apertura de la ventana.
   useEffect(() => {
-    if (!sending) inputRef.current?.focus()
-  }, [sending])
+    if (locked || sending) return
+    const t = setTimeout(() => inputRef.current?.focus(), 60)
+    return () => clearTimeout(t)
+  }, [sending, stepKey, targetOutputKey, locked])
+
+  // Botón de descarga: usa el docUrl transitorio (recién generado) o, al reabrir el chat sin
+  // haber aceptado, lo deriva del tool_call persistido en el mensaje.
+  const derivedDoc         = React.useMemo(() => docFromMessages(messages), [messages])
+  const effectiveDocUrl    = docUrl    ?? derivedDoc?.url
+  const effectiveDocFormat = docFormat ?? derivedDoc?.format
 
   // ── Drag ──────────────────────────────────────────────────────────────────
 
@@ -903,11 +940,12 @@ export default function NodeChatWindow({
 
   const triggerAutoImageGen = (content: string) => {
     if (!imageGenOutputs?.length || !onGenerateItemImage) return
-    let fullMsgUsed = false
     const autoItems: Array<{ outputKey: string; idx: number; text: string; key: string }> = []
 
-    // Fix 2: detectar si al menos un output tiene sección en este mensaje
+    // ¿Algún output de imagen trae sección explícita en el mensaje? Sirve para no duplicar el
+    // fallback-al-contenido-completo cuando hay varios outputs de imagen y solo algunos traen sección.
     const anySectionFound = imageGenOutputs.some(def => {
+      if (!(def.format === 'png' || def.format === 'image')) return false
       const esc = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]')
       return new RegExp(`^(?:#{1,4}\\s+)?${esc}\\s*$`, 'im').test(content)
     })
@@ -916,13 +954,17 @@ export default function NodeChatWindow({
       const isPng = def.format === 'png' || def.format === 'image'
       // Auto-gen solo para outputs PNG/image — otros formatos usan botón on-demand
       if (!isPng) continue
+      // En una sesión focus solo auto-generamos la imagen del output enfocado; el run general
+      // (sin foco) genera todas las imágenes png/image_gen. Esto evita que un focus de OTRO output
+      // (ej. visual_targets) dispare la imagen de reference_images (gasto de crédito no deseado).
+      if (targetOutputKey && def.outputKey !== targetOutputKey) continue
       const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]')
       const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
       const sectionMatch = startRx.exec(content)
 
-      if (!sectionMatch && fullMsgUsed && !isPng) continue
-      // Fix 2: PNG sin sección cuando otros SÍ tienen sección → no usar fallback al contenido completo
-      if (!sectionMatch && isPng && anySectionFound) continue
+      // PNG sin sección explícita y sin ser el foco: no usar el fallback al contenido completo si
+      // otro output de imagen sí trae sección (evita generar la imagen del documento entero duplicada).
+      if (!sectionMatch && def.outputKey !== targetOutputKey && anySectionFound) continue
 
       const otherEscaped = imageGenOutputs
         .filter(d => d.outputKey !== def.outputKey)
@@ -1497,11 +1539,11 @@ export default function NodeChatWindow({
           <div ref={bottomRef} />
         </div>
 
-        {/* Chip de descarga de PDF — aparece tras doc_gen_docx */}
-        {docUrl && (
+        {/* Chip de descarga — del run recién generado o, al reabrir sin aceptar, del tool_call persistido */}
+        {effectiveDocUrl && (
           <div style={{ padding: '6px 12px 0', borderTop: '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
             <a
-              href={docUrl}
+              href={effectiveDocUrl}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -1514,14 +1556,14 @@ export default function NodeChatWindow({
                 letterSpacing: '.04em', transition: 'all 120ms',
               }}
             >
-              ↓ Download {docFormat === 'pptx' ? 'PPTX' : 'PDF'}
+              ↓ Download {effectiveDocFormat === 'pptx' ? 'PPTX' : 'PDF'}
             </a>
           </div>
         )}
 
         {/* Botón Accept — solo si hay respuesta nueva (no persiste en sesiones ya aprobadas) */}
         {onAccept && hasNewResponse && messages.some(m => m.role === 'assistant') && !locked && (
-          <div style={{ padding: '6px 12px 0', borderTop: docUrl ? 'none' : '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
+          <div style={{ padding: '6px 12px 0', borderTop: effectiveDocUrl ? 'none' : '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
             <button
               onClick={async () => {
                 const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
@@ -1847,7 +1889,7 @@ export default function NodeChatWindow({
                             />
                           ),
                         }}>
-                          {inp.content}
+                          {jsonToMarkdown(inp.content) ?? inp.content}
                         </ReactMarkdown>
                       </div>
                     )}
@@ -1892,9 +1934,9 @@ export default function NodeChatWindow({
               <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.08em', flex: 1 }}>
                 {stepLabel}
               </span>
-              {docUrl && (
+              {effectiveDocUrl && (
                 <a
-                  href={docUrl}
+                  href={effectiveDocUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={e => e.stopPropagation()}
@@ -1905,7 +1947,7 @@ export default function NodeChatWindow({
                     borderRadius: 4, letterSpacing: '.04em', flexShrink: 0,
                   }}
                 >
-                  ↓ {docFormat === 'pptx' ? 'PPTX' : 'PDF'}
+                  ↓ {effectiveDocFormat === 'pptx' ? 'PPTX' : 'PDF'}
                 </a>
               )}
               <button
@@ -1918,9 +1960,12 @@ export default function NodeChatWindow({
 
             {/* Contenido */}
             {(() => {
-              // Items siempre frescos desde el estado actual de outputImages
-              const expandedItems = buildItemsFromContent(expandedContent.content)
-              const hasThumbs = expandedItems?.some(i => i.imageUrl || i.isGenerating) ?? false
+              // Si el contenido es un array JSON, mostrarlo legible (tarjetas) y sin inyección
+              // de botones por ítem: el markdown de tarjetas no matchea el patrón "Variation N",
+              // y las imágenes siguen disponibles en el thumbnail row del chat. Para contenido
+              // markdown normal (ej. art direction) se mantiene la inyección de botones ✦.
+              const readable = jsonToMarkdown(expandedContent.content)
+              const expandedItems = readable ? undefined : buildItemsFromContent(expandedContent.content)
               return (
                 <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
                   <div style={{ fontSize: 13, color: 'var(--text-0)', lineHeight: 1.7 }}>
@@ -1928,7 +1973,7 @@ export default function NodeChatWindow({
                       remarkPlugins={[remarkGfm]}
                       components={expandedItems?.length ? buildImageGenComponents(expandedItems) : MD_COMPONENTS}
                     >
-                      {expandedContent.content}
+                      {readable ?? expandedContent.content}
                     </ReactMarkdown>
                   </div>
 

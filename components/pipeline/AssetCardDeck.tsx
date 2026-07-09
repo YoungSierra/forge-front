@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { BACKEND_URL } from '@/lib/api'
 import { MD_COMPONENTS } from '@/lib/md-components'
+import { jsonToCards } from '@/lib/json-display'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,7 +153,12 @@ export default function AssetCardDeck({
         if (data.asset) {
           const { format, content, storage_url, name } = data.asset
           if (content && format !== 'png') {
-            textCards = splitMarkdown(content)
+            // JSON → una card por objeto con título = el output real (seed title, etc.);
+            // si no es JSON, se usa el split de markdown normal por secciones ##.
+            const jsonCards = jsonToCards(content)
+            textCards = jsonCards
+              ? jsonCards.map(c => ({ kind: 'text' as const, title: c.title, body: c.body }))
+              : splitMarkdown(content)
           } else if (storage_url && format === 'png') {
             textCards = [{ kind: 'image', label: name ?? 'Asset', url: storage_url }]
           }

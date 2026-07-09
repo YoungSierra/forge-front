@@ -26,6 +26,8 @@ import ExportModal from '@/components/shared/ExportModal'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
+import { jsonToMarkdown } from '@/lib/json-display'
+import { compareNodeKey } from '@/lib/node-order'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -751,6 +753,8 @@ function NodeLibrarySidebar({ projectId, canvasNodeIds, approvedNodeIds, onAdded
     if (!byPhase[n.phase]) byPhase[n.phase] = []
     byPhase[n.phase].push(n)
   }
+  // Ordenar los nodos dentro de cada fase jerárquicamente (3.2 antes de 3.10)
+  for (const phase of Object.keys(byPhase)) byPhase[phase].sort((a, b) => compareNodeKey(a.node_key, b.node_key))
 
   // Ordenar fases por el índice numérico del node_key más bajo en cada fase (1.x < 2.x < 3.x)
   const sortedPhases = Object.entries(byPhase).sort(([, a], [, b]) => {
@@ -2483,7 +2487,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', fontSize: 12, color: 'var(--text-1)', lineHeight: 1.7 }}>
                   {section ? (
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                      {section}
+                      {/* JSON → markdown legible (solo presentación). Con image items se deja
+                          crudo para no romper la inyección de botones ✦. */}
+                      {imageItems.length > 0 ? section : (jsonToMarkdown(section) ?? section)}
                     </ReactMarkdown>
                   ) : outSession?.output_asset?.storage_url ? (
                     <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
@@ -3451,6 +3457,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [runErrors,         setRunErrors]          = useState<import('@/lib/api').RunValidateError[]>([])
   // Autorización de gates para Run de pipeline (#4) — modal + decisión
   const [runPlanModal,      setRunPlanModal]       = useState<{ plan: RunPlan; scope: RunScope } | null>(null)
+  // Aviso: el run arrancaría sin contexto (ningún Text Input / Library Asset conectado)
+  // → los nodos raíz correrían solo con el nombre del proyecto como referencia.
+  const [noContextModal,    setNoContextModal]     = useState<{ scope: RunScope; roots: string[] } | null>(null)
   const [gateMode,          setGateMode]           = useState<GateAuthMode>('pause')
   const [gateRemember,      setGateRemember]       = useState(false)
   const [draggingNodeId,       setDraggingNodeId]       = useState<string | null>(null)
@@ -4512,11 +4521,60 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     return n.blueprint_id === scope.blueprint_id
   }
 
+  // Nodos que el run arrancaría SIN contexto real: forge_nodes runnable dentro del scope
+  // que son "raíz" — ninguno de sus inputs proviene de un Text Input con texto, un Library
+  // Asset o un forge_node upstream. Sin fuente conectada, el backend igual corre usando solo
+  // el nombre del proyecto como referencia (buildSystemPrompt rellena [project] siempre), lo
+  // que produce output genérico. Devuelve los títulos de esos nodos para avisar antes de correr.
+  function contextlessRunRoots(scope: RunScope): string[] {
+    if (!canvasData) return []
+    const nodes = canvasData.nodes
+    const edges = canvasData.edges as DbEdge[]
+
+    // Fuentes de contexto válidas: Text Input con texto, o Library Asset conectado
+    // (un asset vacío lo bloquea el backend con empty_source por separado).
+    const contextSourceIds = new Set(
+      nodes.filter(n =>
+        (n.node_type === 'text_input' && !!n.text_content?.trim()) ||
+        n.node_type === 'library_asset'
+      ).map(n => n.project_node_id)
+    )
+    // Un forge_node upstream también aporta contexto (su output alimenta al de abajo)
+    const forgeIds = new Set(
+      nodes.filter(n => n.node_type === 'forge_node').map(n => n.project_node_id)
+    )
+
+    const incomingByTarget = new Map<string, string[]>()
+    for (const e of edges) {
+      if (!incomingByTarget.has(e.target)) incomingByTarget.set(e.target, [])
+      incomingByTarget.get(e.target)!.push(e.source)
+    }
+
+    const roots: string[] = []
+    for (const n of nodes) {
+      if (!nodeInScope(n, scope) || !isNodeRunnable(n)) continue
+      const incoming = incomingByTarget.get(n.project_node_id) ?? []
+      const hasContext = incoming.some(srcId => contextSourceIds.has(srcId) || forgeIds.has(srcId))
+      if (!hasContext) roots.push(n.node?.title ?? n.node?.node_key ?? 'Untitled node')
+    }
+    return roots
+  }
+
   // Entrada del Run por alcance. El pipeline cruza gates → pide autorización (modal #4)
   // salvo que el usuario ya la haya recordado en run_config. lane/blueprint corren directo.
-  async function runScope(scope: RunScope) {
+  async function runScope(scope: RunScope, opts: { skipContextCheck?: boolean } = {}) {
     if (!canvasData) return
     if (runLockRef.current) return  // ya hay un run en curso — evitar solapes
+
+    // Pre-flight: si algún nodo raíz correría sin contexto (sin idea ni asset conectado),
+    // avisar antes de gastar el run — el usuario puede seguir igual desde el modal.
+    if (!opts.skipContextCheck) {
+      const roots = contextlessRunRoots(scope)
+      if (roots.length > 0) {
+        setNoContextModal({ scope, roots })
+        return
+      }
+    }
 
     if (scope.type === 'pipeline') {
       let mode: GateAuthMode = 'pause'
@@ -4710,6 +4768,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
   // Abre el chat cargando la sesión persistida del nodo (o de un output específico)
   async function handleRunNode(node: CanvasNode, outputKey?: string | null) {
+    // Sincronizar el target del chat con esta apertura. Un "Run node" general (sin outputKey) debe
+    // resetear el target a null; si no, hereda un chatTargetOutputKey stale de un focus previo
+    // (bug: creaba la sesión general con el output_key de otro nodo, ej. visual_targets del 3.9).
+    setChatTargetOutputKey(outputKey ?? null)
+    if (!outputKey) setChatTargetOutputLabel(null)
     // Si no se especifica output y el nodo ya tiene per-output sessions → abrir output modal
     if (!outputKey && Object.keys(node.output_sessions ?? {}).length > 0) {
       setSelectedNode(null)
@@ -4936,7 +4999,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           initialMessages={chatMessages}
           onSend={async (msg, file, attachmentUrl) => {
             const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined, file, attachmentUrl, chatTargetOutputKey, chatNode.project_node_id)
-            if (r.doc_url) { setChatDocUrl(r.doc_url); setChatDocFormat(r.doc_format ?? null) }
+            // Siempre setear (o resetear): si la respuesta nueva no trae doc (ej. connection),
+            // limpiar el docUrl viejo para que no quede un botón de descarga stale.
+            setChatDocUrl(r.doc_url ?? null); setChatDocFormat(r.doc_format ?? null)
             // Actualizar sesión en el estado local si es nueva
             chatSessionIdRef.current = r.session_id
             if (!chatSessionId) {
@@ -5241,6 +5306,64 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           ))}
         </div>
       )}
+
+      {/* ── Aviso: Run sin contexto (ningún Text Input / Library Asset conectado) ── */}
+      {noContextModal && (() => {
+        const { scope, roots } = noContextModal
+        const proceed = () => { setNoContextModal(null); runScope(scope, { skipContextCheck: true }) }
+        return (
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 9500, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            onClick={() => setNoContextModal(null)}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{ width: 420, maxWidth: '90vw', maxHeight: '82vh', overflowY: 'auto', background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: '0 16px 48px rgba(0,0,0,.4)', padding: 20 }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: '#F59E0B', flex: 1 }}>
+                  ⚠ No context connected
+                </span>
+                <button
+                  onClick={() => setNoContextModal(null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 14, padding: 0 }}
+                >✕</button>
+              </div>
+              <p style={{ fontFamily: 'var(--font-sans)', fontSize: 11, color: 'var(--text-3)', margin: '0 0 12px', lineHeight: 1.5 }}>
+                {roots.length === 1 ? 'This step has' : 'These steps have'} no idea or reference connected.
+                Running now uses only the project name <strong style={{ color: 'var(--text-2)' }}>&ldquo;{localName}&rdquo;</strong> as
+                context, which produces generic output. Connect a <strong style={{ color: 'var(--text-2)' }}>Text Input</strong> with
+                your idea (or a <strong style={{ color: 'var(--text-2)' }}>Library Asset</strong>) first for real results.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
+                {roots.map((title, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 5, background: 'color-mix(in srgb, #F59E0B 6%, var(--bg-2))', border: '1px solid color-mix(in srgb, #F59E0B 22%, transparent)' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-1)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {title}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Alerta, no bloqueo: el usuario decide. Ambas opciones son explícitas. */}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => setNoContextModal(null)}
+                  style={{ fontFamily: 'var(--font-sans)', fontSize: 11, padding: '7px 14px', borderRadius: 6, border: '1px solid var(--line)', background: 'none', color: 'var(--text-2)', cursor: 'pointer' }}
+                >Add context first</button>
+                <button
+                  onClick={proceed}
+                  style={{ fontFamily: 'var(--font-sans)', fontSize: 11, fontWeight: 600, padding: '7px 16px', borderRadius: 6, cursor: 'pointer',
+                    color: '#F59E0B',
+                    background: 'color-mix(in srgb, #F59E0B 12%, var(--bg-2))',
+                    border: '1px solid color-mix(in srgb, #F59E0B 45%, transparent)' }}
+                >Run anyway</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Gate modal — aparece cuando todos los nodos del blueprint están aprobados ── */}
       {gateOpen && canvasData?.active_blueprint?.gate && (
