@@ -980,7 +980,6 @@ export default function NodeChatWindow({
             return s || content
           })()
         : content
-      if (!sectionMatch && !isPng) fullMsgUsed = true
 
       parseOutputItems(section, def.format).forEach((text, idx) => {
         // Fix 1: no regenerar si ya existe imagen para este ítem
@@ -1076,18 +1075,26 @@ export default function NodeChatWindow({
     }
   }
 
+  // En modo focus (targetOutputKey) la vista de imágenes se restringe al output enfocado; en modo
+  // nodo/general se muestran todas. Evita ver imágenes de otros outputs (confuso).
+  const visibleOutputImages = (targetOutputKey
+    ? Object.fromEntries(Object.entries(outputImages ?? {}).filter(([k]) => k === targetOutputKey))
+    : outputImages ?? {}) as typeof outputImages
+
   // Construye InlineImageItem[] desde cualquier contenido usando el estado actual de outputImages
   const buildItemsFromContent = (content: string): InlineImageItem[] | undefined => {
-    if (!imageGenOutputs?.length || !onGenerateItemImage) return undefined
+    // En focus, restringir al output enfocado (ver imágenes de otros outputs es confuso).
+    const defs = targetOutputKey ? (imageGenOutputs ?? []).filter(d => d.outputKey === targetOutputKey) : (imageGenOutputs ?? [])
+    if (!defs.length || !onGenerateItemImage) return undefined
     const items: InlineImageItem[] = []
     let fullMsgUsed = false
-    for (const def of imageGenOutputs) {
+    for (const def of defs) {
       const isPng = def.format === 'png' || def.format === 'image'
       const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]')
       const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
       const sectionMatch = startRx.exec(content)
       if (!sectionMatch && fullMsgUsed && !isPng) continue
-      const otherEscaped = imageGenOutputs.filter(d => d.outputKey !== def.outputKey)
+      const otherEscaped = defs.filter(d => d.outputKey !== def.outputKey)
         .map(d => d.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]'))
       const nextRx = otherEscaped.length > 0
         ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\s*$`, 'im') : null
@@ -1373,11 +1380,13 @@ export default function NodeChatWindow({
 
             // Para mensajes del asistente: construir imageItems para el modal expandido
             const buildItems = (): InlineImageItem[] | undefined => {
-              if (!imageGenOutputs || imageGenOutputs.length === 0 || !onGenerateItemImage) return undefined
+              // En focus, restringir al output enfocado (no mostrar imágenes de otros outputs).
+              const defs = targetOutputKey ? (imageGenOutputs ?? []).filter(d => d.outputKey === targetOutputKey) : (imageGenOutputs ?? [])
+              if (defs.length === 0 || !onGenerateItemImage) return undefined
               const items: InlineImageItem[] = []
               let fullMsgUsed = false  // evita agregar ítems duplicados cuando múltiples outputs usan el msg completo
 
-              for (const def of imageGenOutputs) {
+              for (const def of defs) {
                 const isPng = def.format === 'png' || def.format === 'image'
                 const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
                                              .replace(/_/g, '[_\\s]')  // "concept_list" también matchea "concept list"
@@ -1388,7 +1397,7 @@ export default function NodeChatWindow({
                 if (!sectionMatch && fullMsgUsed && !isPng) continue
 
                 // nextRx dinámico: solo cortar en otras claves conocidas, nunca en headings arbitrarios
-                const otherEscaped = imageGenOutputs
+                const otherEscaped = defs
                   .filter(d => d.outputKey !== def.outputKey)
                   .map(d => d.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]'))
                 const nextRx = otherEscaped.length > 0
@@ -1447,7 +1456,7 @@ export default function NodeChatWindow({
               <React.Fragment key={i}>
                 <MessageBubble
                   msg={msg}
-                  onExpand={() => setExpandedContent({ content: msg.content, imageItems: imageItems ?? buildItems(), pngImages: outputImages })}
+                  onExpand={() => setExpandedContent({ content: msg.content, imageItems: imageItems ?? buildItems(), pngImages: visibleOutputImages })}
                 />
                 {isLastAssistant && <ImageThumbnailRow items={imageItems} />}
               </React.Fragment>
