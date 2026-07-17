@@ -41,8 +41,22 @@ function parseJsonArrayItems(content: string): string[] | null {
 }
 
 export function parseOutputItems(content: string, format: string): string[] {
-  // Outputs de imagen: el contenido completo es el prompt — una sola imagen por output
-  if (format === 'png' || format === 'image') return [content.trim().slice(0, 700)]
+  // Outputs de imagen: un output puede pedir VARIAS imágenes (ej. reference_images: 4-6 prompts
+  // numerados). Extraer un ítem por prompt — cada bloque numerado, incluidas sus líneas siguientes
+  // hasta el próximo número. Antes esto devolvía SIEMPRE el contenido entero como 1 solo ítem, así
+  // que un output de N imágenes generaba una sola. Sin lista numerada, el contenido entero = 1 prompt.
+  if (format === 'png' || format === 'image') {
+    // Inicio de cada prompt: línea que, tras # y ** opcionales, empieza con "N." o "N)". Cubre
+    // "1. Título", "**1. Título**" (el LLM suele poner el número en negrita) y "### 1. Título".
+    const marker = '(?:#{1,4}\\s+)?\\*{0,2}\\d+[.)]\\s'
+    const blocks = content
+      .split(new RegExp(`^(?=${marker})`, 'm'))
+      .map(p => p.trim())
+      .filter(p => new RegExp(`^${marker}`).test(p))
+      .map(p => p.replace(new RegExp(`^${marker}`), '').replace(/^\*{0,2}/, '').trim())
+    if (blocks.length > 1) return blocks.slice(0, 8).map(s => s.slice(0, 700))
+    return [content.trim().slice(0, 700)]
+  }
 
   // Estructurados (json / structured / list<...>): un ítem por objeto del array JSON, no por
   // línea. 'structured' se incluye porque 027 cambió concept_seeds a ese format; sin él, el
@@ -111,6 +125,23 @@ const WINDOW_H = 820
 const MARGIN   = 12
 // Ancho del panel de contexto (gate nodes)
 const PANEL_W  = 288
+
+// ─── Detección de la sección de un output en el markdown ───────────────────────
+// Un output (ej. reference_images) marca su sección con un encabezado. El matcher es TOLERANTE:
+// el título puede EMPEZAR con el label y seguir con más texto (ej. "Reference Image Set —
+// Production Summary"), y el plural final es opcional (Image/Images). Antes se exigía coincidencia
+// exacta (\s*$): un título con sufijo NO matcheaba → la auto-generación de imágenes no se disparaba
+// y quedaban solo los placeholders que el LLM había incrustado. Compartido por triggerAutoImageGen
+// y los dos builders de items para que generar y mostrar usen el MISMO criterio.
+function outputHeaderPat(outputKey: string): string {
+  return outputKey
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/_/g, '[_\\s]')
+    .replace(/s$/i, 's?')
+}
+function outputHeaderRx(outputKey: string): RegExp {
+  return new RegExp(`^(?:#{1,4}\\s+)?${outputHeaderPat(outputKey)}\\b`, 'im')
+}
 
 // ─── Typing dots ──────────────────────────────────────────────────────────────
 
@@ -859,8 +890,14 @@ export default function NodeChatWindow({
   // Botón de descarga: usa el docUrl transitorio (recién generado) o, al reabrir el chat sin
   // haber aceptado, lo deriva del tool_call persistido en el mensaje.
   const derivedDoc         = React.useMemo(() => docFromMessages(messages), [messages])
-  const effectiveDocUrl    = docUrl    ?? derivedDoc?.url
-  const effectiveDocFormat = docFormat ?? derivedDoc?.format
+  // Un output de imagen (png/image) no tiene PDF. Aunque un mensaje YA generado traiga un doc_gen
+  // tool_call (creado antes del guard de backend que ya no lo genera), no mostrar "Descargar PDF"
+  // cuando el foco es un output de imagen — su salida son las imágenes, no un documento.
+  const focusIsImageOutput = !!targetOutputKey && (imageGenOutputs ?? []).some(
+    d => d.outputKey === targetOutputKey && ['png', 'png[]', 'image', 'image[]'].includes((d.format || '').toLowerCase()),
+  )
+  const effectiveDocUrl    = focusIsImageOutput ? undefined : (docUrl ?? derivedDoc?.url)
+  const effectiveDocFormat = focusIsImageOutput ? undefined : (docFormat ?? derivedDoc?.format)
 
   // ── Drag ──────────────────────────────────────────────────────────────────
 
@@ -946,8 +983,7 @@ export default function NodeChatWindow({
     // fallback-al-contenido-completo cuando hay varios outputs de imagen y solo algunos traen sección.
     const anySectionFound = imageGenOutputs.some(def => {
       if (!(def.format === 'png' || def.format === 'image')) return false
-      const esc = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]')
-      return new RegExp(`^(?:#{1,4}\\s+)?${esc}\\s*$`, 'im').test(content)
+      return outputHeaderRx(def.outputKey).test(content)
     })
 
     for (const def of imageGenOutputs) {
@@ -958,8 +994,7 @@ export default function NodeChatWindow({
       // (sin foco) genera todas las imágenes png/image_gen. Esto evita que un focus de OTRO output
       // (ej. visual_targets) dispare la imagen de reference_images (gasto de crédito no deseado).
       if (targetOutputKey && def.outputKey !== targetOutputKey) continue
-      const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]')
-      const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
+      const startRx = outputHeaderRx(def.outputKey)
       const sectionMatch = startRx.exec(content)
 
       // PNG sin sección explícita y sin ser el foco: no usar el fallback al contenido completo si
@@ -968,9 +1003,9 @@ export default function NodeChatWindow({
 
       const otherEscaped = imageGenOutputs
         .filter(d => d.outputKey !== def.outputKey)
-        .map(d => d.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]'))
+        .map(d => outputHeaderPat(d.outputKey))
       const nextRx = otherEscaped.length > 0
-        ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\s*$`, 'im')
+        ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\b`, 'im')
         : null
       const section = sectionMatch
         ? (() => {
@@ -1090,14 +1125,13 @@ export default function NodeChatWindow({
     let fullMsgUsed = false
     for (const def of defs) {
       const isPng = def.format === 'png' || def.format === 'image'
-      const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]')
-      const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
+      const startRx = outputHeaderRx(def.outputKey)
       const sectionMatch = startRx.exec(content)
       if (!sectionMatch && fullMsgUsed && !isPng) continue
       const otherEscaped = defs.filter(d => d.outputKey !== def.outputKey)
-        .map(d => d.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]'))
+        .map(d => outputHeaderPat(d.outputKey))
       const nextRx = otherEscaped.length > 0
-        ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\s*$`, 'im') : null
+        ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\b`, 'im') : null
       const section = sectionMatch
         ? (() => {
             const after = content.slice(sectionMatch.index + sectionMatch[0].length)
@@ -1388,9 +1422,7 @@ export default function NodeChatWindow({
 
               for (const def of defs) {
                 const isPng = def.format === 'png' || def.format === 'image'
-                const escaped = def.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-                                             .replace(/_/g, '[_\\s]')  // "concept_list" también matchea "concept list"
-                const startRx     = new RegExp(`^(?:#{1,4}\\s+)?${escaped}\\s*$`, 'im')
+                const startRx     = outputHeaderRx(def.outputKey)
                 const sectionMatch = startRx.exec(msg.content)
 
                 // PNG outputs nunca se saltan: cada output imagen genera su propia imagen independientemente
@@ -1399,9 +1431,9 @@ export default function NodeChatWindow({
                 // nextRx dinámico: solo cortar en otras claves conocidas, nunca en headings arbitrarios
                 const otherEscaped = defs
                   .filter(d => d.outputKey !== def.outputKey)
-                  .map(d => d.outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]'))
+                  .map(d => outputHeaderPat(d.outputKey))
                 const nextRx = otherEscaped.length > 0
-                  ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\s*$`, 'im')
+                  ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\b`, 'im')
                   : null
 
                 const section = sectionMatch
