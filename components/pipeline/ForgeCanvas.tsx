@@ -14,7 +14,7 @@ import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
 import OrthogonalEdge, { type WayPoint } from './OrthogonalEdge'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
-import { BACKEND_URL, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName } from '@/lib/api'
+import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap, RunPlan, GateAuthMode } from '@/lib/api'
 import type { Project, RunScope } from '@/lib/types'
@@ -234,12 +234,12 @@ const ACTION_PULSE_KF = `@keyframes action-border-pulse { 0%,100%{opacity:1;box-
 // ─── Request helper ───────────────────────────────────────────────────────────
 
 async function canvasFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+  const auth = await authHeaders()
   const res = await fetch(`${BACKEND_URL}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(memberId ? { 'x-member-id': memberId } : {}),
+      ...auth,
       ...(options?.headers as Record<string, string> | undefined),
     },
   })
@@ -291,7 +291,7 @@ async function libraryUpload(projectId: string, file: File, displayName: string,
 
   const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/library`, {
     method: 'POST',
-    headers: memberId ? { 'x-member-id': memberId } : {},
+    headers: await authHeaders(), // Bearer + x-org-id (sin Content-Type: el browser pone el boundary del FormData)
     body: fd,
   })
   if (!res.ok) {

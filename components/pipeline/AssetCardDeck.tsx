@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { BACKEND_URL } from '@/lib/api'
+import { BACKEND_URL, authHeaders } from '@/lib/api'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import { jsonToCards } from '@/lib/json-display'
 
@@ -137,9 +137,8 @@ export default function AssetCardDeck({
 
     async function load() {
       try {
-        const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
         const res  = await fetch(`${BACKEND_URL}/api/projects/${projectId}/canvas/nodes/${nodeId}/session`, {
-          headers: memberId ? { 'x-member-id': memberId } : {},
+          headers: await authHeaders(),
         })
         const data = await res.json()
 

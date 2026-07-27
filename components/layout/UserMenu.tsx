@@ -193,6 +193,18 @@ export default function UserMenu() {
               </div>
             </div>
 
+            {/* My Organization (org-admin self-service) */}
+            <Link
+              href="/org"
+              onClick={() => setOpen(false)}
+              style={menuItemStyle}
+              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.background = 'var(--bg-3)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-0)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.background = 'none'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-2)' }}
+            >
+              <span style={{ fontSize: 13, lineHeight: 1 }}>⬢</span>
+              My Organization
+            </Link>
+
             {/* Admin */}
             {isAdmin && (
               <Link

@@ -1,5 +1,6 @@
 import type { GDD, SpritePreview, Project, Asset, ValidationResult, ScriptFile, CodeGenerationResult, Member, ProjectMember, Discipline, Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus, AdminUser, StepConfig, ComfyUIWorkflow, InjectConfig, ModelsConfig, PromptConfig, RepoConfig, ActionInstance, ActionType, ChangelogEntry, ChangelogType } from './types'
 import type { InputContext } from './nodeExecutionContext'
+import { createClient } from '@/lib/supabase'
 
 export type { ScriptFile, CodeGenerationResult }
 export type { InputContext }
@@ -8,13 +9,39 @@ export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localh
 export const assetUrl = (path: string) =>
   path ? (path.startsWith('http') ? path : `${BACKEND_URL}${path}`) : ''
 
+// ── Auth headers (Frente 2 Multi-Org) ─────────────────────────────────────────
+// Adjunta el JWT de Supabase (Authorization: Bearer) + la org activa (X-Org-Id) a cada llamada.
+// Mantiene x-member-id durante la transición (el back lo ignora una vez montado requireAuth).
+let _sb: ReturnType<typeof createClient> | null = null
+function sbClient() {
+  if (typeof window === 'undefined') return null
+  if (!_sb) _sb = createClient()
+  return _sb
+}
+export async function authHeaders(): Promise<Record<string, string>> {
+  const h: Record<string, string> = {}
+  if (typeof window !== 'undefined') {
+    const memberId = localStorage.getItem('forge_member_id')
+    if (memberId) h['x-member-id'] = memberId
+    const orgId = localStorage.getItem('forge_active_org_id')
+    if (orgId) h['x-org-id'] = orgId
+  }
+  const client = sbClient()
+  if (client) {
+    const { data } = await client.auth.getSession()
+    const token = data.session?.access_token
+    if (token) h['Authorization'] = `Bearer ${token}`
+  }
+  return h
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+  const auth = await authHeaders()
   const res = await fetch(`${BACKEND_URL}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(memberId ? { 'x-member-id': memberId } : {}),
+      ...auth,
       ...(options?.headers as Record<string, string> | undefined),
     },
   })
@@ -204,13 +231,13 @@ export async function getProject(id: string): Promise<Project> {
 }
 
 export async function getGDDRaw(projectId: string): Promise<string> {
-  const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/gdd/raw`)
+  const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/gdd/raw`, { headers: await authHeaders() })
   if (!res.ok) throw new Error('GDD raw not found')
   return res.text()
 }
 
 export async function getADIRaw(projectId: string): Promise<string> {
-  const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/art-direction-intake/raw`)
+  const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/art-direction-intake/raw`, { headers: await authHeaders() })
   if (!res.ok) throw new Error('Art Direction Intake raw not found')
   return res.text()
 }
@@ -1347,7 +1374,7 @@ export async function chatWithForgeNode(
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
 
   let body: BodyInit
-  const headers: Record<string, string> = memberId ? { 'x-member-id': memberId } : {}
+  const headers: Record<string, string> = await authHeaders()
 
   if (file) {
     const fd = new FormData()

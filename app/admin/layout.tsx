@@ -63,6 +63,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         {[
           { href: '/admin/users',        label: 'Users'        },
+          { href: '/admin/orgs',         label: 'Orgs'         },
           { href: '/admin/integrations', label: 'Integrations' },
           { href: '/admin/nodes',        label: 'NMS'          },
           { href: '/admin/blueprints',   label: 'BMS'          },

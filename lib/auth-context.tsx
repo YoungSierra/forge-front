@@ -35,7 +35,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function loadMember(authUser: User | null) {
     if (!authUser) {
       setMember(null)
+      // Limpiar TODO lo del usuario en localStorage al cerrar sesión / expirar — si no, queda basura
+      // (ej. el breadcrumb "último proyecto") que se cruza al loguearse otro usuario en el mismo navegador.
       localStorage.removeItem(MEMBER_ID_KEY)
+      localStorage.removeItem('forge_last_project')
+      localStorage.removeItem('forge_active_org_id')
       return
     }
     try {
@@ -86,6 +90,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user])
 
   async function signOut() {
+    localStorage.removeItem(MEMBER_ID_KEY)
+    localStorage.removeItem('forge_last_project')
+    localStorage.removeItem('forge_active_org_id')
     await supabase.auth.signOut()
     window.location.replace('/login')
   }
