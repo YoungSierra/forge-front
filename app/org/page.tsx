@@ -33,9 +33,11 @@ const inp: React.CSSProperties = { background: 'var(--bg-0)', border: '1px solid
 const btn: React.CSSProperties = { background: 'var(--action)', color: '#fff', border: 'none', borderRadius: 5, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }
 const btnGhost: React.CSSProperties = { background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '3px 8px', fontSize: 10, cursor: 'pointer' }
 const btnDanger: React.CSSProperties = { background: 'var(--danger,#b3261e)', color: '#fff', border: 'none', borderRadius: 5, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }
-const label: React.CSSProperties = { fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3, display: 'block' }
-const th: React.CSSProperties = { padding: '4px 6px', color: 'var(--text-3)', fontSize: 10, textTransform: 'uppercase', textAlign: 'left', fontWeight: 400 }
-const h2: React.CSSProperties = { fontSize: 12, color: 'var(--text-2)', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.06em' }
+// Acción destructiva discreta pero legible como peligro (P2: la jerarquía debe seguir el riesgo)
+const btnGhostDanger: React.CSSProperties = { background: 'transparent', color: 'var(--danger,#b3261e)', border: '1px solid color-mix(in srgb, var(--danger,#b3261e) 45%, var(--line-2))', borderRadius: 5, padding: '3px 8px', fontSize: 10, cursor: 'pointer' }
+const label: React.CSSProperties = { fontSize: 10, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3, display: 'block' }
+const th: React.CSSProperties = { padding: '4px 6px', color: 'var(--text-2)', fontSize: 10, textTransform: 'uppercase', textAlign: 'left', fontWeight: 400 }
+const h2: React.CSSProperties = { fontSize: 13, color: 'var(--text-0)', fontWeight: 700, margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: '0.06em' }
 
 export default function OrgAdminPage() {
   const [denied, setDenied] = useState(false)
@@ -45,10 +47,15 @@ export default function OrgAdminPage() {
   const [blueprints, setBlueprints] = useState<OrgBlueprint[]>([])
   const [catalog, setCatalog] = useState<ForgeNode[]>([])
   const [bpEditing, setBpEditing] = useState<Partial<ForgeBlueprint> | null>(null)
-  const [msg, setMsg] = useState('')
-  const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
+  const [msg, setMsg] = useState<{ text: string; type: 'ok' | 'error' } | null>(null)
+  // Éxito: breve y se va solo. Error: persiste hasta descartarlo, para no perder el detalle en un parpadeo.
+  const flash = (text: string, type: 'ok' | 'error' = 'ok') => {
+    setMsg({ text, type })
+    if (type === 'ok') setTimeout(() => setMsg(m => (m?.text === text ? null : m)), 3000)
+  }
 
   const [nm, setNm] = useState({ email: '', password: '', display_name: '', org_role: 'member' })
+  const [nmTried, setNmTried] = useState(false)  // marca los campos requeridos vacíos tras intentar
   const [buyAmount, setBuyAmount] = useState('')
   const [confirmState, setConfirmState] = useState<ConfirmOpts | null>(null)
   const [busy, setBusy] = useState(false)  // evita doble-checkout mientras se crea la sesión de pago
@@ -85,7 +92,7 @@ export default function OrgAdminPage() {
   }, [confirmState])
 
   function buyCredits() {
-    if (!buyAmount || Number(buyAmount) <= 0) { flash('Enter an amount greater than 0'); return }
+    if (!buyAmount || Number(buyAmount) <= 0) { flash('Enter an amount greater than 0.', 'error'); return }
     const amount = Number(buyAmount)
     // Readback del monto en NUESTRA superficie antes de mandar al usuario (y su plata) a la pasarela
     askConfirm({
@@ -98,16 +105,22 @@ export default function OrgAdminPage() {
         const r = await orgFetch('/api/org/credits/checkout', { method: 'POST', body: JSON.stringify({ amount_usd: amount }) })
         const d = await r.json()
         if (d.success && d.url) window.location.href = d.url  // redirige a la pasarela
-        else { setBusy(false); flash(d.error || 'Error') }
+        else { setBusy(false); flash(d.error || 'Something went wrong. Try again.', 'error') }
       },
     })
   }
 
   async function addMember() {
-    if (!nm.email || !nm.password || !nm.display_name) return
+    if (!nm.email || !nm.password || !nm.display_name) {
+      setNmTried(true)
+      flash('Email, name and password are all required.', 'error')
+      return
+    }
     const r = await orgFetch('/api/org/members', { method: 'POST', body: JSON.stringify(nm) })
     const d = await r.json()
-    if (d.success) { setNm({ email: '', password: '', display_name: '', org_role: 'member' }); flash('User created'); loadAll() } else flash(d.error || 'Error')
+    if (d.success) { setNm({ email: '', password: '', display_name: '', org_role: 'member' }); setNmTried(false); flash('User added.') }
+    else flash(d.error || 'Something went wrong. Try again.', 'error')
+    if (d.success) loadAll()
   }
   function changeRole(m: OrgMember, org_role: string) {
     if (org_role === m.org_role) return
@@ -115,14 +128,14 @@ export default function OrgAdminPage() {
     // No dejar la organización sin owner: bloquear degradar al único owner
     const owners = members.filter(x => x.org_role === 'owner')
     if (m.org_role === 'owner' && org_role !== 'owner' && owners.length <= 1) {
-      flash('Assign another owner first — an organization must keep at least one owner.')
+      flash('Assign another owner first — an organization must keep at least one owner.', 'error')
       revert(); return
     }
     const myId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
     const selfLosingAccess = m.member_id === myId && (m.org_role === 'owner' || m.org_role === 'admin') && (org_role === 'member' || org_role === 'viewer')
     const apply = async () => {
       const r = await orgFetch(`/api/org/members/${m.member_id}`, { method: 'PATCH', body: JSON.stringify({ org_role }) })
-      const d = await r.json(); if (d.success) loadAll(); else { flash(d.error || 'Error'); revert() }
+      const d = await r.json(); if (d.success) loadAll(); else { flash(d.error || 'Something went wrong. Try again.', 'error'); revert() }
     }
     if (selfLosingAccess) {
       askConfirm({
@@ -140,7 +153,7 @@ export default function OrgAdminPage() {
       confirmLabel: 'Remove', danger: true,
       onConfirm: async () => {
         const r = await orgFetch(`/api/org/members/${m.member_id}`, { method: 'DELETE' })
-        const d = await r.json(); if (d.success) { flash('Member removed'); loadAll() } else flash(d.error || 'Error')
+        const d = await r.json(); if (d.success) { flash('Member removed.'); loadAll() } else flash(d.error || 'Something went wrong. Try again.', 'error')
       },
     })
   }
@@ -150,7 +163,7 @@ export default function OrgAdminPage() {
     const r = await orgFetch(isNew ? '/api/org/blueprints' : `/api/org/blueprints/${data.id}`, { method: isNew ? 'POST' : 'PATCH', body: JSON.stringify(data) })
     const d = await r.json()
     if (!d.success) throw new Error(d.error)
-    setBpEditing(null); flash(isNew ? 'Blueprint created' : 'Blueprint updated'); loadAll()
+    setBpEditing(null); flash(isNew ? 'Blueprint created.' : 'Blueprint updated.'); loadAll()
   }
   function deleteBlueprint(b: OrgBlueprint) {
     askConfirm({
@@ -159,7 +172,7 @@ export default function OrgAdminPage() {
       confirmLabel: 'Delete', danger: true,
       onConfirm: async () => {
         const r = await orgFetch(`/api/org/blueprints/${b.id}`, { method: 'DELETE' })
-        const d = await r.json(); if (d.success) { flash('Blueprint deleted'); loadAll() } else flash(d.error || 'Error')
+        const d = await r.json(); if (d.success) { flash('Blueprint deleted.'); loadAll() } else flash(d.error || 'Something went wrong. Try again.', 'error')
       },
     })
   }
@@ -181,7 +194,15 @@ export default function OrgAdminPage() {
         <div style={{ width: 1, height: 16, background: 'var(--line-2)' }} />
         <span style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>My Organization</span>
         <div style={{ flex: 1 }} />
-        {msg && <span style={{ fontSize: 11, color: 'var(--action)' }}>{msg}</span>}
+        {msg && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: msg.type === 'error' ? 'var(--danger,#b3261e)' : 'var(--ok,#3a3)' }}>
+            {msg.type === 'error' ? '⚠ ' : '✓ '}{msg.text}
+            {msg.type === 'error' && (
+              <button onClick={() => setMsg(null)} title="Dismiss" aria-label="Dismiss"
+                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+            )}
+          </span>
+        )}
         <Link href="/" style={{ fontSize: 11, color: 'var(--text-3)', textDecoration: 'none' }}>← Projects</Link>
       </div>
 
@@ -220,7 +241,7 @@ export default function OrgAdminPage() {
               {ledger.map(t => (
                 <tr key={t.id} style={{ borderTop: '1px solid var(--line-2)' }}>
                   <td style={{ padding: '3px 6px', color: 'var(--text-3)' }}>{fmtDate(t.created_at)}</td>
-                  <td style={{ padding: '3px 6px', color: t.type === 'purchase' ? 'var(--ok,#3a3)' : 'var(--text-2)' }}>{t.type}</td>
+                  <td style={{ padding: '3px 6px', color: t.type === 'purchase' ? 'var(--ok,#3a3)' : 'var(--text-2)', textTransform: 'capitalize' }}>{t.type}</td>
                   <td style={{ padding: '3px 6px', color: 'var(--text-1)' }}>{money(t.amount_usd)}</td>
                   <td style={{ padding: '3px 6px', color: 'var(--text-3)' }}>{money(t.balance_after)}</td>
                 </tr>
@@ -245,16 +266,17 @@ export default function OrgAdminPage() {
                       {['owner', 'admin', 'member', 'viewer'].map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
-                  <td style={{ padding: '5px 6px', textAlign: 'right' }}><button style={btnGhost} onClick={() => removeMember(m)}>remove</button></td>
+                  <td style={{ padding: '5px 6px', textAlign: 'right' }}><button style={btnGhostDanger} onClick={() => removeMember(m)}>Remove</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
           <span style={label}>Add a user to your organization</span>
+          <p style={{ fontSize: 10, color: 'var(--text-3)', margin: '0 0 6px' }}>You set an initial password; the user can change it later. All fields required.</p>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <input style={{ ...inp, width: 180 }} value={nm.email} onChange={e => setNm({ ...nm, email: e.target.value })} placeholder="email" autoComplete="off" name="new-user-email" />
-            <input style={{ ...inp, width: 140 }} value={nm.display_name} onChange={e => setNm({ ...nm, display_name: e.target.value })} placeholder="name" autoComplete="off" name="new-user-name" />
-            <input style={{ ...inp, width: 120 }} type="password" value={nm.password} onChange={e => setNm({ ...nm, password: e.target.value })} placeholder="password" autoComplete="new-password" name="new-user-password" />
+            <input style={{ ...inp, width: 180, ...(nmTried && !nm.email ? { borderColor: 'var(--danger,#b3261e)' } : {}) }} value={nm.email} onChange={e => setNm({ ...nm, email: e.target.value })} placeholder="email" autoComplete="off" name="new-user-email" />
+            <input style={{ ...inp, width: 140, ...(nmTried && !nm.display_name ? { borderColor: 'var(--danger,#b3261e)' } : {}) }} value={nm.display_name} onChange={e => setNm({ ...nm, display_name: e.target.value })} placeholder="name" autoComplete="off" name="new-user-name" />
+            <input style={{ ...inp, width: 120, ...(nmTried && !nm.password ? { borderColor: 'var(--danger,#b3261e)' } : {}) }} type="password" value={nm.password} onChange={e => setNm({ ...nm, password: e.target.value })} placeholder="password" autoComplete="new-password" name="new-user-password" />
             <select value={nm.org_role} onChange={e => setNm({ ...nm, org_role: e.target.value })} style={{ ...inp, fontSize: 11 }}>
               {['admin', 'member', 'viewer'].map(r => <option key={r} value={r}>{r}</option>)}
             </select>
@@ -279,7 +301,7 @@ export default function OrgAdminPage() {
                   <td style={{ padding: '5px 6px', color: 'var(--text-3)', fontSize: 10 }}>{b.blueprint_key}</td>
                   <td style={{ padding: '5px 6px', color: 'var(--text-2)' }}>{b.phase}</td>
                   <td style={{ padding: '5px 6px' }}><span style={{ fontSize: 10, color: b.standard ? 'var(--text-3)' : 'var(--action)' }}>{b.standard ? 'standard' : 'own'}</span></td>
-                  <td style={{ padding: '5px 6px', textAlign: 'right' }}>{b.editable && <button style={btnGhost} onClick={e => { e.stopPropagation(); deleteBlueprint(b) }}>delete</button>}</td>
+                  <td style={{ padding: '5px 6px', textAlign: 'right' }}>{b.editable && <button style={btnGhostDanger} onClick={e => { e.stopPropagation(); deleteBlueprint(b) }}>Delete</button>}</td>
                 </tr>
               ))}
               {blueprints.length === 0 && <tr><td colSpan={5} style={{ padding: 8, color: 'var(--text-3)', fontSize: 10 }}>No blueprints.</td></tr>}
