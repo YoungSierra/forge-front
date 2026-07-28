@@ -6,6 +6,7 @@ import Link from 'next/link'
 import UserMenu from '@/components/layout/UserMenu'
 import { useAuth } from '@/lib/auth-context'
 import { useTheme } from '@/lib/theme'
+import { isPlatformAdmin } from '@/lib/roles'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { member, loading } = useAuth()
@@ -22,10 +23,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }, [])
 
   useEffect(() => {
-    if (!loading && member?.role !== 'admin') router.replace('/')
+    if (!loading && !isPlatformAdmin(member?.role)) router.replace('/')
   }, [loading, member, router])
 
-  if (loading || member?.role !== 'admin') return null
+  if (loading || !isPlatformAdmin(member?.role)) return null
 
   return (
     <div style={{ height: '100vh', background: 'var(--bg-0)', display: 'flex', flexDirection: 'column' }}>

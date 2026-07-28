@@ -12,6 +12,7 @@ import PipelineSuggestionModal from './PipelineSuggestionModal'
 import { useAuth } from '@/lib/auth-context'
 import { getProjectMembers, BACKEND_URL } from '@/lib/api'
 import { useTheme } from '@/lib/theme'
+import { isPlatformAdmin } from '@/lib/roles'
 
 type PipelinePhase = 'idle' | 'running' | 'error'
 
@@ -420,7 +421,7 @@ export default function ForgeToolbar({ project, phase, onRefresh, onPipelineAppl
       )}
 
       {/* Chip de costo — solo admins */}
-      {hasProject && member?.role === 'admin' && (
+      {hasProject && isPlatformAdmin(member?.role) && (
         <CostChip projectId={project.id} />
       )}
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import type { ProjectMember, Member } from '@/lib/types'
 import { getProjectMembers, searchMembers, addProjectMember, removeProjectMember } from '@/lib/api'
+import { isPlatformAdmin } from '@/lib/roles'
 
 const DISC_COLOR: Record<string, string> = {
   design: 'var(--cat-design)',
@@ -46,7 +47,7 @@ export default function MembersModal({ projectId, projectName, ownerMemberId, cu
   const [filterQ, setFilterQ]         = useState('')
 
   const isOwner   = currentMemberId === ownerMemberId
-  const isAdmin   = members.some(m => m.members.id === currentMemberId && m.members.role === 'admin')
+  const isAdmin   = members.some(m => m.members.id === currentMemberId && isPlatformAdmin(m.members.role))
   const canManage = isOwner || isAdmin
 
   useEffect(() => {

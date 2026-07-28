@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { getMemberByAuth, updateAdminUser, invalidateMemberCache, getChangelog } from '@/lib/api'
 import { createClient } from '@/lib/supabase'
+import { isPlatformAdmin } from '@/lib/roles'
 import type { ChangelogEntry, ChangelogType } from '@/lib/types'
 
 // Metadata visual por tipo de entrada (badge/color) — espejo del admin
@@ -60,7 +61,7 @@ export default function UserMenu() {
   const [loadingMore, setLoadingMore] = useState(false)
 
   useEffect(() => {
-    if (user?.id) getMemberByAuth(user.id).then(m => setIsAdmin(m?.role === 'admin'))
+    if (user?.id) getMemberByAuth(user.id).then(m => setIsAdmin(isPlatformAdmin(m?.role)))
   }, [user?.id])
 
   // Carga la primera página del changelog y calcula si hay entradas sin ver (vs localStorage)

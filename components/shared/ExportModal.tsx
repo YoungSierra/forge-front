@@ -6,6 +6,7 @@ import {
   saveProjectRepoConfig, createProjectRepo, getMemberByAuth,
 } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
+import { isPlatformAdmin } from '@/lib/roles'
 
 // ─── Detección de proveedor ───────────────────────────────────────────────────
 
@@ -107,7 +108,7 @@ export default function ExportModal({ project, onClose, onRepoSaved }: Props) {
   const [exportErrors, setExportErrors] = useState<string[]>([])
 
   useEffect(() => {
-    if (user?.id) getMemberByAuth(user.id).then(m => setIsAdmin(m?.role === 'admin'))
+    if (user?.id) getMemberByAuth(user.id).then(m => setIsAdmin(isPlatformAdmin(m?.role)))
   }, [user?.id])
 
   const hasRepo     = !!repoUrl

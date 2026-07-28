@@ -46,6 +46,7 @@ export default function OrgAdminPage() {
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
 
   const [nm, setNm] = useState({ email: '', password: '', display_name: '', org_role: 'member' })
+  const [buyAmount, setBuyAmount] = useState('')
 
   const loadAll = useCallback(async () => {
     const cr = await orgFetch('/api/org/credit')
@@ -59,6 +60,22 @@ export default function OrgAdminPage() {
     if (ndd.success) setCatalog(ndd.nodes)
   }, [])
   useEffect(() => { loadAll() }, [loadAll])
+
+  // Retorno de la pasarela: los créditos llegan por webhook, así que refrescamos con un pequeño delay
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const p = new URLSearchParams(window.location.search)
+    if (p.get('paid')) { flash('Payment received — credits will appear shortly.'); setTimeout(() => loadAll(), 2500); window.history.replaceState({}, '', '/org') }
+    else if (p.get('canceled')) { flash('Payment canceled.'); window.history.replaceState({}, '', '/org') }
+  }, [loadAll])
+
+  async function buyCredits() {
+    if (!buyAmount || Number(buyAmount) <= 0) return
+    const r = await orgFetch('/api/org/credits/checkout', { method: 'POST', body: JSON.stringify({ amount_usd: Number(buyAmount) }) })
+    const d = await r.json()
+    if (d.success && d.url) window.location.href = d.url  // redirige a la pasarela
+    else flash(d.error || 'Error')
+  }
 
   async function addMember() {
     if (!nm.email || !nm.password || !nm.display_name) return
@@ -124,9 +141,17 @@ export default function OrgAdminPage() {
         {/* Credit */}
         <div style={box}>
           <h2 style={h2}>Credit & consumption</h2>
-          <div style={{ display: 'flex', gap: 40, marginBottom: 14 }}>
+          <div style={{ display: 'flex', gap: 40, marginBottom: 14, alignItems: 'flex-end' }}>
             <div><span style={label}>Balance (remaining)</span><div style={{ fontSize: 22, color: 'var(--text-0)', fontWeight: 700 }}>{money(credit?.balance)}</div></div>
             <div><span style={label}>Credit loaded</span><div style={{ fontSize: 22, color: 'var(--text-2)' }}>{money(credit?.last_topup_usd)}</div></div>
+            <div style={{ flex: 1 }} />
+            <div>
+              <span style={label}>Buy credits (USD)</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input style={{ ...inp, width: 100 }} value={buyAmount} onChange={e => setBuyAmount(e.target.value)} placeholder="100" />
+                <button style={btn} onClick={buyCredits}>Buy credits</button>
+              </div>
+            </div>
           </div>
           <span style={label}>Recent activity</span>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
