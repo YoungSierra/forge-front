@@ -49,7 +49,7 @@ function CapEditor({ capUsd, period, spent, onSave }: { capUsd: number | null; p
   const over = capUsd != null && spent >= capUsd
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ fontSize: 10, color: over ? 'var(--danger,#b3261e)' : 'var(--text-3)', minWidth: 72, textAlign: 'right' }}>
+      <span style={{ fontSize: 10, color: over ? 'var(--danger,#b3261e)' : 'var(--text-3)', minWidth: 72, textAlign: 'left' }}>
         {money(spent)}{capUsd != null ? ` / ${money(capUsd)}` : ''}
       </span>
       <input value={amt} onChange={e => setAmt(e.target.value)} onBlur={() => onSave(amt, per)} placeholder="no cap"
@@ -64,6 +64,7 @@ function CapEditor({ capUsd, period, spent, onSave }: { capUsd: number | null; p
 
 export default function OrgAdminPage() {
   const [denied, setDenied] = useState(false)
+  const [tab, setTab] = useState<'members' | 'projects' | 'blueprints'>('members')
   const [credit, setCredit] = useState<Credit | null>(null)
   const [ledger, setLedger] = useState<Tx[]>([])
   const [members, setMembers] = useState<OrgMember[]>([])
@@ -295,11 +296,20 @@ export default function OrgAdminPage() {
           </table>
         </div>
 
-        {/* Members */}
+        {/* Tabs: Members / Projects / Blueprints — evita bajar el scroll */}
+        <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--line-2)' }}>
+          {(['members', 'projects', 'blueprints'] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px 16px', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: tab === t ? 'var(--text-0)' : 'var(--text-3)', borderBottom: tab === t ? '2px solid var(--action)' : '2px solid transparent', marginBottom: -1 }}>
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'members' && (
         <div style={box}>
-          <h2 style={h2}>Members</h2>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 12 }}>
-            <thead><tr><th style={th}>Name</th><th style={th}>Email</th><th style={th}>Role</th><th style={{ ...th, textAlign: 'right' }}>Spending cap</th><th style={th}></th></tr></thead>
+            <thead><tr><th style={th}>Name</th><th style={th}>Email</th><th style={th}>Role</th><th style={th}>Spending cap</th><th style={th}></th></tr></thead>
             <tbody>
               {members.map(m => (
                 <tr key={m.member_id} style={{ borderTop: '1px solid var(--line-2)' }}>
@@ -332,25 +342,24 @@ export default function OrgAdminPage() {
           </div>
         </div>
 
-        {/* Projects — sub-topes por proyecto (búsqueda + paginación) */}
+        )}
+
+        {tab === 'projects' && (
         <div style={box}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-            <h2 style={{ ...h2, margin: 0, flex: 1 }}>Projects</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+            <p style={{ fontSize: 11, color: 'var(--text-3)', margin: 0, flex: 1 }}>Optional per-project spending caps, under your organization&apos;s credit. Leave empty for no cap.</p>
             <input value={projSearch} onChange={e => { setProjSearch(e.target.value); setProjPage(0) }}
-              placeholder="Search by name…" style={{ ...inp, width: 200 }} />
+              placeholder="Search by name…" style={{ ...inp, width: 200, flexShrink: 0 }} />
           </div>
-          <p style={{ fontSize: 11, color: 'var(--text-3)', margin: '0 0 10px' }}>Optional per-project spending caps, under your organization&apos;s credit. Leave empty for no cap.</p>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead><tr><th style={th}>Project</th><th style={{ ...th, textAlign: 'right' }}>Spending cap</th></tr></thead>
+            <thead><tr><th style={{ ...th, width: '100%' }}>Project</th><th style={th}>Spending cap</th></tr></thead>
             <tbody>
               {projects.map(p => (
                 <tr key={p.id} style={{ borderTop: '1px solid var(--line-2)' }}>
                   <td style={{ padding: '5px 6px', color: 'var(--text-0)' }}>{p.name || '—'}</td>
-                  <td style={{ padding: '5px 6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                      <CapEditor capUsd={p.credit_cap_usd} period={p.credit_cap_period} spent={p.spent}
-                        onSave={(cap, per) => updateProjectCap(p.id, cap, per)} />
-                    </div>
+                  <td style={{ padding: '5px 6px', whiteSpace: 'nowrap' }}>
+                    <CapEditor capUsd={p.credit_cap_usd} period={p.credit_cap_period} spent={p.spent}
+                      onSave={(cap, per) => updateProjectCap(p.id, cap, per)} />
                   </td>
                 </tr>
               ))}
@@ -366,13 +375,14 @@ export default function OrgAdminPage() {
           )}
         </div>
 
-        {/* Blueprints */}
+        )}
+
+        {tab === 'blueprints' && (
         <div style={box}>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-            <h2 style={{ ...h2, margin: 0, flex: 1 }}>Blueprints</h2>
-            <button style={btn} onClick={() => setBpEditing({ ...EMPTY_BP })}>+ New blueprint</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+            <p style={{ fontSize: 11, color: 'var(--text-3)', margin: 0, flex: 1 }}>Standard blueprints (by V57) are read-only. Click your own to edit.</p>
+            <button style={{ ...btn, flexShrink: 0 }} onClick={() => setBpEditing({ ...EMPTY_BP })}>+ New blueprint</button>
           </div>
-          <p style={{ fontSize: 11, color: 'var(--text-3)', margin: '0 0 10px' }}>Standard blueprints (by V57) are read-only. Click your own to edit.</p>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead><tr><th style={th}>Name</th><th style={th}>Key</th><th style={th}>Phase</th><th style={th}>Source</th><th style={th}></th></tr></thead>
             <tbody>
@@ -390,6 +400,7 @@ export default function OrgAdminPage() {
             </tbody>
           </table>
         </div>
+        )}
 
       </div>
 
