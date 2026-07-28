@@ -16,12 +16,13 @@ async function orgFetch(path: string, opts?: RequestInit) {
 
 interface Credit { balance: number; last_topup_usd: number; alert: 'low' | 'depleted' | null }
 interface Tx { id: string; type: string; amount_usd: number; balance_after: number | null; created_at: string }
-interface OrgMember { org_member_id: string; member_id: string; org_role: string; display_name: string | null; email: string | null }
+interface OrgMember { org_member_id: string; member_id: string; org_role: string; display_name: string | null; email: string | null; credit_cap_usd: number | null; credit_cap_period: string; spent: number }
 interface OrgBlueprint {
   id: string; blueprint_key: string; name: string; phase: string; description: string | null
   is_default?: boolean; node_sequence?: NodeSequenceItem[]; edges?: Edge[]; gate?: Gate
   standard: boolean; editable: boolean
 }
+interface OrgProject { id: string; name: string; credit_cap_usd: number | null; credit_cap_period: string; spent: number }
 // Confirmación in-app para acciones destructivas/financieras (deletes, degradar owner, comprar créditos)
 type ConfirmOpts = { title: string; body: string; confirmLabel: string; danger?: boolean; onConfirm: () => void | Promise<void>; onCancel?: () => void }
 
@@ -39,11 +40,37 @@ const label: React.CSSProperties = { fontSize: 10, color: 'var(--text-2)', textT
 const th: React.CSSProperties = { padding: '4px 6px', color: 'var(--text-2)', fontSize: 10, textTransform: 'uppercase', textAlign: 'left', fontWeight: 400 }
 const h2: React.CSSProperties = { fontSize: 13, color: 'var(--text-0)', fontWeight: 700, margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: '0.06em' }
 
+// Editor compacto de sub-tope: muestra gasto vs tope (rojo si lo alcanzó) y edita monto + período.
+// Guarda al salir del campo (blur) o al cambiar el período. Monto vacío = sin tope.
+function CapEditor({ capUsd, period, spent, onSave }: { capUsd: number | null; period: string; spent: number; onSave: (cap: string, period: string) => void }) {
+  const [amt, setAmt] = useState(capUsd != null ? String(capUsd) : '')
+  const [per, setPer] = useState(period || 'monthly')
+  useEffect(() => { setAmt(capUsd != null ? String(capUsd) : ''); setPer(period || 'monthly') }, [capUsd, period])
+  const over = capUsd != null && spent >= capUsd
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 10, color: over ? 'var(--danger,#b3261e)' : 'var(--text-3)', minWidth: 72, textAlign: 'right' }}>
+        {money(spent)}{capUsd != null ? ` / ${money(capUsd)}` : ''}
+      </span>
+      <input value={amt} onChange={e => setAmt(e.target.value)} onBlur={() => onSave(amt, per)} placeholder="no cap"
+        style={{ ...inp, width: 64, padding: '2px 5px', fontSize: 11 }} />
+      <select value={per} onChange={e => { setPer(e.target.value); onSave(amt, e.target.value) }} style={{ ...inp, padding: '2px 3px', fontSize: 10 }}>
+        <option value="monthly">/mo</option>
+        <option value="total">total</option>
+      </select>
+    </div>
+  )
+}
+
 export default function OrgAdminPage() {
   const [denied, setDenied] = useState(false)
   const [credit, setCredit] = useState<Credit | null>(null)
   const [ledger, setLedger] = useState<Tx[]>([])
   const [members, setMembers] = useState<OrgMember[]>([])
+  const [projects, setProjects] = useState<OrgProject[]>([])
+  const [projSearch, setProjSearch] = useState('')
+  const [projPage, setProjPage] = useState(0)
+  const [projTotal, setProjTotal] = useState(0)
   const [blueprints, setBlueprints] = useState<OrgBlueprint[]>([])
   const [catalog, setCatalog] = useState<ForgeNode[]>([])
   const [bpEditing, setBpEditing] = useState<Partial<ForgeBlueprint> | null>(null)
@@ -74,6 +101,15 @@ export default function OrgAdminPage() {
     if (ndd.success) setCatalog(ndd.nodes)
   }, [])
   useEffect(() => { loadAll() }, [loadAll])
+
+  // Proyectos: carga paginada con búsqueda por nombre (server-side). El gasto se calcula solo de la página visible.
+  const PROJ_PAGE_SIZE = 10
+  const loadProjects = useCallback(async () => {
+    const r = await orgFetch(`/api/org/projects?search=${encodeURIComponent(projSearch)}&page=${projPage}&pageSize=${PROJ_PAGE_SIZE}`)
+    const d = await r.json()
+    if (d.success) { setProjects(d.projects); setProjTotal(d.total) }
+  }, [projSearch, projPage])
+  useEffect(() => { const t = setTimeout(loadProjects, 250); return () => clearTimeout(t) }, [loadProjects])
 
   // Retorno de la pasarela: los créditos llegan por webhook, así que refrescamos con un pequeño delay
   useEffect(() => {
@@ -144,6 +180,14 @@ export default function OrgAdminPage() {
         confirmLabel: 'Change my role', danger: true, onConfirm: apply, onCancel: revert,
       })
     } else apply()
+  }
+  async function updateMemberCap(memberId: string, cap: string, period: string) {
+    const r = await orgFetch(`/api/org/members/${memberId}`, { method: 'PATCH', body: JSON.stringify({ credit_cap_usd: cap === '' ? null : Number(cap), credit_cap_period: period }) })
+    const d = await r.json(); if (d.success) loadAll(); else flash(d.error || 'Something went wrong. Try again.', 'error')
+  }
+  async function updateProjectCap(projectId: string, cap: string, period: string) {
+    const r = await orgFetch(`/api/org/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify({ credit_cap_usd: cap === '' ? null : Number(cap), credit_cap_period: period }) })
+    const d = await r.json(); if (d.success) loadProjects(); else flash(d.error || 'Something went wrong. Try again.', 'error')
   }
   function removeMember(m: OrgMember) {
     const name = m.display_name || m.email || 'this member'
@@ -255,7 +299,7 @@ export default function OrgAdminPage() {
         <div style={box}>
           <h2 style={h2}>Members</h2>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 12 }}>
-            <thead><tr><th style={th}>Name</th><th style={th}>Email</th><th style={th}>Role</th><th style={th}></th></tr></thead>
+            <thead><tr><th style={th}>Name</th><th style={th}>Email</th><th style={th}>Role</th><th style={{ ...th, textAlign: 'right' }}>Spending cap</th><th style={th}></th></tr></thead>
             <tbody>
               {members.map(m => (
                 <tr key={m.member_id} style={{ borderTop: '1px solid var(--line-2)' }}>
@@ -265,6 +309,10 @@ export default function OrgAdminPage() {
                     <select value={m.org_role} onChange={e => changeRole(m, e.target.value)} style={{ ...inp, padding: '2px 4px', fontSize: 11 }}>
                       {['owner', 'admin', 'member', 'viewer'].map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
+                  </td>
+                  <td style={{ padding: '5px 6px' }}>
+                    <CapEditor capUsd={m.credit_cap_usd} period={m.credit_cap_period} spent={m.spent}
+                      onSave={(cap, per) => updateMemberCap(m.member_id, cap, per)} />
                   </td>
                   <td style={{ padding: '5px 6px', textAlign: 'right' }}><button style={btnGhostDanger} onClick={() => removeMember(m)}>Remove</button></td>
                 </tr>
@@ -282,6 +330,40 @@ export default function OrgAdminPage() {
             </select>
             <button style={btn} onClick={addMember}>Add user</button>
           </div>
+        </div>
+
+        {/* Projects — sub-topes por proyecto (búsqueda + paginación) */}
+        <div style={box}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+            <h2 style={{ ...h2, margin: 0, flex: 1 }}>Projects</h2>
+            <input value={projSearch} onChange={e => { setProjSearch(e.target.value); setProjPage(0) }}
+              placeholder="Search by name…" style={{ ...inp, width: 200 }} />
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--text-3)', margin: '0 0 10px' }}>Optional per-project spending caps, under your organization&apos;s credit. Leave empty for no cap.</p>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead><tr><th style={th}>Project</th><th style={{ ...th, textAlign: 'right' }}>Spending cap</th></tr></thead>
+            <tbody>
+              {projects.map(p => (
+                <tr key={p.id} style={{ borderTop: '1px solid var(--line-2)' }}>
+                  <td style={{ padding: '5px 6px', color: 'var(--text-0)' }}>{p.name || '—'}</td>
+                  <td style={{ padding: '5px 6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <CapEditor capUsd={p.credit_cap_usd} period={p.credit_cap_period} spent={p.spent}
+                        onSave={(cap, per) => updateProjectCap(p.id, cap, per)} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {projects.length === 0 && <tr><td colSpan={2} style={{ padding: 8, color: 'var(--text-3)', fontSize: 10 }}>{projSearch ? 'No projects match your search.' : 'No projects in this organization yet.'}</td></tr>}
+            </tbody>
+          </table>
+          {projTotal > PROJ_PAGE_SIZE && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 10, fontSize: 11, color: 'var(--text-3)' }}>
+              <span>{projPage * PROJ_PAGE_SIZE + 1}–{Math.min((projPage + 1) * PROJ_PAGE_SIZE, projTotal)} of {projTotal}</span>
+              <button style={{ ...btnGhost, opacity: projPage === 0 ? 0.4 : 1 }} disabled={projPage === 0} onClick={() => setProjPage(p => Math.max(0, p - 1))}>Prev</button>
+              <button style={{ ...btnGhost, opacity: (projPage + 1) * PROJ_PAGE_SIZE >= projTotal ? 0.4 : 1 }} disabled={(projPage + 1) * PROJ_PAGE_SIZE >= projTotal} onClick={() => setProjPage(p => p + 1)}>Next</button>
+            </div>
+          )}
         </div>
 
         {/* Blueprints */}
