@@ -50,7 +50,10 @@ export default function ProjectsList() {
 
   useEffect(() => {
     if (authLoading) return
-    getProjects(user?.id)
+    // Sin sesión (p.ej. durante el sign-out, cuando user pasa a null antes del redirect) no pedimos
+    // proyectos: el backend responde 401 y se pintaría un error rojo en un parpadeo. Se va a /login.
+    if (!user) { setLoading(false); return }
+    getProjects(user.id)
       .then(setProjects)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))

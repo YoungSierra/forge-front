@@ -3435,6 +3435,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [canvasData,        setCanvasData]        = useState<CanvasData | null>(null)
   const [loading,           setLoading]           = useState(true)
   const [selectedNode,      setSelectedNode]      = useState<CanvasNode | null>(null)
+  const [hoveredNodeId,     setHoveredNodeId]     = useState<string | null>(null)  // focus: resalta sus cables
   const [removing,          setRemoving]          = useState(false)
   const [sidebarCollapsed,  setSidebarCollapsed]  = useState(false)
   const [chatNode,          setChatNode]          = useState<CanvasNode | null>(null)
@@ -4032,6 +4033,92 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     requestAnimationFrame(() => fitView({ padding: 0.3, duration: 300 }))
   }
 
+  // Auto-organiza en capas del DAG (rango topológico): las raíces a la izquierda y cada nodo a la
+  // derecha de sus predecesores. Endereza el "plato de espagueti" minimizando cruces de cables.
+  function autoArrange() {
+    if (!canvasData) return
+
+    const cns     = canvasData.nodes
+    const idSet   = new Set(cns.map(n => n.project_node_id))
+    const orderOf: Record<string, number> = Object.fromEntries(cns.map(n => [n.project_node_id, n.order_index ?? 999]))
+
+    // Grafo dirigido source(out) -> target(in) sobre los nodos reales
+    const succ: Record<string, string[]> = {}
+    const pred: Record<string, string[]> = {}
+    const indeg: Record<string, number>  = {}
+    for (const id of idSet) { succ[id] = []; pred[id] = []; indeg[id] = 0 }
+    for (const e of edgesRef.current) {
+      if (!idSet.has(e.source) || !idSet.has(e.target) || e.source === e.target) continue
+      succ[e.source].push(e.target); pred[e.target].push(e.source); indeg[e.target]++
+    }
+
+    // Rango por longest-path (Kahn). Nodos en ciclo o sueltos quedan en rango 0.
+    const rank: Record<string, number> = {}
+    const indegLeft: Record<string, number> = { ...indeg }
+    const queue: string[] = []
+    for (const id of idSet) if (indeg[id] === 0) { rank[id] = 0; queue.push(id) }
+    while (queue.length) {
+      const u = queue.shift() as string
+      for (const v of succ[u]) {
+        rank[v] = Math.max(rank[v] ?? 0, (rank[u] ?? 0) + 1)
+        if (--indegLeft[v] === 0) queue.push(v)
+      }
+    }
+    for (const id of idSet) if (rank[id] === undefined) rank[id] = 0
+
+    // Agrupar por columna (rango) y ordenar cada columna por order_index (orden inicial estable)
+    const cols: Record<number, string[]> = {}
+    for (const id of idSet) (cols[rank[id]] ??= []).push(id)
+    for (const r of Object.keys(cols)) cols[+r].sort((a, b) => orderOf[a] - orderOf[b])
+
+    // Minimización de cruces (baricentro / método de Sugiyama): en varias pasadas se reordena cada
+    // columna según la posición media de sus vecinos en la columna fija contigua. Los nodos sin
+    // vecinos se quedan donde están. Alterna izquierda->derecha (por predecesores) y viceversa.
+    const maxRank = Math.max(0, ...Object.keys(cols).map(Number))
+    const idxOf: Record<string, number> = {}
+    const reindex = () => { for (const r of Object.keys(cols)) cols[+r].forEach((id, i) => { idxOf[id] = i }) }
+    const bary = (id: string, neigh: string[]) => {
+      const ns = neigh.filter(n => idxOf[n] !== undefined)
+      if (ns.length === 0) return idxOf[id]  // sin vecinos -> conserva su lugar
+      return ns.reduce((s, n) => s + idxOf[n], 0) / ns.length
+    }
+    reindex()
+    for (let sweep = 0; sweep < 4; sweep++) {
+      for (let r = 1; r <= maxRank; r++) {                 // hacia adelante: ordena por predecesores
+        if (!cols[r]) continue
+        const b: Record<string, number> = {}
+        cols[r].forEach(id => { b[id] = bary(id, pred[id]) })
+        cols[r].sort((a, c) => b[a] - b[c]); reindex()
+      }
+      for (let r = maxRank - 1; r >= 0; r--) {             // hacia atrás: ordena por sucesores
+        if (!cols[r]) continue
+        const b: Record<string, number> = {}
+        cols[r].forEach(id => { b[id] = bary(id, succ[id]) })
+        cols[r].sort((a, c) => b[a] - b[c]); reindex()
+      }
+    }
+
+    const COL_PITCH = NODE_W + 140  // separación horizontal entre columnas
+    const ROW_PITCH = 200           // separación vertical dentro de una columna
+    const positions: { id: string; position: { x: number; y: number } }[] = []
+    for (const r of Object.keys(cols)) {
+      const col = cols[+r]
+      const x   = +r * COL_PITCH
+      col.forEach((id, i) => {
+        const y = (i - (col.length - 1) / 2) * ROW_PITCH  // columna centrada en y=0
+        positions.push({ id, position: { x, y } })
+      })
+    }
+
+    // Aplicar + persistir (mismo patrón que resetLayout); no toca los nodos de lane
+    const posMap = Object.fromEntries(positions.map(p => [p.id, p]))
+    saveLayout(project.id, { templateId: canvasData?.active_blueprint?.id ?? null, nodes: positions.map(p => ({ id: p.id, position: p.position })) as never, edges: [] }, true)
+    setSavedLayout(null)
+    setNodes(prev => prev.map(n => posMap[n.id] ? { ...n, position: posMap[n.id].position } : n))
+
+    requestAnimationFrame(() => fitView({ padding: 0.25, duration: 400 }))
+  }
+
   function toggleEdgeStyle() {
     setEdgeStyle(prev => {
       const next: EdgeStyle = prev === 'bezier' ? 'orthogonal' : 'bezier'
@@ -4087,6 +4174,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   // Ref para que syncLaneNodes siempre use la versión actual de persistLayout
   const persistLayoutRef = useRef(persistLayout)
   persistLayoutRef.current = persistLayout
+
+  // Se marca .rf-moving en el canvas para apagar por CSS los filtros y animaciones pesados de los
+  // cables (blur/drop-shadow/animaciones) en dos casos: (1) durante zoom/pan, y (2) con zoom alto
+  // (>1.5), donde esos filtros se rasterizan a gran escala cada frame y causan parpadeo aun quieto.
+  const [moving, setMoving] = useState(false)
 
   // Ref a runScope para que el botón ▶ del LaneGroupNode no quede con un closure stale
   const runScopeRef = useRef(runScope)
@@ -4245,21 +4337,28 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
   // Selección y onDelete inyectados en runtime (onDelete no es serializable a localStorage)
   const displayEdges = useMemo(
-    () => edges.map(e => {
-      const approved = forgyiSourceIds.has(e.source)
-      return {
-        ...e,
-        selected: e.id === selectedEdgeId,
-        data: {
-          ...(e.data as object),
-          onDelete: () => deleteEdge(e.id),
-          approved,
-          active:   false,
-          color:    '#6b7280',
-        },
-      }
-    }),
-    [edges, selectedEdgeId, deleteEdge, forgyiSourceIds],
+    () => {
+      // Focus: con un nodo en hover (o seleccionado) se resaltan SOLO sus cables y se atenúa el resto,
+      // para leer el grafo por denso que sea.
+      const focusId = hoveredNodeId ?? selectedNode?.project_node_id ?? null
+      return edges.map(e => {
+        const approved = forgyiSourceIds.has(e.source)
+        const touches  = focusId != null && (e.source === focusId || e.target === focusId)
+        return {
+          ...e,
+          selected: e.id === selectedEdgeId,
+          data: {
+            ...(e.data as object),
+            onDelete: () => deleteEdge(e.id),
+            approved,
+            active:   touches,
+            dimmed:   focusId != null && !touches,
+            color:    '#6b7280',
+          },
+        }
+      })
+    },
+    [edges, selectedEdgeId, deleteEdge, forgyiSourceIds, hoveredNodeId, selectedNode],
   )
 
   const onConnect = useCallback((connection: Connection) => {
@@ -4869,6 +4968,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               { label: '−', action: () => zoomOut({ duration: 200 }),               title: 'Zoom out'    },
               { label: '⊡', action: () => fitView({ padding: 0.3, duration: 300 }), title: 'Fit view'    },
               { label: '↺', action: () => resetLayout(),                             title: 'Reset layout' },
+              { label: '≣', action: () => autoArrange(),                             title: 'Auto-arrange (tidy DAG layout)' },
             ] as const).map(({ label, action, title }) => (
               <button key={label} title={title} onClick={action} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-1)', cursor: 'pointer', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                 {label}
@@ -4938,7 +5038,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             onNodeDragStart={handleNodeDragStart}
             onNodeDrag={handleNodeDrag}
             onNodeDragStop={handleNodeDragStop}
-            onMoveEnd={persistLayout}
+            onNodeMouseEnter={(_, node) => { if (!node.id.startsWith('lane-')) setHoveredNodeId(node.id) }}
+            onNodeMouseLeave={() => setHoveredNodeId(null)}
+            onMoveStart={() => setMoving(true)}
+            onMoveEnd={() => { setMoving(false); persistLayout() }}
+            className={(moving || zoom > 1.5) ? 'rf-moving' : undefined}
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             nodeTypes={NODE_TYPES}

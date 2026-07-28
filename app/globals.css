@@ -1115,3 +1115,9 @@ html, body {
 
 /* Expand button en bubble del asistente */
 div:hover > div > .msg-expand-btn { opacity: 1 !important; }
+
+/* Canvas: con .rf-moving (durante zoom/pan, o con zoom alto >1.5) se apagan los filtros y animaciones
+   pesados de los cables (blur + drop-shadow + animaciones infinitas) -> evita la saturación naranja y
+   el parpadeo de nodos (esos filtros se rasterizan a gran escala cada frame). A zoom normal y en
+   reposo el efecto vuelve completo. */
+.rf-moving .forge-edge-fx { filter: none !important; animation: none !important; opacity: 0.2 !important; }

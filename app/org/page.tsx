@@ -22,6 +22,8 @@ interface OrgBlueprint {
   is_default?: boolean; node_sequence?: NodeSequenceItem[]; edges?: Edge[]; gate?: Gate
   standard: boolean; editable: boolean
 }
+// Confirmación in-app para acciones destructivas/financieras (deletes, degradar owner, comprar créditos)
+type ConfirmOpts = { title: string; body: string; confirmLabel: string; danger?: boolean; onConfirm: () => void | Promise<void>; onCancel?: () => void }
 
 const money = (v: number | null | undefined) => '$' + Number(v ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -30,6 +32,7 @@ const box: React.CSSProperties = { background: 'var(--bg-1)', border: '1px solid
 const inp: React.CSSProperties = { background: 'var(--bg-0)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '5px 8px', fontSize: 12, color: 'var(--text-0)', fontFamily: 'inherit' }
 const btn: React.CSSProperties = { background: 'var(--action)', color: '#fff', border: 'none', borderRadius: 5, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }
 const btnGhost: React.CSSProperties = { background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--line-2)', borderRadius: 5, padding: '3px 8px', fontSize: 10, cursor: 'pointer' }
+const btnDanger: React.CSSProperties = { background: 'var(--danger,#b3261e)', color: '#fff', border: 'none', borderRadius: 5, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }
 const label: React.CSSProperties = { fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3, display: 'block' }
 const th: React.CSSProperties = { padding: '4px 6px', color: 'var(--text-3)', fontSize: 10, textTransform: 'uppercase', textAlign: 'left', fontWeight: 400 }
 const h2: React.CSSProperties = { fontSize: 12, color: 'var(--text-2)', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.06em' }
@@ -47,6 +50,10 @@ export default function OrgAdminPage() {
 
   const [nm, setNm] = useState({ email: '', password: '', display_name: '', org_role: 'member' })
   const [buyAmount, setBuyAmount] = useState('')
+  const [confirmState, setConfirmState] = useState<ConfirmOpts | null>(null)
+  const [busy, setBusy] = useState(false)  // evita doble-checkout mientras se crea la sesión de pago
+  const askConfirm = (o: ConfirmOpts) => setConfirmState(o)
+  const closeConfirm = () => { confirmState?.onCancel?.(); setConfirmState(null) }
 
   const loadAll = useCallback(async () => {
     const cr = await orgFetch('/api/org/credit')
@@ -69,12 +76,31 @@ export default function OrgAdminPage() {
     else if (p.get('canceled')) { flash('Payment canceled.'); window.history.replaceState({}, '', '/org') }
   }, [loadAll])
 
-  async function buyCredits() {
-    if (!buyAmount || Number(buyAmount) <= 0) return
-    const r = await orgFetch('/api/org/credits/checkout', { method: 'POST', body: JSON.stringify({ amount_usd: Number(buyAmount) }) })
-    const d = await r.json()
-    if (d.success && d.url) window.location.href = d.url  // redirige a la pasarela
-    else flash(d.error || 'Error')
+  // Escape cierra (cancela) el diálogo de confirmación
+  useEffect(() => {
+    if (!confirmState) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { confirmState.onCancel?.(); setConfirmState(null) } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [confirmState])
+
+  function buyCredits() {
+    if (!buyAmount || Number(buyAmount) <= 0) { flash('Enter an amount greater than 0'); return }
+    const amount = Number(buyAmount)
+    // Readback del monto en NUESTRA superficie antes de mandar al usuario (y su plata) a la pasarela
+    askConfirm({
+      title: 'Confirm purchase',
+      body: `Load ${money(amount)} of credit to your organization? You'll be taken to the payment provider to complete the purchase.`,
+      confirmLabel: 'Continue to payment',
+      onConfirm: async () => {
+        if (busy) return
+        setBusy(true)
+        const r = await orgFetch('/api/org/credits/checkout', { method: 'POST', body: JSON.stringify({ amount_usd: amount }) })
+        const d = await r.json()
+        if (d.success && d.url) window.location.href = d.url  // redirige a la pasarela
+        else { setBusy(false); flash(d.error || 'Error') }
+      },
+    })
   }
 
   async function addMember() {
@@ -83,13 +109,40 @@ export default function OrgAdminPage() {
     const d = await r.json()
     if (d.success) { setNm({ email: '', password: '', display_name: '', org_role: 'member' }); flash('User created'); loadAll() } else flash(d.error || 'Error')
   }
-  async function changeRole(memberId: string, org_role: string) {
-    const r = await orgFetch(`/api/org/members/${memberId}`, { method: 'PATCH', body: JSON.stringify({ org_role }) })
-    const d = await r.json(); if (d.success) loadAll(); else flash(d.error || 'Error')
+  function changeRole(m: OrgMember, org_role: string) {
+    if (org_role === m.org_role) return
+    const revert = () => setMembers(ms => [...ms])  // fuerza al <select> controlado a volver al rol real
+    // No dejar la organización sin owner: bloquear degradar al único owner
+    const owners = members.filter(x => x.org_role === 'owner')
+    if (m.org_role === 'owner' && org_role !== 'owner' && owners.length <= 1) {
+      flash('Assign another owner first — an organization must keep at least one owner.')
+      revert(); return
+    }
+    const myId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+    const selfLosingAccess = m.member_id === myId && (m.org_role === 'owner' || m.org_role === 'admin') && (org_role === 'member' || org_role === 'viewer')
+    const apply = async () => {
+      const r = await orgFetch(`/api/org/members/${m.member_id}`, { method: 'PATCH', body: JSON.stringify({ org_role }) })
+      const d = await r.json(); if (d.success) loadAll(); else { flash(d.error || 'Error'); revert() }
+    }
+    if (selfLosingAccess) {
+      askConfirm({
+        title: 'Change your own role?',
+        body: `You're about to set your own role to "${org_role}". You'll lose access to this admin page, and you can't undo it from here.`,
+        confirmLabel: 'Change my role', danger: true, onConfirm: apply, onCancel: revert,
+      })
+    } else apply()
   }
-  async function removeMember(memberId: string) {
-    const r = await orgFetch(`/api/org/members/${memberId}`, { method: 'DELETE' })
-    const d = await r.json(); if (d.success) loadAll(); else flash(d.error || 'Error')
+  function removeMember(m: OrgMember) {
+    const name = m.display_name || m.email || 'this member'
+    askConfirm({
+      title: 'Remove member',
+      body: `Remove ${name} from your organization? They'll lose access to it. This can't be undone.`,
+      confirmLabel: 'Remove', danger: true,
+      onConfirm: async () => {
+        const r = await orgFetch(`/api/org/members/${m.member_id}`, { method: 'DELETE' })
+        const d = await r.json(); if (d.success) { flash('Member removed'); loadAll() } else flash(d.error || 'Error')
+      },
+    })
   }
   // Guardar blueprint desde el modal (crea o edita el propio)
   async function saveBp(data: Partial<ForgeBlueprint>) {
@@ -99,9 +152,16 @@ export default function OrgAdminPage() {
     if (!d.success) throw new Error(d.error)
     setBpEditing(null); flash(isNew ? 'Blueprint created' : 'Blueprint updated'); loadAll()
   }
-  async function deleteBlueprint(id: string) {
-    const r = await orgFetch(`/api/org/blueprints/${id}`, { method: 'DELETE' })
-    const d = await r.json(); if (d.success) loadAll(); else flash(d.error || 'Error')
+  function deleteBlueprint(b: OrgBlueprint) {
+    askConfirm({
+      title: 'Delete blueprint',
+      body: `Delete blueprint "${b.name}"? This can't be undone.`,
+      confirmLabel: 'Delete', danger: true,
+      onConfirm: async () => {
+        const r = await orgFetch(`/api/org/blueprints/${b.id}`, { method: 'DELETE' })
+        const d = await r.json(); if (d.success) { flash('Blueprint deleted'); loadAll() } else flash(d.error || 'Error')
+      },
+    })
   }
 
   if (denied) return (
@@ -181,11 +241,11 @@ export default function OrgAdminPage() {
                   <td style={{ padding: '5px 6px', color: 'var(--text-0)' }}>{m.display_name || '—'}</td>
                   <td style={{ padding: '5px 6px', color: 'var(--text-2)' }}>{m.email || '—'}</td>
                   <td style={{ padding: '5px 6px' }}>
-                    <select value={m.org_role} onChange={e => changeRole(m.member_id, e.target.value)} style={{ ...inp, padding: '2px 4px', fontSize: 11 }}>
+                    <select value={m.org_role} onChange={e => changeRole(m, e.target.value)} style={{ ...inp, padding: '2px 4px', fontSize: 11 }}>
                       {['owner', 'admin', 'member', 'viewer'].map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
-                  <td style={{ padding: '5px 6px', textAlign: 'right' }}><button style={btnGhost} onClick={() => removeMember(m.member_id)}>remove</button></td>
+                  <td style={{ padding: '5px 6px', textAlign: 'right' }}><button style={btnGhost} onClick={() => removeMember(m)}>remove</button></td>
                 </tr>
               ))}
             </tbody>
@@ -219,7 +279,7 @@ export default function OrgAdminPage() {
                   <td style={{ padding: '5px 6px', color: 'var(--text-3)', fontSize: 10 }}>{b.blueprint_key}</td>
                   <td style={{ padding: '5px 6px', color: 'var(--text-2)' }}>{b.phase}</td>
                   <td style={{ padding: '5px 6px' }}><span style={{ fontSize: 10, color: b.standard ? 'var(--text-3)' : 'var(--action)' }}>{b.standard ? 'standard' : 'own'}</span></td>
-                  <td style={{ padding: '5px 6px', textAlign: 'right' }}>{b.editable && <button style={btnGhost} onClick={e => { e.stopPropagation(); deleteBlueprint(b.id) }}>delete</button>}</td>
+                  <td style={{ padding: '5px 6px', textAlign: 'right' }}>{b.editable && <button style={btnGhost} onClick={e => { e.stopPropagation(); deleteBlueprint(b) }}>delete</button>}</td>
                 </tr>
               ))}
               {blueprints.length === 0 && <tr><td colSpan={5} style={{ padding: 8, color: 'var(--text-3)', fontSize: 10 }}>No blueprints.</td></tr>}
@@ -239,6 +299,26 @@ export default function OrgAdminPage() {
               {bpEditing.id ? `Edit — ${bpEditing.name}` : 'New Blueprint'}
             </div>
             <BlueprintForm blueprint={bpEditing} allNodes={catalog} onSave={saveBp} onCancel={() => setBpEditing(null)} />
+          </div>
+        </div>
+      )}
+
+      {/* Diálogo de confirmación (deletes, auto-degradación, compra de créditos) */}
+      {confirmState && (
+        <div role="dialog" aria-modal="true" onClick={closeConfirm}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <style>{`@keyframes org-confirm-in{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}} .org-confirm{animation:org-confirm-in .16s cubic-bezier(.2,.8,.2,1)}`}</style>
+          <div className="org-confirm" onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 400, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 10, padding: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.45)' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-0)', marginBottom: 8 }}>{confirmState.title}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.5, marginBottom: 18 }}>{confirmState.body}</div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button style={{ ...btnGhost, padding: '6px 12px', fontSize: 12 }} onClick={closeConfirm}>Cancel</button>
+              <button autoFocus style={confirmState.danger ? btnDanger : btn}
+                onClick={() => { const o = confirmState; setConfirmState(null); o.onConfirm() }}>
+                {confirmState.confirmLabel}
+              </button>
+            </div>
           </div>
         </div>
       )}

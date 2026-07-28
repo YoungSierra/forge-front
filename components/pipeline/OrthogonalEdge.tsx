@@ -11,6 +11,7 @@ export interface OrthogonalEdgeData extends Record<string, unknown> {
   color?:             string
   active?:            boolean
   approved?:          boolean
+  dimmed?:            boolean
   waypoints?:         WayPoint[]
   onWaypointsChange?: (id: string, waypoints: WayPoint[]) => void
   onDelete?:          () => void
@@ -83,6 +84,7 @@ function OrthogonalEdge({
   const d         = data as OrthogonalEdgeData
   const approved  = d?.approved ?? false
   const active    = d?.active   ?? false
+  const dimmed    = d?.dimmed   ?? false
   const color     = approved ? FORGYI_CLR : (d?.color ?? 'var(--text-3)')
   const edgeColor = selected ? '#EF4444' : color
   const stored    = (d?.waypoints ?? []) as WayPoint[]
@@ -153,7 +155,7 @@ function OrthogonalEdge({
   return (
     <>
       {(approved) && <style>{ANIM_KF}</style>}
-      <g>
+      <g style={{ opacity: dimmed ? 0.07 : 1, transition: 'opacity 120ms ease' }}>
         {/* Hit area amplio para facilitar selección y futuro click-to-add-waypoint */}
         <path
           d={edgePath}
@@ -165,19 +167,19 @@ function OrthogonalEdge({
 
         {approved ? (
           <>
-            <path d={edgePath} fill="none" stroke={FORGYI_CLR} strokeWidth={8}
+            <path className="forge-edge-fx" d={edgePath} fill="none" stroke={FORGYI_CLR} strokeWidth={8}
               strokeLinejoin="miter"
               style={{ filter: 'blur(6px)', animation: 'forgyi-pulse 1.8s ease-in-out infinite' }} />
             <path d={edgePath} fill="none" stroke={FORGYI_CLR} strokeWidth={1.5}
               opacity={0.35} strokeLinejoin="miter" />
-            <path d={edgePath} fill="none" stroke={FORGYI_CLR} strokeWidth={2}
+            <path className="forge-edge-fx" d={edgePath} fill="none" stroke={FORGYI_CLR} strokeWidth={2}
               strokeDasharray="10 18" strokeLinejoin="miter"
               style={{ filter: `drop-shadow(0 0 5px ${FORGYI_CLR})`, animation: 'forgyi-flow 1s linear infinite' }} />
           </>
         ) : (
           <>
             {/* Glow */}
-            <path d={edgePath} fill="none" stroke={edgeColor}
+            <path className="forge-edge-fx" d={edgePath} fill="none" stroke={edgeColor}
               strokeWidth={active || selected ? 3 : 2}
               opacity={active || selected ? 0.35 : 0.1}
               strokeLinejoin="miter"

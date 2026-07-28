@@ -20,6 +20,7 @@ export interface ForgeEdgeData extends Record<string, unknown> {
   color?:    string
   active?:   boolean
   approved?: boolean
+  dimmed?:   boolean
   onDelete?: () => void
 }
 
@@ -32,6 +33,7 @@ function ForgeEdge({
   const onDelete = d?.onDelete
   const approved = d?.approved ?? false
   const active   = d?.active   ?? false
+  const dimmed   = d?.dimmed   ?? false
   const color    = approved ? FORGYI_CLR : (d?.color ?? (style?.stroke as string) ?? 'var(--text-3)')
   const edgeColor = selected ? '#EF4444' : color
 
@@ -43,7 +45,7 @@ function ForgeEdge({
   return (
     <>
       {approved && <style>{FORGYI_KF}</style>}
-      <g>
+      <g style={{ opacity: dimmed ? 0.07 : 1, transition: 'opacity 120ms ease' }}>
         {/* Hit area */}
         <path
           d={edgePath}
@@ -57,6 +59,7 @@ function ForgeEdge({
           <>
             {/* Glow exterior pulsante */}
             <path
+              className="forge-edge-fx"
               d={edgePath}
               fill="none"
               stroke={FORGYI_CLR}
@@ -78,6 +81,7 @@ function ForgeEdge({
             />
             {/* Dashes animados que fluyen */}
             <path
+              className="forge-edge-fx"
               d={edgePath}
               fill="none"
               stroke={FORGYI_CLR}
@@ -94,6 +98,7 @@ function ForgeEdge({
           <>
             {/* Glow estático */}
             <path
+              className="forge-edge-fx"
               d={edgePath}
               fill="none"
               stroke={edgeColor}

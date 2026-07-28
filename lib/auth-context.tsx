@@ -89,12 +89,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user])
 
-  async function signOut() {
+  function signOut() {
     localStorage.removeItem(MEMBER_ID_KEY)
     localStorage.removeItem('forge_last_project')
     localStorage.removeItem('forge_active_org_id')
-    await supabase.auth.signOut()
+    // Navegar de INMEDIATO: si esperáramos el signOut, React alcanza a renderizar el error de alguna
+    // request que quedó sin token (el "Invalid token" del backend) y se ve un parpadeo rojo antes del
+    // redirect. Revocamos la sesión en segundo plano y descargamos la página ya.
+    supabase.auth.signOut().catch(() => {})
     window.location.replace('/login')
+    return Promise.resolve()
   }
 
   return (
