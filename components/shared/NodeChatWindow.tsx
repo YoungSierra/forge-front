@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { CopyButton } from '@/components/shared/CopyButton'
 import { chatWithNode, getNodeContextInputs } from '@/lib/api'
 import type { ChatMessage, ChatAttachment, ChatToolCall, ApprovedAsset, OutputImageItem, OutputImagesMap, NodeContextInput } from '@/lib/api'
 import type { Project } from '@/lib/types'
@@ -667,6 +668,8 @@ function MessageBubble({ msg, onExpand }: {
   onExpand?: () => void
 }) {
   const isUser = msg.role === 'user'
+  // Texto a copiar: la versión legible (markdown), igual a lo que se muestra
+  const copyText = jsonToMarkdown(msg.content) ?? msg.content
   return (
     <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', gap: 8, flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
       {!isUser && msg.tool_calls && msg.tool_calls.length > 0 && (
@@ -707,6 +710,12 @@ function MessageBubble({ msg, onExpand }: {
               </div>
             )}
           </div>
+
+          {/* Botón copiar como texto — mensajes del asistente */}
+          {!isUser && (
+            <CopyButton text={copyText} className="msg-expand-btn"
+              style={{ position: 'absolute', top: 6, right: onExpand ? 30 : 6, opacity: 0, transition: 'opacity 120ms' }} />
+          )}
 
           {/* Botón expandir — solo en mensajes del asistente */}
           {!isUser && onExpand && (
@@ -825,6 +834,16 @@ export default function NodeChatWindow({
   const [hasNewResponse,  setHasNewResponse]  = useState(!approvedAsset)
   const [error,           setError]           = useState<string | null>(null)
   const [expandedContent, setExpandedContent] = useState<{ content: string; imageItems?: InlineImageItem[]; pngImages?: OutputImagesMap } | null>(null)
+  // Modal expand: arrastrable (offset desde el centro). El resize lo hace CSS (resize: both).
+  const [expandPos, setExpandPos] = useState({ x: 0, y: 0 })
+  useEffect(() => { if (expandedContent) setExpandPos({ x: 0, y: 0 }) }, [expandedContent])  // re-centrar al abrir
+  const onExpandDrag = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, a')) return  // no arrastrar desde los controles
+    const start = { sx: e.clientX, sy: e.clientY, ox: expandPos.x, oy: expandPos.y }
+    const move = (me: MouseEvent) => setExpandPos({ x: start.ox + (me.clientX - start.sx), y: start.oy + (me.clientY - start.sy) })
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up)
+  }
   const [promptOpen,      setPromptOpen]      = useState(false)
   const [pendingFile,     setPendingFile]     = useState<File | null>(null)
   const [pendingUrl,      setPendingUrl]      = useState<string | null>(null)
@@ -1959,18 +1978,20 @@ export default function NodeChatWindow({
               background: 'var(--bg-1)',
               border: '1px solid var(--line-2)',
               borderRadius: 12,
-              width: '100%', maxWidth: 860,
-              maxHeight: '88vh',
+              width: 'min(820px, 92vw)', height: 'auto',
+              minWidth: 360, minHeight: 200, maxWidth: '95vw', maxHeight: '85vh',
+              resize: 'both',
+              transform: `translate(${expandPos.x}px, ${expandPos.y}px)`,
               display: 'flex', flexDirection: 'column',
               boxShadow: '0 32px 80px rgba(0,0,0,0.7)',
               overflow: 'hidden',
             }}
           >
-            {/* Header */}
-            <div style={{
+            {/* Header — arrastrable */}
+            <div onMouseDown={onExpandDrag} style={{
               padding: '12px 16px', borderBottom: '1px solid var(--line-2)',
               display: 'flex', alignItems: 'center', gap: 10,
-              flexShrink: 0, background: 'var(--bg-2)',
+              flexShrink: 0, background: 'var(--bg-2)', cursor: 'move', userSelect: 'none',
             }}>
               <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.08em', flex: 1 }}>
                 {stepLabel}
@@ -1991,6 +2012,7 @@ export default function NodeChatWindow({
                   ↓ {effectiveDocFormat === 'pptx' ? 'PPTX' : 'PDF'}
                 </a>
               )}
+              <CopyButton text={jsonToMarkdown(expandedContent.content) ?? expandedContent.content} style={{ width: 24, height: 24, fontSize: 12 }} />
               <button
                 onClick={() => setExpandedContent(null)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 16, lineHeight: 1, padding: '2px 6px', flexShrink: 0 }}

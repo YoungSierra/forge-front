@@ -23,6 +23,7 @@ import type { ImageOutputDef, InlineImageItem } from '@/components/shared/NodeCh
 import AssetCardDeck, { invalidateAssetDeckCache } from './AssetCardDeck'
 import ForgeToolbar, { type RunMenuItem } from './ForgeToolbar'
 import ExportModal from '@/components/shared/ExportModal'
+import { CopyButton } from '@/components/shared/CopyButton'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
@@ -2059,6 +2060,12 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                     >{pdfLoading ? '…' : '↓ PDF'}</button>
                   ) : null}
                 </>
+              )}
+              {/* Copiar como texto (solo outputs de texto/documento) */}
+              {outSession?.output_asset?.content && (
+                <span onMouseDown={e => e.stopPropagation()} style={{ flexShrink: 0 }}>
+                  <CopyButton text={outSession.output_asset.content} style={{ width: 24, height: 24, fontSize: 12 }} />
+                </span>
               )}
               {/* Grip */}
               <span onMouseDown={e => e.stopPropagation()} style={{ fontSize: 15, flexShrink: 0, lineHeight: 1, opacity: 0.55, userSelect: 'none', filter: 'brightness(0) invert(1)' }}>🖐️</span>

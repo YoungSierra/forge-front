@@ -14,14 +14,22 @@ export const MD_COMPONENTS = {
   em: ({ children }: React.HTMLAttributes<HTMLElement>) => <em style={{ fontStyle: 'italic', color: 'var(--text-1)' }}>{children}</em>,
   hr: () => <hr style={{ border: 'none', borderTop: '1px solid var(--line-2)', margin: '.7em 0' }} />,
   blockquote: ({ children }: React.HTMLAttributes<HTMLQuoteElement>) => <blockquote style={{ borderLeft: '3px solid var(--action)', margin: '.4em 0', padding: '.2em .8em', color: 'var(--text-2)', fontStyle: 'italic' }}>{children}</blockquote>,
-  code: ({ children, className }: React.HTMLAttributes<HTMLElement>) =>
-    className ? (
-      <pre style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 12px', overflowX: 'auto', margin: '.5em 0' }}>
-        <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{children}</code>
-      </pre>
+  // La caja del bloque de código la da el <pre> (react-markdown ya envuelve el code en un pre).
+  pre: ({ children }: React.HTMLAttributes<HTMLPreElement>) => (
+    <pre style={{ background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '10px 12px', margin: '.5em 0', maxWidth: '100%', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere', overflowX: 'hidden' }}>
+      {children}
+    </pre>
+  ),
+  code: ({ children, className }: React.HTMLAttributes<HTMLElement>) => {
+    // Bloque = tiene language class O es multilínea (los fences sin lenguaje no traen className).
+    const text = Array.isArray(children) ? children.join('') : String(children ?? '')
+    const isBlock = !!className || text.includes('\n')
+    return isBlock ? (
+      <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{children}</code>
     ) : (
-      <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11, background: 'var(--bg-3)', padding: '1px 5px', borderRadius: 3 }}>{children}</code>
-    ),
+      <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11, background: 'var(--bg-3)', padding: '1px 5px', borderRadius: 3, wordBreak: 'break-word' }}>{children}</code>
+    )
+  },
   table: ({ children }: React.HTMLAttributes<HTMLTableElement>) => (
     <div style={{ overflowX: 'auto', margin: '.6em 0' }}>
       <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11 }}>{children}</table>
