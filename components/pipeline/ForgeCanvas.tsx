@@ -4320,16 +4320,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           if (cn.node_type !== 'forge_node') return false
           // Sesión general aprobada
           if (cn.session?.status === 'approved' || cn.session?.status === 'auto_approved') return true
-          // Todos los outputs tipo connection aprobados via per-output sessions
-          const connOuts = (cn.node?.outputs ?? []).filter((o: { type?: string }) => o.type === 'connection')
-          if (connOuts.length > 0) {
-            return connOuts.every((o: { key?: string; name?: string }) => {
-              const k = o.key || o.name || ''
-              const s = (cn.output_sessions ?? {})[k]
-              return s?.status === 'approved' || s?.status === 'auto_approved'
-            })
-          }
-          return false
+          // O cualquier output aprobado vía per-output session (asset, connection, etc.) — no solo 'connection'
+          return Object.values(cn.output_sessions ?? {}).some(
+            (s: { status?: string } | null | undefined) => s?.status === 'approved' || s?.status === 'auto_approved'
+          )
         })
         .map(cn => cn.project_node_id)
     )
