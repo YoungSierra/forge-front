@@ -47,9 +47,10 @@ export function parseOutputItems(content: string, format: string): string[] {
   // hasta el próximo número. Antes esto devolvía SIEMPRE el contenido entero como 1 solo ítem, así
   // que un output de N imágenes generaba una sola. Sin lista numerada, el contenido entero = 1 prompt.
   if (format === 'png' || format === 'image') {
-    // Inicio de cada prompt: línea que, tras # y ** opcionales, empieza con "N." o "N)". Cubre
-    // "1. Título", "**1. Título**" (el LLM suele poner el número en negrita) y "### 1. Título".
-    const marker = '(?:#{1,4}\\s+)?\\*{0,2}\\d+[.)]\\s'
+    // Inicio de cada prompt. Cubre dos estilos: número al inicio ("1.", "**1.**", "### 1.") Y
+    // "Palabra(s) N" + separador ("**Image 1 —**", "### Image 2:", "Image 3 -") — el LLM suele
+    // titular las imágenes así en vez de una lista numerada, y antes eso quedaba como 1 solo prompt.
+    const marker = '(?:#{1,4}[ \\t]+)?\\*{0,2}(?:[A-Za-z][A-Za-z]*[ \\t]+){0,3}\\d+[ \\t]*[.):\\u2014\\u2013-]'
     const blocks = content
       .split(new RegExp(`^(?=${marker})`, 'm'))
       .map(p => p.trim())
