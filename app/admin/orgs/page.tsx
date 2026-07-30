@@ -22,6 +22,10 @@ interface LedgerTx {
   raw_cost_usd: number | null; margin_multiplier: number | null
   payment_provider: string | null; external_ref: string | null; created_at: string
 }
+interface OrgBlueprint {
+  id: string; blueprint_key: string; name: string; phase: string; description: string | null
+  is_default: boolean; node_sequence: unknown[] | null; updated_at: string
+}
 
 const money = (v: number | null | undefined) =>
   '$' + Number(v ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -38,6 +42,7 @@ export default function OrgsAdminPage() {
   const [orgs, setOrgs] = useState<Org[]>([])
   const [selId, setSelId] = useState<string | null>(null)
   const [ledger, setLedger] = useState<LedgerTx[]>([])
+  const [blueprints, setBlueprints] = useState<OrgBlueprint[]>([])
   const [msg, setMsg] = useState<string>('')
 
   // forms
@@ -58,6 +63,12 @@ export default function OrgsAdminPage() {
     if (d.success) setLedger(d.transactions)
   }, [])
   useEffect(() => { if (selId) loadLedger(selId) }, [selId, loadLedger])
+
+  const loadBlueprints = useCallback(async (id: string) => {
+    const r = await adminFetch(`/api/admin/orgs/${id}/blueprints`); const d = await r.json()
+    if (d.success) setBlueprints(d.blueprints)
+  }, [])
+  useEffect(() => { if (selId) loadBlueprints(selId) }, [selId, loadBlueprints])
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
 
@@ -183,6 +194,28 @@ export default function OrgsAdminPage() {
                     </tr>
                   ))}
                   {ledger.length === 0 && <tr><td colSpan={5} style={{ padding: 8, color: 'var(--text-3)', fontSize: 10 }}>No transactions.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Org-owned blueprints — oversight read-only (el super-admin NO los edita) */}
+            <div style={box}>
+              <span style={label}>Blueprints (org-owned · read-only)</span>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead><tr>
+                  <th style={{ ...th, fontSize: 9 }}>Name</th><th style={{ ...th, fontSize: 9 }}>Key</th>
+                  <th style={{ ...th, fontSize: 9 }}>Phase</th><th style={{ ...th, fontSize: 9 }}>Nodes</th>
+                </tr></thead>
+                <tbody>
+                  {blueprints.map(b => (
+                    <tr key={b.id} style={{ borderTop: '1px solid var(--line-2)' }}>
+                      <td style={{ padding: '3px 4px', color: 'var(--text-0)' }}>{b.name}{b.is_default && <span style={{ color: 'var(--action)', fontSize: 9 }}> ·default</span>}</td>
+                      <td style={{ padding: '3px 4px', color: 'var(--text-3)', fontSize: 10 }}>{b.blueprint_key}</td>
+                      <td style={{ padding: '3px 4px', color: 'var(--text-2)' }}>{b.phase}</td>
+                      <td style={{ padding: '3px 4px', color: 'var(--text-3)' }}>{b.node_sequence?.length ?? 0}</td>
+                    </tr>
+                  ))}
+                  {blueprints.length === 0 && <tr><td colSpan={4} style={{ padding: 8, color: 'var(--text-3)', fontSize: 10 }}>This organization has no own blueprints (uses standard only).</td></tr>}
                 </tbody>
               </table>
             </div>
