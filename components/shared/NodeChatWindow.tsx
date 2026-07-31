@@ -1317,8 +1317,8 @@ export default function NodeChatWindow({
         {systemPrompt && (
           <div style={{ borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              {/* Botón panel de contexto — solo para nodos gate */}
-              {isGate && projectNodeId && (
+              {/* Botón panel de contexto — disponible en todos los nodos */}
+              {projectNodeId && (
                 <button
                   onMouseDown={e => e.stopPropagation()}
                   onClick={handleToggleCtxPanel}
