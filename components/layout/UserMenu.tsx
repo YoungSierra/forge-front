@@ -114,7 +114,7 @@ export default function UserMenu() {
   async function handleSignOut() {
     setOpen(false)
     await signOut()
-    router.push('/login')
+    router.push('/welcome')
   }
 
   function openProfileModal() {

@@ -39,15 +39,18 @@ export async function proxy(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
 
   const isLoginPage    = request.nextUrl.pathname === '/login'
+  const isWelcomePage  = request.nextUrl.pathname === '/welcome'
   const isRecoveryFlow = isLoginPage && request.nextUrl.searchParams.get('recovery') === '1'
   const isPublicPath   = request.nextUrl.pathname.startsWith('/_next') ||
                          request.nextUrl.pathname.startsWith('/api') ||
                          request.nextUrl.pathname.startsWith('/auth/') ||
                          request.nextUrl.pathname.includes('.')
 
-  if (!user && !isLoginPage && !isPublicPath) {
+  // Sin sesión: aterrizar en la página de bienvenida (pública), no en el login de una.
+  // Desde /welcome el botón "Sign in" lleva a /login.
+  if (!user && !isLoginPage && !isWelcomePage && !isPublicPath) {
     const url = request.nextUrl.clone()
-    url.pathname = '/login'
+    url.pathname = '/welcome'
     return NextResponse.redirect(url)
   }
 

@@ -79,7 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const timer = setInterval(async () => {
       if (Date.now() - lastActivityRef.current > IDLE_TIMEOUT) {
         await supabase.auth.signOut()
-        window.location.replace('/login')
+        window.location.replace('/welcome')
       }
     }, CHECK_INTERVAL)
 
@@ -97,7 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // request que quedó sin token (el "Invalid token" del backend) y se ve un parpadeo rojo antes del
     // redirect. Revocamos la sesión en segundo plano y descargamos la página ya.
     supabase.auth.signOut().catch(() => {})
-    window.location.replace('/login')
+    window.location.replace('/welcome')
     return Promise.resolve()
   }
 
