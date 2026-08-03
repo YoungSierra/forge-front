@@ -84,6 +84,7 @@ export default function OrgAdminPage() {
 
   const [nm, setNm] = useState({ email: '', password: '', display_name: '', org_role: 'member' })
   const [nmTried, setNmTried] = useState(false)  // marca los campos requeridos vacíos tras intentar
+  const [nmMode, setNmMode] = useState<'direct' | 'invite'>('direct')  // crear directo (password) o invitar por correo
   const [buyAmount, setBuyAmount] = useState('')
   const [confirmState, setConfirmState] = useState<ConfirmOpts | null>(null)
   const [busy, setBusy] = useState(false)  // evita doble-checkout mientras se crea la sesión de pago
@@ -148,6 +149,14 @@ export default function OrgAdminPage() {
   }
 
   async function addMember() {
+    if (nmMode === 'invite') {
+      if (!nm.email) { setNmTried(true); flash('Email is required.', 'error'); return }
+      const r = await orgFetch('/api/org/members/invite', { method: 'POST', body: JSON.stringify({ email: nm.email, org_role: nm.org_role }) })
+      const d = await r.json()
+      if (d.success) { setNm({ email: '', password: '', display_name: '', org_role: 'member' }); setNmTried(false); flash('Invite sent.'); loadAll() }
+      else flash(d.error || 'Something went wrong. Try again.', 'error')
+      return
+    }
     if (!nm.email || !nm.password || !nm.display_name) {
       setNmTried(true)
       flash('Email, name and password are all required.', 'error')
@@ -330,15 +339,31 @@ export default function OrgAdminPage() {
             </tbody>
           </table>
           <span style={label}>Add a user to your organization</span>
-          <p style={{ fontSize: 10, color: 'var(--text-3)', margin: '0 0 6px' }}>You set an initial password; the user can change it later. All fields required.</p>
+          {/* modo: crear directo (password) o invitar por correo — igual que el super-admin */}
+          <div style={{ display: 'flex', gap: 4, margin: '4px 0 6px' }}>
+            {(['direct', 'invite'] as const).map(mode => (
+              <button key={mode} onClick={() => { setNmMode(mode); setNmTried(false) }}
+                style={{ ...inp, cursor: 'pointer', fontSize: 11, padding: '3px 10px',
+                  ...(nmMode === mode ? { borderColor: 'var(--action)', color: 'var(--action)' } : { color: 'var(--text-3)' }) }}>
+                {mode === 'direct' ? 'Set password' : 'Invite by email'}
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 10, color: 'var(--text-3)', margin: '0 0 6px' }}>
+            {nmMode === 'invite'
+              ? 'We email an invite; the user sets their own name and password when they accept.'
+              : 'You set an initial password; the user can change it later. All fields required.'}
+          </p>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             <input style={{ ...inp, width: 180, ...(nmTried && !nm.email ? { borderColor: 'var(--danger,#b3261e)' } : {}) }} value={nm.email} onChange={e => setNm({ ...nm, email: e.target.value })} placeholder="email" autoComplete="off" name="new-user-email" />
-            <input style={{ ...inp, width: 140, ...(nmTried && !nm.display_name ? { borderColor: 'var(--danger,#b3261e)' } : {}) }} value={nm.display_name} onChange={e => setNm({ ...nm, display_name: e.target.value })} placeholder="name" autoComplete="off" name="new-user-name" />
-            <input style={{ ...inp, width: 120, ...(nmTried && !nm.password ? { borderColor: 'var(--danger,#b3261e)' } : {}) }} type="password" value={nm.password} onChange={e => setNm({ ...nm, password: e.target.value })} placeholder="password" autoComplete="new-password" name="new-user-password" />
+            {nmMode === 'direct' && (<>
+              <input style={{ ...inp, width: 140, ...(nmTried && !nm.display_name ? { borderColor: 'var(--danger,#b3261e)' } : {}) }} value={nm.display_name} onChange={e => setNm({ ...nm, display_name: e.target.value })} placeholder="name" autoComplete="off" name="new-user-name" />
+              <input style={{ ...inp, width: 120, ...(nmTried && !nm.password ? { borderColor: 'var(--danger,#b3261e)' } : {}) }} type="password" value={nm.password} onChange={e => setNm({ ...nm, password: e.target.value })} placeholder="password" autoComplete="new-password" name="new-user-password" />
+            </>)}
             <select value={nm.org_role} onChange={e => setNm({ ...nm, org_role: e.target.value })} style={{ ...inp, fontSize: 11 }}>
               {['admin', 'member', 'viewer'].map(r => <option key={r} value={r}>{r}</option>)}
             </select>
-            <button style={btn} onClick={addMember}>Add user</button>
+            <button style={btn} onClick={addMember}>{nmMode === 'invite' ? 'Send invite' : 'Add user'}</button>
           </div>
         </div>
 

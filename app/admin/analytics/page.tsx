@@ -57,8 +57,9 @@ interface LogRow {
 }
 
 interface Project { id: string; name: string }
+interface Org { id: string; name: string }
 
-type GroupBy = 'project' | 'member' | 'provider' | 'day'
+type GroupBy = 'project' | 'member' | 'org' | 'provider' | 'day'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -110,8 +111,10 @@ function AnalyticsContent() {
   const [logTotal,  setLogTotal]  = useState(0)
   const [logPage,   setLogPage]   = useState(1)
   const [projects,  setProjects]  = useState<Project[]>([])
-  const [groupBy,   setGroupBy]   = useState<GroupBy>('project')
+  const [orgs,      setOrgs]      = useState<Org[]>([])
+  const [groupBy,   setGroupBy]   = useState<GroupBy>('org')
   const [projectId, setProjectId] = useState(() => searchParams.get('project_id') ?? '')
+  const [orgId,     setOrgId]     = useState(() => searchParams.get('org_id') ?? '')
   const [from,      setFrom]      = useState('')
   const [to,        setTo]        = useState('')
   const [loading,   setLoading]   = useState(false)
@@ -121,8 +124,9 @@ function AnalyticsContent() {
     if (from)      p.set('from', from)
     if (to)        p.set('to', to)
     if (projectId) p.set('project_id', projectId)
+    if (orgId)     p.set('org_id', orgId)
     return p.toString() ? `?${p}` : ''
-  }, [from, to, projectId])
+  }, [from, to, projectId, orgId])
 
   const load = useCallback(async (page = 1) => {
     setLoading(true)
@@ -146,6 +150,9 @@ function AnalyticsContent() {
     adminFetch('/api/admin/analytics/projects-list').then(r => r.json()).then(d => {
       if (d.success) setProjects(d.projects)
     })
+    adminFetch('/api/admin/analytics/orgs-list').then(r => r.json()).then(d => {
+      if (d.success) setOrgs(d.orgs)
+    })
   }, [])
 
   useEffect(() => { load(1) }, [load])
@@ -161,6 +168,7 @@ function AnalyticsContent() {
   }
 
   const TABS: { key: GroupBy; label: string }[] = [
+    { key: 'org',      label: 'By Org'      },
     { key: 'project',  label: 'By Project'  },
     { key: 'member',   label: 'By Member'   },
     { key: 'provider', label: 'By Provider' },
@@ -176,6 +184,15 @@ function AnalyticsContent() {
           ANALYTICS
         </span>
         <div style={{ width: 1, height: 16, background: 'var(--line-2)' }} />
+
+        <select
+          value={orgId}
+          onChange={e => setOrgId(e.target.value)}
+          style={{ fontSize: 11, background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '5px 8px', color: 'var(--text-1)', fontFamily: 'inherit' }}
+        >
+          <option value="">All orgs</option>
+          {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
 
         <select
           value={projectId}
@@ -206,9 +223,9 @@ function AnalyticsContent() {
         >
           {loading ? '…' : 'Apply'}
         </button>
-        {(from || to || projectId) && (
+        {(from || to || projectId || orgId) && (
           <button
-            onClick={() => { setFrom(''); setTo(''); setProjectId('') }}
+            onClick={() => { setFrom(''); setTo(''); setProjectId(''); setOrgId('') }}
             style={{ fontSize: 11, padding: '5px 10px', borderRadius: 6, border: 'none', background: 'none', color: 'var(--text-3)', cursor: 'pointer' }}
           >
             Clear
