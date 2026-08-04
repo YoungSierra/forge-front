@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { CopyButton } from '@/components/shared/CopyButton'
+import { downloadTextFile, mdFilename } from '@/lib/download'
 import { chatWithNode, getNodeContextInputs } from '@/lib/api'
 import type { ChatMessage, ChatAttachment, ChatToolCall, ApprovedAsset, OutputImageItem, OutputImagesMap, NodeContextInput } from '@/lib/api'
 import type { Project } from '@/lib/types'
@@ -1600,25 +1601,42 @@ export default function NodeChatWindow({
           <div ref={bottomRef} />
         </div>
 
-        {/* Chip de descarga — del run recién generado o, al reabrir sin aceptar, del tool_call persistido */}
+        {/* Chip de descarga — mitad PDF, mitad MD (texto original). Del run recién generado o del tool_call persistido */}
         {effectiveDocUrl && (
           <div style={{ padding: '6px 12px 0', borderTop: '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
-            <a
-              href={effectiveDocUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                width: '100%', padding: '7px 0', borderRadius: 6, textDecoration: 'none',
-                background: 'color-mix(in srgb, #F59E0B 12%, var(--bg-2))',
-                border: '1px solid color-mix(in srgb, #F59E0B 40%, transparent)',
-                color: '#F59E0B',
-                fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                letterSpacing: '.04em', transition: 'all 120ms',
-              }}
-            >
-              ↓ Download {effectiveDocFormat === 'pptx' ? 'PPTX' : 'PDF'}
-            </a>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <a
+                href={effectiveDocUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  padding: '7px 0', borderRadius: 6, textDecoration: 'none',
+                  background: 'color-mix(in srgb, #F59E0B 12%, var(--bg-2))',
+                  border: '1px solid color-mix(in srgb, #F59E0B 40%, transparent)',
+                  color: '#F59E0B',
+                  fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                  letterSpacing: '.04em', transition: 'all 120ms',
+                }}
+              >
+                ↓ Download {effectiveDocFormat === 'pptx' ? 'PPTX' : 'PDF'}
+              </a>
+              <button
+                onClick={() => { const m = [...messages].reverse().find(x => x.role === 'assistant'); const c = m?.content ?? ''; downloadTextFile(jsonToMarkdown(c) ?? c, mdFilename(stepLabel)) }}
+                title="Download Markdown (original text)"
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  padding: '7px 0', borderRadius: 6, cursor: 'pointer',
+                  background: 'var(--bg-3)',
+                  border: '1px solid var(--line-2)',
+                  color: 'var(--text-2)',
+                  fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                  letterSpacing: '.04em', transition: 'all 120ms',
+                }}
+              >
+                ↓ Download MD
+              </button>
+            </div>
           </div>
         )}
 
@@ -1998,20 +2016,34 @@ export default function NodeChatWindow({
                 {stepLabel}
               </span>
               {effectiveDocUrl && (
-                <a
-                  href={effectiveDocUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={e => e.stopPropagation()}
-                  style={{
-                    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                    color: '#F59E0B', textDecoration: 'none',
-                    padding: '3px 10px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)',
-                    borderRadius: 4, letterSpacing: '.04em', flexShrink: 0,
-                  }}
-                >
-                  ↓ {effectiveDocFormat === 'pptx' ? 'PPTX' : 'PDF'}
-                </a>
+                <>
+                  <button
+                    onClick={e => { e.stopPropagation(); downloadTextFile(jsonToMarkdown(expandedContent.content) ?? expandedContent.content, mdFilename(stepLabel)) }}
+                    title="Download Markdown (original text)"
+                    style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      color: 'var(--text-2)', background: 'none', cursor: 'pointer',
+                      padding: '3px 10px', border: '1px solid var(--line-2)',
+                      borderRadius: 4, letterSpacing: '.04em', flexShrink: 0,
+                    }}
+                  >
+                    ↓ MD
+                  </button>
+                  <a
+                    href={effectiveDocUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={e => e.stopPropagation()}
+                    style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      color: '#F59E0B', textDecoration: 'none',
+                      padding: '3px 10px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)',
+                      borderRadius: 4, letterSpacing: '.04em', flexShrink: 0,
+                    }}
+                  >
+                    ↓ {effectiveDocFormat === 'pptx' ? 'PPTX' : 'PDF'}
+                  </a>
+                </>
               )}
               <CopyButton text={jsonToMarkdown(expandedContent.content) ?? expandedContent.content} style={{ width: 24, height: 24, fontSize: 12 }} />
               <button

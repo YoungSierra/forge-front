@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import type { Project } from '@/lib/types'
 import type { GlobalRefStatus, ImageRef } from '@/lib/types'
 import { exportGDDToPDF, } from '@/lib/gdd-pdf'
+import { downloadTextFile, mdFilename } from '@/lib/download'
 import { assetUrl, getImageReferenceStatus, getImageReferencePool, generateImageReferenceRound, approveImageReferenceSelection, saveRefinedImageReference, approveNode, getCharatersStatus, generateCharacterRender, approveCharacterRender, approveCharatersNode, saveRefinedCharacterRender, restoreCharacterVersion, getIdeaCandidate, getGDDRaw, getADIRaw, getModelingCharactersStatus } from '@/lib/api'
 import type { IdeaCard } from '@/lib/api'
 import type { CharacterRenderStatus, AssetVersion, ModelingCharacterStatus } from '@/lib/types'
@@ -2691,6 +2692,13 @@ export default function DetailModal({ stepKey, project, pendingData, onClose, no
                 {rawLabel} — {project.name}
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={() => downloadTextFile(rawMd, mdFilename(rawLabel))}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', cursor: 'pointer' }}
+                  title="Descargar Markdown (texto original)"
+                >
+                  ↓ MD
+                </button>
                 <button
                   onClick={() => printRawMd(rawMd, `${rawLabel} — ${project.name}`)}
                   style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'var(--bg-3)', border: '1px solid var(--line-2)', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', cursor: 'pointer' }}
