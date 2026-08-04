@@ -28,6 +28,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import { jsonToMarkdown } from '@/lib/json-display'
+import { downloadTextFile, mdFilename } from '@/lib/download'
 import { compareNodeKey } from '@/lib/node-order'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -2059,6 +2060,14 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', background: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0, cursor: pdfLoading ? 'default' : 'pointer', opacity: pdfLoading ? 0.6 : 1 }}
                     >{pdfLoading ? '…' : '↓ PDF'}</button>
                   ) : null}
+                  {outSession.output_asset.content && (
+                    <button
+                      onMouseDown={e => e.stopPropagation()}
+                      onClick={() => { const c = outSession?.output_asset?.content; if (!c) return; downloadTextFile(jsonToMarkdown(c) ?? c, mdFilename(outSession?.output_asset?.name || 'document')) }}
+                      title="Download Markdown (original text)"
+                      style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', background: 'none', padding: '2px 8px', border: '1px solid var(--line-2)', borderRadius: 3, flexShrink: 0, cursor: 'pointer' }}
+                    >↓ MD</button>
+                  )}
                 </>
               )}
               {/* Copiar como texto (solo outputs de texto/documento) */}
