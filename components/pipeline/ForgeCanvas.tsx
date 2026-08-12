@@ -229,9 +229,10 @@ const PHASE_COLOR: Record<string, string> = {
   'live-ops':        '#F87171',
 }
 
-const PULSE_KF      = `@keyframes canvas-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`
+// El giro del spinner es la única animación que queda: marca trabajo en curso sin
+// hacer titilar el canvas. Los pulsos de opacidad (nodo activo y borde de ejecución)
+// se sacaron — con decenas de nodos el parpadeo simultáneo era ilegible.
 const SPIN_KF       = `@keyframes canvas-spin  { to { transform: rotate(360deg); } }`
-const ACTION_PULSE_KF = `@keyframes action-border-pulse { 0%,100%{opacity:1;box-shadow:0 0 8px rgba(255,138,61,0.5)} 50%{opacity:0.35;box-shadow:0 0 3px rgba(255,138,61,0.2)} }`
 
 // ─── Request helper ───────────────────────────────────────────────────────────
 
@@ -1606,15 +1607,14 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
 
   return (
     <div style={{ position: 'relative', zoom: scale }} ref={cardRef}>
-      {status === 'active' && <style>{PULSE_KF}</style>}
-      {isRunning && <style>{ACTION_PULSE_KF + SPIN_KF}</style>}
+      {isRunning && <style>{SPIN_KF}</style>}
 
-      {/* Borde naranja pulsante — overlay para no conflictuar con estilos inline */}
+      {/* Borde naranja fijo — el parpadeo lo marca el spinner, no el borde */}
       {isRunning && (
         <div style={{
           position: 'absolute', inset: 0, borderRadius: 8, pointerEvents: 'none', zIndex: 5,
           border: '2px solid rgba(255,138,61,1)',
-          animation: 'action-border-pulse 1s ease-in-out infinite',
+          boxShadow: '0 0 8px rgba(255,138,61,0.5)',
         }} />
       )}
 
@@ -1655,7 +1655,6 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
           borderRadius: 8,
           boxShadow: glowShadow,
           transition: 'box-shadow 200ms ease, border-color 200ms ease',
-          animation: status === 'active' && !isRunning ? 'canvas-pulse 2s ease-in-out infinite' : 'none',
         }}
         onMouseEnter={e => {
           const hoverBorder = statusColor ?? 'var(--action)'
@@ -1664,7 +1663,6 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
             : `0 0 0 1px var(--action), 0 6px 28px rgba(0,0,0,0.34)`
           e.currentTarget.style.borderColor = hoverBorder
           e.currentTarget.style.boxShadow   = hoverGlow
-          e.currentTarget.style.animation   = 'none'
           if (isApproved && cardRef.current) {
             keepDeckOpen()
             const rect = cardRef.current.getBoundingClientRect()
@@ -1674,7 +1672,6 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
         onMouseLeave={e => {
           e.currentTarget.style.borderColor = borderColor
           e.currentTarget.style.boxShadow   = glowShadow
-          e.currentTarget.style.animation   = status === 'active' ? 'canvas-pulse 2s ease-in-out infinite' : 'none'
           if (isApproved) scheduleDeckClose()
         }}
       >

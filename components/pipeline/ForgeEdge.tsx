@@ -5,17 +5,6 @@ import { getBezierPath, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
 
 const FORGYI_CLR = '#F59E0B'
 
-const FORGYI_KF = `
-@keyframes forgyi-flow {
-  from { stroke-dashoffset: 28; }
-  to   { stroke-dashoffset: 0; }
-}
-@keyframes forgyi-pulse {
-  0%, 100% { opacity: 0.18; }
-  50%       { opacity: 0.52; }
-}
-`
-
 export interface ForgeEdgeData extends Record<string, unknown> {
   color?:    string
   active?:   boolean
@@ -44,7 +33,6 @@ function ForgeEdge({
 
   return (
     <>
-      {approved && <style>{FORGYI_KF}</style>}
       <g style={{ opacity: dimmed ? 0.07 : 1, transition: 'opacity 120ms ease' }}>
         {/* Hit area */}
         <path
@@ -57,41 +45,26 @@ function ForgeEdge({
 
         {approved ? (
           <>
-            {/* Glow exterior pulsante */}
+            {/* Halo apenas perceptible — el ámbar ya distingue al cable aprobado */}
             <path
               className="forge-edge-fx"
               d={edgePath}
               fill="none"
               stroke={FORGYI_CLR}
-              strokeWidth={8}
+              strokeWidth={3}
               strokeLinecap="round"
-              style={{
-                filter: 'blur(6px)',
-                animation: 'forgyi-pulse 1.8s ease-in-out infinite',
-              }}
+              opacity={0.12}
+              style={{ filter: 'blur(3px)' }}
             />
-            {/* Cable base — semitransparente */}
+            {/* Cable aprobado — una sola línea continua */}
             <path
+              id={id}
               d={edgePath}
               fill="none"
               stroke={FORGYI_CLR}
-              strokeWidth={1.5}
-              opacity={0.35}
+              strokeWidth={selected ? 2 : 1.6}
+              opacity={selected ? 0.9 : 0.6}
               strokeLinecap="round"
-            />
-            {/* Dashes animados que fluyen */}
-            <path
-              className="forge-edge-fx"
-              d={edgePath}
-              fill="none"
-              stroke={FORGYI_CLR}
-              strokeWidth={2}
-              strokeDasharray="10 18"
-              strokeLinecap="round"
-              style={{
-                filter: `drop-shadow(0 0 5px ${FORGYI_CLR})`,
-                animation: 'forgyi-flow 1s linear infinite',
-              }}
             />
           </>
         ) : (

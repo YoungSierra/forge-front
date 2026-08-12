@@ -17,19 +17,7 @@ export interface OrthogonalEdgeData extends Record<string, unknown> {
   onDelete?:          () => void
 }
 
-// ─── Animaciones (mismas que ForgeEdge) ──────────────────────────────────────
-
 const FORGYI_CLR = '#F59E0B'
-const ANIM_KF = `
-@keyframes forgyi-flow {
-  from { stroke-dashoffset: 28; }
-  to   { stroke-dashoffset: 0; }
-}
-@keyframes forgyi-pulse {
-  0%, 100% { opacity: 0.18; }
-  50%       { opacity: 0.52; }
-}
-`
 
 // ─── Lógica de path ───────────────────────────────────────────────────────────
 
@@ -154,7 +142,6 @@ function OrthogonalEdge({
 
   return (
     <>
-      {(approved) && <style>{ANIM_KF}</style>}
       <g style={{ opacity: dimmed ? 0.07 : 1, transition: 'opacity 120ms ease' }}>
         {/* Hit area amplio para facilitar selección y futuro click-to-add-waypoint */}
         <path
@@ -167,14 +154,15 @@ function OrthogonalEdge({
 
         {approved ? (
           <>
-            <path className="forge-edge-fx" d={edgePath} fill="none" stroke={FORGYI_CLR} strokeWidth={8}
-              strokeLinejoin="miter"
-              style={{ filter: 'blur(6px)', animation: 'forgyi-pulse 1.8s ease-in-out infinite' }} />
-            <path d={edgePath} fill="none" stroke={FORGYI_CLR} strokeWidth={1.5}
-              opacity={0.35} strokeLinejoin="miter" />
-            <path className="forge-edge-fx" d={edgePath} fill="none" stroke={FORGYI_CLR} strokeWidth={2}
-              strokeDasharray="10 18" strokeLinejoin="miter"
-              style={{ filter: `drop-shadow(0 0 5px ${FORGYI_CLR})`, animation: 'forgyi-flow 1s linear infinite' }} />
+            {/* Halo apenas perceptible — el ámbar ya distingue al cable aprobado */}
+            <path className="forge-edge-fx" d={edgePath} fill="none" stroke={FORGYI_CLR} strokeWidth={3}
+              strokeLinejoin="miter" opacity={0.12}
+              style={{ filter: 'blur(3px)' }} />
+            {/* Cable aprobado — una sola línea continua */}
+            <path id={id} d={edgePath} fill="none" stroke={FORGYI_CLR}
+              strokeWidth={selected ? 2 : 1.6}
+              opacity={selected ? 0.9 : 0.6}
+              strokeLinejoin="miter" />
           </>
         ) : (
           <>
