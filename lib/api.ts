@@ -294,7 +294,7 @@ export interface UnifiedAssetVersion {
 
 export interface UnifiedAsset {
   id: string
-  source: 'forge' | 'legacy' | 'generated'
+  source: 'forge' | 'legacy' | 'generated' | 'library'   // 'library' = subido por el usuario al proyecto
   name: string
   project_id: string | null
   node_key: string | null
@@ -314,6 +314,56 @@ export async function getProjectAssets(projectId?: string): Promise<UnifiedAsset
     `/api/assets/project-assets${qs}`,
   )
   return data.assets || []
+}
+
+// Identidad visual del proyecto para el moodboard. `source` dice de dónde salió: 'style_guide'
+// si el 3.9 ya produjo la paleta bloqueada, 'default' si el proyecto todavía no tiene arte.
+export interface MoodboardTheme {
+  accent: string
+  colors: string[]
+  motion: 'neutral' | 'rise' | 'streak' | 'fall' | 'pulse'
+  source: 'style_guide' | 'default'
+}
+
+export const NEUTRAL_THEME: MoodboardTheme = {
+  accent: '#7d8493', colors: ['#7d8493'], motion: 'neutral', source: 'default',
+}
+
+// Sube un archivo a la librería DEL PROYECTO. No pertenece a ningún nodo: cualquiera puede
+// referenciarlo después conectándolo en el canvas como `library_asset`.
+export async function uploadLibraryAsset(
+  projectId: string,
+  file: File,
+  displayName?: string,
+): Promise<{ id: string; storage_url: string }> {
+  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+  const fd = new FormData()
+  fd.append('file', file)
+  if (displayName) fd.append('display_name', displayName)
+  if (memberId)    fd.append('member_id', memberId)
+
+  // Sin Content-Type: el browser pone el boundary del multipart.
+  const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/library`, {
+    method: 'POST', headers: await authHeaders(), body: fd,
+  })
+  if (!res.ok) {
+    let msg = `Upload failed: ${res.status}`
+    try { const b = await res.json(); msg = b.error || b.message || msg } catch {}
+    throw new Error(msg)
+  }
+  const data = await res.json()
+  return data.asset
+}
+
+// Moodboard: solo activos que se ven, y sin el campo `content`. El listado completo de un
+// proyecto son ~1,5 MB de texto que la galería no muestra; así viaja el metadato y la URL.
+export async function getProjectMedia(
+  projectId: string,
+): Promise<{ assets: UnifiedAsset[]; theme: MoodboardTheme }> {
+  const data = await request<{ success: boolean; assets: UnifiedAsset[]; theme?: MoodboardTheme }>(
+    `/api/assets/project-assets?project_id=${projectId}&media=1`,
+  )
+  return { assets: data.assets || [], theme: data.theme || NEUTRAL_THEME }
 }
 
 export async function getAssets(filters?: { project_id?: string; step_key?: string }) {

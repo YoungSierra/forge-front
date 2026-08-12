@@ -13,6 +13,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
 import OrthogonalEdge, { type WayPoint } from './OrthogonalEdge'
+import MoodboardButton from '../moodboard/MoodboardButton'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
 import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
@@ -5647,6 +5648,9 @@ export default function ForgeCanvas({ project, onRefresh }: { project: Project; 
       <ReactFlowProvider>
         <ForgeCanvasInner project={project} onRefresh={onRefresh} />
       </ReactFlowProvider>
+      {/* Forgy: lanza el moodboard del proyecto. Fuera del ReactFlowProvider para que el
+          overlay no quede atrapado por el z-index ni por el pan/zoom del canvas. */}
+      <MoodboardButton projectId={project.id} projectName={project.name} />
     </div>
   )
 }
