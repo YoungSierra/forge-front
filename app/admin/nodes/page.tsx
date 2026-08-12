@@ -38,6 +38,10 @@ interface NodeOutput {
   mode?:           string
   image_gen?:      boolean
   image_gen_model?: string
+  // Se compone por código desde una plantilla de slots en vez de generarlo el LLM.
+  // Paralelo a image_gen: la marca va POR OUTPUT, no por nodo, porque un mismo nodo
+  // mezcla outputs de LLM, de imagen y de ensamble.
+  assembly?:       boolean
 }
 
 // Wired port del nuevo formato v1.3.0
@@ -494,10 +498,11 @@ function ImageGenSelector({ value, onChange, workflows }: {
 
 // ─── Componente OutputsList ───────────────────────────────────
 
-function OutputsList({ outputs, onChange, workflows }: {
+function OutputsList({ outputs, onChange, workflows, nodeKey }: {
   outputs:   NodeOutput[]
   onChange:  (v: NodeOutput[]) => void
   workflows: ComfyUIWorkflow[]
+  nodeKey?:  string   // sólo para mostrar el id de plantilla esperado en outputs de ensamble
 }) {
   const update = (i: number, field: keyof NodeOutput, val: string | boolean | undefined) => {
     const next = outputs.map((o, idx) => idx === i ? { ...o, [field]: val } : o)
@@ -618,6 +623,20 @@ function OutputsList({ outputs, onChange, workflows }: {
               onChange={v => update(i, 'image_gen_model', v)}
               workflows={workflows}
             />
+          )}
+
+          {/* ── Assembly ──────────────────────────────────────── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, borderTop: '1px solid var(--line-2)' }}>
+            <input type="checkbox" id={`asm-${i}`} checked={!!out.assembly}
+              onChange={e => update(i, 'assembly', e.target.checked)} />
+            <label htmlFor={`asm-${i}`} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', cursor: 'pointer' }}>
+              Assembled from template (no LLM)
+            </label>
+          </div>
+          {out.assembly && (
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', paddingLeft: 22 }}>
+              template: tpl_{(nodeKey || '?').replace(/\./g, '_')}_{out.key || out.name || '?'}
+            </div>
           )}
         </div>
       ))}
@@ -842,7 +861,7 @@ function NodeForm({ node, onSave, onCancel, workflows, availableProviders, skill
           key: 'outputs',
           title: 'Outputs',
           summary: ((form.outputs as NodeOutput[]) || []).map((o: NodeOutput) => o.key || o.name).join(', ') || '—',
-          content: <OutputsList outputs={(form.outputs as NodeOutput[]) || []} onChange={v => set('outputs', v)} workflows={workflows} />,
+          content: <OutputsList outputs={(form.outputs as NodeOutput[]) || []} onChange={v => set('outputs', v)} workflows={workflows} nodeKey={form.node_key as string} />,
         },
         {
           key: 'constraints',
