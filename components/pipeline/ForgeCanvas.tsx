@@ -14,6 +14,7 @@ import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
 import OrthogonalEdge, { type WayPoint } from './OrthogonalEdge'
 import MoodboardButton from '../moodboard/MoodboardButton'
+import ModelViewer from '@/components/shared/ModelViewer'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
 import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
@@ -322,21 +323,11 @@ declare global {
   }
 }
 
-function AssetPreviewOverlay({ asset, projectId, onClose }: { asset: LibraryAsset; projectId: string; onClose: () => void }) {
+function AssetPreviewOverlay({ asset, onClose }: { asset: LibraryAsset; onClose: () => void }) {
   const isImage    = asset.asset_type === 'image'
   const isModel3d  = asset.asset_type === 'model_3d'
   const isMarkdown = asset.mime_type === 'text/markdown' || asset.file_name?.endsWith('.md')
   const hasText    = !!asset.extracted_text
-  // Para modelos 3D usar el proxy del backend para evitar CORS con R2
-  const modelSrc   = isModel3d ? `${BACKEND_URL}/api/projects/${projectId}/library/${asset.id}/file` : ''
-
-  // Carga @google/model-viewer solo cuando se necesita (evita SSR)
-  useEffect(() => {
-    if (!isModel3d) return
-    if (typeof window === 'undefined') return
-    if (customElements.get('model-viewer')) return
-    import('@google/model-viewer').catch(() => {})
-  }, [isModel3d])
 
   const panelWidth = isImage || isModel3d ? 'min(640px, 90vw)' : 480
 
@@ -381,14 +372,9 @@ function AssetPreviewOverlay({ asset, projectId, onClose }: { asset: LibraryAsse
               style={{ width: '100%', borderRadius: 8, display: 'block' }}
             />
           ) : isModel3d ? (
-            <model-viewer
-              src={modelSrc}
-              alt={asset.display_name}
-              camera-controls=""
-              auto-rotate=""
-              shadow-intensity="1"
-              style={{ width: '100%', height: 400, background: 'var(--bg-0)' }}
-            />
+            // El mismo visor de la librería de activos y del testeador de ComfyUI: descarga el
+            // .glb a un blob antes de montarlo, cachea, y avisa mientras carga o si falla.
+            <ModelViewer url={asset.storage_url} style={{ width: '100%', height: 400 }} />
           ) : isMarkdown && hasText ? (
             <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.7 }}>
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
@@ -503,7 +489,7 @@ function ProjectLibraryPanel({ projectId }: { projectId: string }) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* Preview overlay */}
-      {previewAsset && <AssetPreviewOverlay asset={previewAsset} projectId={projectId} onClose={() => setPreviewAsset(null)} />}
+      {previewAsset && <AssetPreviewOverlay asset={previewAsset} onClose={() => setPreviewAsset(null)} />}
 
       {/* Upload form (paso 2) o botón trigger (paso 1) */}
       <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
@@ -1123,7 +1109,7 @@ const AssetNodeCard = React.memo(function AssetNodeCard({ data }: { data: AssetN
 
       {/* Preview overlay — portal para escapar el contexto de ReactFlow */}
       {previewOpen && typeof document !== 'undefined' && createPortal(
-        <AssetPreviewOverlay asset={asset} projectId={projectId} onClose={() => setPreviewOpen(false)} />,
+        <AssetPreviewOverlay asset={asset} onClose={() => setPreviewOpen(false)} />,
         document.body,
       )}
     </>

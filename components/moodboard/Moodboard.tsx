@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
+import ModelViewer from '@/components/shared/ModelViewer'
 import { getProjectMedia, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset } from '@/lib/api'
 
 // ── Pestañas ─────────────────────────────────────────────────────────────────
@@ -24,7 +25,6 @@ const TABS: { key: string; label: string; formats: string[] }[] = [
   { key: 'audio',   label: 'Audio',       formats: ['audio'] },
   { key: 'video',   label: 'Video',       formats: ['video', 'mp4'] },
   { key: 'docs',    label: 'Docs',        formats: ['document', 'docx', 'pdf', 'pptx', 'md', 'markdown'] },
-  { key: 'refs',    label: 'Refs',        formats: [] },   // por procedencia, ver tabOf
 ]
 
 // El asset se guarda como "<título del nodo> — <label del output>", así que el output es lo
@@ -35,13 +35,9 @@ const outputOf = (a: UnifiedAsset) => {
   return parts.length > 1 ? parts[parts.length - 1].trim() : null
 }
 
-// `Refs` no es un formato sino una PROCEDENCIA: lo que subió el usuario a la librería del
-// proyecto. Por eso se resuelve antes que el formato — si no, una imagen subida caía en
-// Concept Art junto a las que generaron los nodos.
+// Qué pestaña: siempre por tipo. La procedencia es el otro eje y vive en el selector de origen.
 const tabOf = (a: UnifiedAsset) =>
-  a.source === 'library'
-    ? 'refs'
-    : TABS.find(t => t.formats.includes(String(a.format).toLowerCase()))?.key ?? 'concept'
+  TABS.find(t => t.formats.includes(String(a.format).toLowerCase()))?.key ?? 'concept'
 
 // Cómo se dibuja el activo. Siempre por formato real, nunca por pestaña: una imagen subida
 // vive en Refs pero se sigue viendo como imagen.
@@ -78,6 +74,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
   const [tab,     setTab]     = useState('all')
+  // Origen: 'all' · una clave de nodo · 'library' (lo que subió el usuario al proyecto).
   const [node,    setNode]    = useState<string>(nodeKey ?? 'all')
   const [page,    setPage]    = useState(0)
   const [sel,     setSel]     = useState<string | null>(null)
@@ -160,6 +157,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
 
   useEffect(() => { setPage(0) }, [tab, node, cols, query, view])
 
+  // Cuánto subió el usuario al proyecto: es el contador del chip de Refs.
+  const refCount = useMemo(() => assets.filter(a => a.source === 'library').length, [assets])
+
   // Nodos presentes, ordenados por clave (3.2 antes que 3.13, no alfabético)
   const nodes = useMemo(() => {
     const m = new Map<string, string>()
@@ -169,13 +169,16 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       (ver(a[0])[0] - ver(b[0])[0]) || ((ver(a[0])[1] ?? 0) - (ver(b[0])[1] ?? 0)))
   }, [assets])
 
-  // Lo que el filtro de nodo deja ver. Los refs pertenecen al PROYECTO, no a un nodo, así que
-  // atraviesan el filtro y están siempre — por eso también entran en `All`: si no, la suma de
-  // las pestañas no daba el total.
+  // Lo que el filtro de origen deja ver. Origen y tipo son ejes distintos: acá se filtra por
+  // de dónde viene el activo (un nodo, o la librería del proyecto), y las pestañas de arriba
+  // filtran por qué es. Así un GLB subido cuenta en `3D` y en `Library` a la vez.
   const shownSet = useMemo(() => {
     const q = query.trim().toLowerCase()
     return assets.filter(a => {
-      if (!(tabOf(a) === 'refs' || node === 'all' || a.node_key === node)) return false
+      const okOrigin = node === 'all'     ? true
+                     : node === 'library' ? a.source === 'library'
+                     :                      a.node_key === node
+      if (!okOrigin) return false
       if (!q) return true
       // Se busca por lo que el usuario ve: nombre, output, y el nodo con su título.
       return [a.name, outputOf(a), a.node_key, a.node_title]
@@ -190,11 +193,12 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   }, [shownSet])
 
   // En `All` la grilla se agrupa por tipo siguiendo el orden de las pestañas —Concept Art,
-  // 3D, Audio, Video, Docs y los Refs al final— y dentro de cada grupo, lo más nuevo primero.
-  // Mezclado por fecha, la vista general no se podía leer.
+  // 3D, Audio, Video, Docs— y dentro de cada grupo, lo más nuevo primero. Mezclado por fecha,
+  // la vista general no se podía leer. Lo subido por el usuario cierra cada grupo: lo que
+  // produjo el pipeline es lo que se viene a mirar.
   const rankOf = (a: UnifiedAsset) => {
     const i = TABS.findIndex(t => t.key === tabOf(a))
-    return i === -1 ? TABS.length : i
+    return (i === -1 ? TABS.length : i) * 2 + (a.source === 'library' ? 1 : 0)
   }
 
   const filtered = useMemo(() => {
@@ -337,19 +341,37 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             <ViewBtn active={view === 'table'} onClick={() => setView('table')} kind="table" />
           </div>
 
+          {/* Refs a la vista como chip: es un origen, no un tipo, pero sigue a un clic. */}
+          {refCount > 0 && (
+            <button
+              onClick={() => setNode(n => n === 'library' ? 'all' : 'library')}
+              title="Files uploaded to this project"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                padding: '6px 11px', borderRadius: 8, fontSize: 12, marginRight: 4,
+                background: node === 'library' ? 'rgba(255,255,255,0.09)' : 'transparent',
+                border: `1px solid ${node === 'library' ? 'var(--line-2)' : 'transparent'}`,
+                color: node === 'library' ? 'var(--text-0)' : 'var(--text-2)',
+                fontWeight: node === 'library' ? 600 : 500,
+              }}
+            >
+              Refs
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
+                {refCount}
+              </span>
+            </button>
+          )}
+
           <select
             value={node}
             onChange={e => setNode(e.target.value)}
-            disabled={tab === 'refs'}
-            title={tab === 'refs' ? 'Refs belong to the project, not to a node' : undefined}
             style={{
               background: 'var(--bg-2)', color: 'var(--text-1)', fontSize: 12,
               border: '1px solid var(--line-2)', borderRadius: 7, padding: '6px 10px',
-              fontFamily: 'var(--font-sans)', maxWidth: 280,
-              cursor: tab === 'refs' ? 'not-allowed' : 'pointer',
-              opacity: tab === 'refs' ? 0.4 : 1,
+              fontFamily: 'var(--font-sans)', maxWidth: 280, cursor: 'pointer',
             }}>
-            <option value="all">All nodes</option>
+            <option value="all">All sources</option>
+            {refCount > 0 && <option value="library">Library · uploaded</option>}
             {nodes.map(([k, title]) => <option key={k} value={k}>{k} · {title}</option>)}
           </select>
         </div>
@@ -570,7 +592,7 @@ function Card({ asset, index, accent, selected, onOpen, onMenu }: {
           alignItems: 'center', justifyContent: 'center', gap: 12, padding: '18px 14px 34px',
           background: 'linear-gradient(150deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012))',
         }}>
-          <TypeIcon type={kind} accent={kind === 'doc' ? 'var(--action)' : accent} />
+          <TypeIcon type={kind} accent={kind === 'doc' || kind === '3d' ? 'var(--action)' : accent} />
           {kind === 'doc' && (outputOf(asset) ?? asset.name) && (
             // El nombre del output: es lo que distingue un ADI de otro dentro del mismo nodo.
             <div style={{
@@ -724,9 +746,8 @@ function Detail({ asset, from, onMenu, onClose }: {
           </div>
         )}
         {t === '3d' && (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-2)', fontSize: 13 }}>
-            3D viewer — coming next
-          </div>
+          // El mismo visor que usan la librería de activos y el detalle de nodo.
+          <ModelViewer url={url || undefined} style={{ width: '100%', height: '100%' }} />
         )}
         {t === 'doc' && (
           <div style={{
@@ -1213,7 +1234,7 @@ function AssetTable({ assets, accent, sort, selected, onSort, onOpen, onMenu }: 
             }}>
               {kind === 'image' && a.storage_url
                 ? <img src={a.storage_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                : <MiniIcon kind={kind} accent={kind === 'doc' ? 'var(--action)' : accent} />}
+                : <MiniIcon kind={kind} accent={kind === 'doc' || kind === '3d' ? 'var(--action)' : accent} />}
             </div>
 
             <span style={{
