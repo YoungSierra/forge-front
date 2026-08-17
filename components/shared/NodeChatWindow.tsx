@@ -68,6 +68,18 @@ export function parseOutputItems(content: string, format: string): string[] {
     const items = parseJsonArrayItems(content)
     if (items) return items
   }
+  // Lo que NO es un ítem generable, fuera antes de mirar nada más:
+  //
+  //  · los bloques cercados con ``` — son datos estructurados o código, nunca un sujeto de imagen;
+  //  · la sección `gaps_for_downstream`, que la enmienda M-8 de v2.9.4 obliga a emitir al cierre
+  //    de todo output de concepto. Sus líneas empiezan con "- gap:", y como la regla de bullets es
+  //    la primera que dispara, el nodo 1.1 ofrecía generar una imagen POR CADA HUECO PENDIENTE en
+  //    vez de por cada seed. El bloque es instrucción para los nodos de abajo, no contenido.
+  content = content
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/^#{1,4}[ \t]+gaps_for_downstream[\s\S]*$/im, '')
+    .trim()
+
   // Bullet list: "- item", "* item", "• item"
   const bulletRx   = /^[ \t]*[-*•][ \t]+(.+)$/gm
   // Numbered list: "1. item", "1) item"
@@ -96,8 +108,10 @@ export function parseOutputItems(content: string, format: string): string[] {
   const richRx = /^#{1,4}[ \t]+([^\n]+(?:\n(?!#{1,4}[ \t])[^\n]*)*)/gm
   for (const m of content.matchAll(richRx)) {
     const block = m[1].trim()
-    // Incluir si el heading contiene "Palabra(s) NNN" — con o sin delimitador (:)
-    if (/^(?:\*{0,2})(?:[A-Za-z]+[ \t]+)+\d+/.test(block)) {
+    // El ordinal puede ser un número o una LETRA: el modelo rotula tan seguido "Seed A / Seed B"
+    // como "Variation 1", y exigiendo dígito los seeds del 1.1 no se capturaban. La letra tiene
+    // que ir sola —`(?![A-Za-z])`— o "## Image Descriptions" pasaría por "Image D…".
+    if (/^(?:\*{0,2})(?:[A-Za-z]+[ \t]+)+(?:\d+|[A-Z](?![A-Za-z]))/.test(block)) {
       richBlocks.push(block)
     }
   }
