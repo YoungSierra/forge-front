@@ -14,7 +14,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import ModelViewer from '@/components/shared/ModelViewer'
-import { getProjectMedia, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset } from '@/lib/api'
+import { glbThumb, glbThumbCached, type Rampa } from '@/lib/glb-thumb'
+import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type AudioThumb } from '@/lib/media-thumb'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { MD_COMPONENTS } from '@/lib/md-components'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset } from '@/lib/api'
 
 // ── Pestañas ─────────────────────────────────────────────────────────────────
 // El juego es el de la referencia. Las que no tienen activos se muestran apagadas en vez de
@@ -390,7 +395,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             } />
           ) : view === 'table' ? (
             <AssetTable
-              assets={visible} accent={theme.accent} sort={sort} selected={sel}
+              assets={visible} accent={theme.accent} colors={theme.colors} sort={sort} selected={sel}
               onSort={by => setSort(s => ({ by, dir: s.by === by ? (s.dir === 1 ? -1 : 1) : -1 }))}
               onOpen={(a, from) => { setSel(a.id); setDetail({ asset: a, from }) }}
               onMenu={(a, x, y) => setMenu({ x, y, asset: a })}
@@ -402,7 +407,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
               gridTemplateRows:    `repeat(${ROWS}, minmax(0, 1fr))`,
             }}>
               {visible.map((a, i) => (
-                <Card key={a.id} asset={a} index={i} accent={theme.accent}
+                <Card key={a.id} asset={a} index={i} accent={theme.accent} colors={theme.colors}
                       selected={sel === a.id}
                       onOpen={(from) => { setSel(a.id); setDetail({ asset: a, from }) }}
                       onMenu={(x, y) => setMenu({ x, y, asset: a })} />
@@ -554,14 +559,164 @@ function Tab({ label, count, active, onClick }: {
 // ── Tarjeta ──────────────────────────────────────────────────────────────────
 // Como la referencia: la imagen ocupa la tarjeta entera y el título va encima, sobre un
 // degradado que lo despega del fondo.
-function Card({ asset, index, accent, selected, onOpen, onMenu }: {
-  asset: UnifiedAsset; index: number; accent: string
+// Las miniaturas se calculan una sola vez por navegador y quedan en localStorage, así que a
+// partir de la segunda vez aparecen sin red. Mientras tanto la tarjeta muestra su ícono.
+function useGlbThumb(url: string, id: string, r: Rampa) {
+  // Estado inicial = lo que ya está en cache. Si se dejaba en null y se esperaba al `await`,
+  // React pintaba un frame con el ícono en CADA montaje — o sea en cada cambio de pestaña.
+  const [data, setData] = useState<string | null>(() => (url ? glbThumbCached(id, r) ?? null : null))
+  const [cargando, setCargando] = useState(false)
+  // La rampa se serializa en la dependencia: si viniera como objeto nuevo en cada render el
+  // efecto se dispararía en bucle y repintaría el modelo sin parar.
+  const clave = `${r.sombra}|${r.luz}|${r.borde}`
+  useEffect(() => {
+    if (!url) { setData(null); setCargando(false); return }
+    const [sombra, luz, borde] = clave.split('|')
+    const hit = glbThumbCached(id, { sombra, luz, borde })
+    if (hit !== undefined) { setData(hit); setCargando(false); return }
+    let vivo = true
+    setCargando(true)
+    glbThumb(url, id, { sombra, luz, borde }).then(d => { if (vivo) { setData(d); setCargando(false) } })
+    return () => { vivo = false }
+  }, [url, id, clave])
+  return { data, cargando }
+}
+
+// El documento entero, pedido de a uno cuando se abre. Se cachea en memoria por sesión: abrir
+// y cerrar el mismo documento no vuelve a pegarle al backend.
+const docCache = new Map<string, string>()
+
+function useDocContent(id: string) {
+  const [texto, setTexto] = useState<string | null>(() => (id ? docCache.get(id) ?? null : null))
+  useEffect(() => {
+    if (!id || docCache.has(id)) { setTexto(id ? docCache.get(id)! : null); return }
+    let vivo = true
+    getAssetContent(id)
+      .then(r => { docCache.set(id, r.content); if (vivo) setTexto(r.content) })
+      .catch(() => { /* sin contenido: queda el asomo de la tarjeta */ })
+    return () => { vivo = false }
+  }, [id])
+  return texto
+}
+
+function useVideoThumb(url: string, id: string) {
+  const [data, setData] = useState<string | null>(() => (url ? videoThumbCached(id) ?? null : null))
+  const [cargando, setCargando] = useState(false)
+  useEffect(() => {
+    if (!url) { setData(null); setCargando(false); return }
+    const hit = videoThumbCached(id)
+    if (hit !== undefined) { setData(hit); setCargando(false); return }
+    let vivo = true
+    setCargando(true)
+    videoThumb(url, id).then(d => { if (vivo) { setData(d); setCargando(false) } })
+    return () => { vivo = false }
+  }, [url, id])
+  return { data, cargando }
+}
+
+// El acento del proyecto se elige por luminancia, que es lo correcto para el aro del radial pero
+// deja la onda casi blanca: en SMACK gana `#D4E8F0` sobre un naranja y un rosa saturados. Para la
+// onda se busca color, no luz — el más saturado de la paleta, ignorando los casi-negros del fondo
+// del documento y los casi-blancos, que no son identidad de nadie.
+// El play de la referencia: aro fino, relleno apenas, y el triángulo del color del proyecto.
+function Play({ accent, size }: { accent: string; size: number }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      border: `1.5px solid ${accent}`,
+      background: `${accent}14`,
+      boxShadow: `0 0 18px ${accent}44`,
+    }}>
+      <svg width={size * 0.34} height={size * 0.34} viewBox="0 0 12 14" fill={accent}
+           style={{ marginLeft: size * 0.05 }}>
+        <path d="M0 0 L12 7 L0 14 Z" />
+      </svg>
+    </div>
+  )
+}
+
+function hsl(h: string): { s: number; l: number; hue: number } | null {
+  const m = h.match(/^#([0-9a-f]{6})$/i)
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2
+  const s = max === min ? 0 : (max - min) / (1 - Math.abs(2 * l - 1))
+  let hue = 0
+  if (max !== min) {
+    hue = max === r ? ((g - b) / (max - min) + (g < b ? 6 : 0))
+        : max === g ? ((b - r) / (max - min) + 2)
+        :             ((r - g) / (max - min) + 4)
+    hue *= 60
+  }
+  return { s, l, hue }
+}
+
+// Color con carácter para la onda y el borde del 3D. NO se usa el acento del tema: ése se elige
+// por luminancia —correcto para el aro del radial— y en SMACK gana `#D4E8F0`, casi blanco.
+//
+// Se penalizan los tonos que en una interfaz YA significan algo: rojo-naranja es error o
+// advertencia, verde es éxito. Usarlos de relleno decorativo pelea con ese significado, aunque
+// sean los más saturados de la paleta. Lo que queda —violetas, magentas, azules— es color libre.
+// En SMACK eso descarta el `#FF6B35` (el más saturado) y el `#A8E6CF`, y deja el rosa `#E8B4E8`.
+function vivido(colors: string[], fallback: string): string {
+  const puntaje = (h: string) => {
+    const c = hsl(h)
+    if (!c || c.l < 0.18 || c.l > 0.88 || c.s < 0.15) return -1
+    const semantico = c.hue < 45 || c.hue > 345 || (c.hue > 90 && c.hue < 165)
+    return semantico ? c.s * 0.35 : c.s
+  }
+  const mejor = [...colors].sort((a, b) => puntaje(b) - puntaje(a))[0]
+  return mejor && puntaje(mejor) > 0 ? mejor : fallback
+}
+
+// La rampa con que se sombrea un modelo 3D: sombra, luz y borde, los tres de la paleta.
+// La sombra no es el color más oscuro sin más — las paletas suelen traer un casi-negro que es el
+// fondo del documento, y con ése la mitad en sombra queda plana. Se toma el más oscuro que
+// todavía tenga algo de color.
+function rampa(colors: string[], accent: string): Rampa {
+  const conL = colors.map(c => ({ c, l: hsl(c)?.l ?? -1 })).filter(x => x.l >= 0)
+  if (conL.length < 2) return { sombra: '#2a2f38', luz: '#eef2f7', borde: accent }
+  const orden  = [...conL].sort((a, b) => a.l - b.l)
+  const sombra = orden.find(x => x.l >= 0.08) ?? orden[0]
+  return {
+    sombra: sombra.c,
+    luz:    orden[orden.length - 1].c,
+    borde:  vivido(colors, accent),
+  }
+}
+
+function useAudioThumb(url: string, id: string, accent: string) {
+  const [data, setData] = useState<AudioThumb | null>(() => (url ? audioThumbCached(id, accent) ?? null : null))
+  const [cargando, setCargando] = useState(false)
+  useEffect(() => {
+    if (!url) { setData(null); setCargando(false); return }
+    const hit = audioThumbCached(id, accent)
+    if (hit !== undefined) { setData(hit); setCargando(false); return }
+    let vivo = true
+    setCargando(true)
+    audioThumb(url, id, accent).then(d => { if (vivo) { setData(d); setCargando(false) } })
+    return () => { vivo = false }
+  }, [url, id, accent])
+  return { data, cargando }
+}
+
+function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
+  asset: UnifiedAsset; index: number; accent: string; colors: string[]
   selected: boolean; onOpen: (from: DOMRect) => void; onMenu: (x: number, y: number) => void
 }) {
   const [hover, setHover] = useState(false)
   const t    = tabOf(asset)
   const kind = kindOf(asset)
   const url  = asset.storage_url ?? ''
+  const g    = useGlbThumb(kind === '3d'    ? url : '', asset.id, rampa(colors, accent))
+  const v    = useVideoThumb(kind === 'video' ? url : '', asset.id)
+  const a    = useAudioThumb(kind === 'audio' ? url : '', asset.id, vivido(colors, accent))
+  const glb = g.data, vid = v.data, aud = a.data
+  // El ícono es el marcador de posición mientras se calcula la miniatura; late para que se lea
+  // como "trabajando" y no como resultado final, y la miniatura entra fundida en vez de saltar.
+  const calculando = g.cargando || v.cargando || a.cargando
 
   return (
     <div
@@ -584,23 +739,85 @@ function Card({ asset, index, accent, selected, onOpen, onMenu }: {
       {kind === 'image' && url ? (
         <Image src={url} alt={asset.name} fill sizes="(max-width: 1100px) 50vw, 320px"
                style={{ objectFit: 'cover' }} />
-      ) : kind === 'video' && url ? (
-        <video src={url} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      ) : kind === 'video' && vid ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={vid} alt={asset.name}
+               style={{ width: '100%', height: '100%', objectFit: 'cover', animation: 'mb-aparece 420ms ease' }} />
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', pointerEvents: 'none',
+          }}>
+            <Play accent={vivido(colors, accent)} size={54} />
+          </div>
+        </>
+      ) : kind === 'audio' && aud ? (
+        // Como en la referencia: play a la izquierda, onda ocupando el ancho, duración abajo
+        // a la derecha. El play es una marca de tipo, no un reproductor — se escucha al abrir.
+        <div style={{
+          width: '100%', height: '100%', display: 'flex', alignItems: 'center', gap: 12,
+          padding: '18px 16px 34px',
+        }}>
+          <Play accent={vivido(colors, accent)} size={38} />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={aud.img} alt=""
+               style={{ flex: 1, minWidth: 0, opacity: aud.real ? 1 : 0.6, animation: 'mb-aparece 420ms ease' }} />
+        </div>
+      ) : kind === '3d' && glb ? (
+        // Silueta de la geometría real del modelo, no un ícono. Ver lib/glb-thumb.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={glb} alt={asset.name}
+             style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 10,
+                      animation: 'mb-aparece 420ms ease' }} />
+      ) : kind === 'doc' ? (
+        // La tarjeta de un documento se lee como una hoja: encabezado arriba —ícono y nombre en
+        // una línea, no centrados— y debajo el texto ocupando lo que sobre. Antes el encabezado
+        // estaba centrado en vertical y el texto empezaba al 52%: se pisaban.
+        <div style={{
+          width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+          gap: 8, padding: '14px 14px 32px',
+          background: 'linear-gradient(150deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012))',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, flexShrink: 0 }}>
+            <div style={{ flexShrink: 0, marginTop: 1, opacity: 0.9 }}>
+              <TypeIcon type={kind} accent="var(--action)" size={17} />
+            </div>
+            <div style={{
+              fontSize: 11.5, fontWeight: 600, color: 'var(--text-1)', lineHeight: 1.3,
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            }}>{outputOf(asset) ?? asset.name}</div>
+          </div>
+
+          {asset.preview && (
+            // Un documento se distingue de otro por lo que dice, no por su ícono. Se renderiza
+            // como markdown —igual que al abrirlo— y se reduce al 62% con `scale`: así entran
+            // encabezados y tablas legibles en una tarjeta, y al abrir no hay salto de formato.
+            <div style={{
+              flex: 1, minHeight: 0, overflow: 'hidden', pointerEvents: 'none',
+              maskImage: 'linear-gradient(to bottom, #000 55%, transparent)',
+              WebkitMaskImage: 'linear-gradient(to bottom, #000 55%, transparent)',
+            }}>
+              <div style={{
+                transform: 'scale(0.62)', transformOrigin: 'top left',
+                width: '161%',                       // 1/0.62: recupera el ancho que quita la escala
+                fontSize: 12, lineHeight: 1.6, color: 'var(--text-2)',
+              }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                  {asset.preview}
+                </ReactMarkdown>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <div style={{
           width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 12, padding: '18px 14px 34px',
           background: 'linear-gradient(150deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012))',
         }}>
-          <TypeIcon type={kind} accent={kind === 'doc' || kind === '3d' ? 'var(--action)' : accent} />
-          {kind === 'doc' && (outputOf(asset) ?? asset.name) && (
-            // El nombre del output: es lo que distingue un ADI de otro dentro del mismo nodo.
-            <div style={{
-              fontSize: 12, fontWeight: 600, color: 'var(--text-1)', textAlign: 'center',
-              lineHeight: 1.35, maxWidth: '100%',
-              display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-            }}>{outputOf(asset) ?? asset.name}</div>
-          )}
+          <div style={{ animation: calculando ? 'mb-latido 1.4s ease-in-out infinite' : 'none' }}>
+            <TypeIcon type={kind} accent={kind === '3d' ? 'var(--action)' : accent} />
+          </div>
         </div>
       )}
 
@@ -620,6 +837,15 @@ function Card({ asset, index, accent, selected, onOpen, onMenu }: {
         </div>
       </div>
 
+      {/* Duración abajo a la derecha, como en la referencia. Convive con la procedencia de la
+          izquierda porque el scrim ya ocupa todo el ancho. */}
+      {(kind === 'audio' || kind === 'video') && aud?.segundos != null && (
+        <div style={{
+          position: 'absolute', right: 12, bottom: 9, pointerEvents: 'none',
+          fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.72)',
+        }}>{mmss(aud.segundos)}</div>
+      )}
+
     </div>
   )
 }
@@ -633,6 +859,7 @@ function Detail({ asset, from, onMenu, onClose }: {
 }) {
   const t   = kindOf(asset)
   const url = asset.storage_url ?? ''
+  const texto = useDocContent(kindOf(asset) === 'doc' ? asset.id : '')
   const [open,  setOpen]  = useState(false)
   // Zoom dentro de la card, para mirar el detalle fino de un arte sin abrir otra ventana.
   // Rueda para acercar sobre el puntero, arrastre para desplazar, doble clic para volver.
@@ -683,8 +910,11 @@ function Detail({ asset, from, onMenu, onClose }: {
 
   // Caja de destino: alta pero sin llenar la pantalla — es una card, no un lightbox.
   // Se deja aire abajo para los datos y a la derecha para la X, que ahora van fuera del marco.
-  const maxH = window.innerHeight * 0.68
-  const maxW = window.innerWidth  * 0.50
+  // Un documento se lee, así que se le da más alto y más ancho que a una imagen: con el tamaño
+  // de imagen entraban seis líneas y había que hacer scroll para todo.
+  const doc  = t === 'doc'
+  const maxH = window.innerHeight * (doc ? 0.80 : 0.68)
+  const maxW = window.innerWidth  * (doc ? 0.62 : 0.50)
   let h = maxH, w = h * ratio
   if (w > maxW) { w = maxW; h = w / ratio }
 
@@ -750,19 +980,51 @@ function Detail({ asset, from, onMenu, onClose }: {
           <ModelViewer url={url || undefined} style={{ width: '100%', height: '100%' }} />
         )}
         {t === 'doc' && (
+          // Al frente el documento se lee, no solo se anuncia: el mismo asomo de texto de la
+          // tarjeta pero con espacio, y la acción abajo del todo. Antes era un ícono gigante y
+          // un botón — ocupaba media pantalla para decir menos que la miniatura.
           <div style={{
             width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 18, padding: 30,
+            gap: 14, padding: '26px 28px 22px',
           }}>
-            <TypeIcon type="doc" accent="var(--action)" />
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)', textAlign: 'center' }}>
-              {outputOf(asset) ?? asset.name}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11, flexShrink: 0 }}>
+              <TypeIcon type="doc" accent="var(--action)" size={22} />
+              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)', lineHeight: 1.3 }}>
+                {outputOf(asset) ?? asset.name}
+              </div>
             </div>
+
+            {/* El listado viaja sin `content` a propósito; acá se pide el documento entero, de
+                a uno, y se renderiza como markdown — que es lo que son. El asomo de la tarjeta
+                se muestra mientras llega, así el marco nunca queda vacío. */}
+            <div
+              onWheel={e => e.stopPropagation()}
+              style={{
+                flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 6,
+                fontSize: 12, lineHeight: 1.7, color: 'var(--text-1)',
+              }}>
+              {/* Un solo render para los dos estados: primero el asomo, después el documento
+                  entero. Si el asomo se pintara como texto plano se vería el markdown crudo y
+                  al llegar el contenido habría un salto de formato — que es justo lo que no
+                  queremos. Acá lo único que cambia es cuánto texto hay. */}
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                {texto ?? asset.preview ?? ''}
+              </ReactMarkdown>
+            </div>
+
             {url && (
-              <a href={url} target="_blank" rel="noreferrer" style={{
-                fontSize: 12, padding: '7px 14px', borderRadius: 8, textDecoration: 'none',
-                background: 'rgba(255,255,255,0.06)', border: '1px solid var(--line-2)', color: 'var(--text-1)',
-              }}>Open document</a>
+              <a href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                 style={{
+                   flexShrink: 0, alignSelf: 'flex-start',
+                   display: 'flex', alignItems: 'center', gap: 7,
+                   fontSize: 12, padding: '8px 15px', borderRadius: 8, textDecoration: 'none',
+                   background: 'rgba(255,255,255,0.06)', border: '1px solid var(--line-2)', color: 'var(--text-1)',
+                 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M7 17 17 7M9 7h8v8" />
+                </svg>
+                Open document
+              </a>
             )}
           </div>
         )}
@@ -1054,9 +1316,9 @@ function RadialIcon({ kind }: { kind: string }) {
   return <svg {...p}><path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" /><path d="M3 6h.01" /><path d="M3 12h.01" /><path d="M3 18h.01" /></svg>
 }
 
-function TypeIcon({ type, accent }: { type: string; accent: string }) {
+function TypeIcon({ type, accent, size = 40 }: { type: string; accent: string; size?: number }) {
   const common = {
-    width: 40, height: 40, viewBox: '0 0 24 24', fill: 'none',
+    width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
     stroke: accent, strokeWidth: 1.4, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const,
     style: { opacity: 0.85 },
   }
@@ -1173,9 +1435,10 @@ function CloudIcon() {
 // ── Vista de tabla ───────────────────────────────────────────────────────────
 // La grilla sirve para mirar; la tabla para encontrar. Acá el orden lo elige el usuario
 // tocando la cabecera, que es lo que la grilla no puede ofrecer.
-function AssetTable({ assets, accent, sort, selected, onSort, onOpen, onMenu }: {
+function AssetTable({ assets, accent, colors, sort, selected, onSort, onOpen, onMenu }: {
   assets: UnifiedAsset[]
   accent: string
+  colors: string[]
   sort: { by: string; dir: 1 | -1 }
   selected: string | null
   onSort: (by: 'name' | 'type' | 'origin' | 'date') => void
@@ -1212,11 +1475,27 @@ function AssetTable({ assets, accent, sort, selected, onSort, onOpen, onMenu }: 
         ))}
       </div>
 
-      {assets.map(a => {
-        const kind = kindOf(a)
-        return (
+      {assets.map(a => (
+        <TableRow key={a.id} asset={a} accent={accent} colors={colors} grid={grid} selected={selected}
+                  onOpen={onOpen} onMenu={onMenu} />
+      ))}
+    </div>
+  )
+}
+
+// Una fila es su propio componente porque la miniatura del .glb necesita estado, y un hook no
+// puede vivir dentro de un .map.
+function TableRow({ asset: a, accent, colors, grid, selected, onOpen, onMenu }: {
+  asset: UnifiedAsset; accent: string; colors: string[]; grid: string; selected: string | null
+  onOpen: (a: UnifiedAsset, from: DOMRect) => void
+  onMenu: (a: UnifiedAsset, x: number, y: number) => void
+}) {
+  const kind = kindOf(a)
+  const glb  = useGlbThumb(kind === '3d' ? (a.storage_url ?? '') : '', a.id, rampa(colors, accent)).data
+  const aud  = useAudioThumb(kind === 'audio' ? (a.storage_url ?? '') : '', a.id, vivido(colors, accent)).data
+
+  return (
           <div
-            key={a.id}
             onClick={e => onOpen(a, e.currentTarget.getBoundingClientRect())}
             onContextMenu={e => { e.preventDefault(); onMenu(a, e.clientX, e.clientY) }}
             style={{
@@ -1234,6 +1513,8 @@ function AssetTable({ assets, accent, sort, selected, onSort, onOpen, onMenu }: 
             }}>
               {kind === 'image' && a.storage_url
                 ? <img src={a.storage_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : glb || aud?.img
+                ? <img src={glb ?? aud!.img} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                 : <MiniIcon kind={kind} accent={kind === 'doc' || kind === '3d' ? 'var(--action)' : accent} />}
             </div>
 
@@ -1255,9 +1536,6 @@ function AssetTable({ assets, accent, sort, selected, onSort, onOpen, onMenu }: 
               {new Date(a.created_at).toLocaleDateString()}
             </span>
           </div>
-        )
-      })}
-    </div>
   )
 }
 
@@ -1385,6 +1663,14 @@ const KEYFRAMES = `
 @keyframes mb-breathe {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
   50%      { transform: translate(-50%, -50%) scale(1.05); }
+}
+@keyframes mb-aparece {
+  from { opacity: 0; transform: scale(0.965); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes mb-latido {
+  0%, 100% { opacity: 0.32; }
+  50%      { opacity: 0.72; }
 }
 @keyframes mb-in {
   from { opacity: 0; transform: translateY(6px); }

@@ -304,6 +304,9 @@ export interface UnifiedAsset {
   status: string
   storage_url: string | null
   content: string | null
+  /** Primeras líneas del texto, solo para documentos y solo en modo media: la tarjeta muestra
+   *  un asomo del contenido en vez de un ícono. `content` sigue sin viajar. */
+  preview?: string | null
   created_at: string
   versions: UnifiedAssetVersion[]
 }
@@ -364,6 +367,16 @@ export async function getProjectMedia(
     `/api/assets/project-assets?project_id=${projectId}&media=1`,
   )
   return { assets: data.assets || [], theme: data.theme || NEUTRAL_THEME }
+}
+
+// El texto completo de UN documento, para cuando se abre en el moodboard. El listado va sin
+// `content` a propósito; esto lo trae de a uno y solo cuando hace falta.
+export async function getAssetContent(
+  assetId: string,
+): Promise<{ name: string; format: string; content: string }> {
+  return request<{ success: boolean; name: string; format: string; content: string }>(
+    `/api/assets/${assetId}/content`,
+  )
 }
 
 export async function getAssets(filters?: { project_id?: string; step_key?: string }) {
