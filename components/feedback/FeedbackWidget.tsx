@@ -36,6 +36,16 @@ export default function FeedbackWidget() {
   const [sent, setSent]             = useState(false)
   const [memberId, setMemberId]     = useState<string | null>(null)
   const pasteAreaRef                = useRef<HTMLDivElement>(null)
+  const fileRef                     = useRef<HTMLInputElement>(null)
+  const [dragging,    setDragging]  = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  // Único camino de entrada de la imagen, venga de pegar, arrastrar o del selector.
+  function tomarImagen(file: File) {
+    setScreenshot(file)
+    setPreview(URL.createObjectURL(file))
+    setUploadError(null)
+  }
 
   useEffect(() => {
     if (user?.id) getMemberByAuth(user.id).then(m => setMemberId(m?.id ?? null))
@@ -51,8 +61,7 @@ export default function FeedbackWidget() {
         if (item.type.startsWith('image/')) {
           const file = item.getAsFile()
           if (!file) continue
-          setScreenshot(file)
-          setPreview(URL.createObjectURL(file))
+          tomarImagen(file)
           break
         }
       }
@@ -68,6 +77,8 @@ export default function FeedbackWidget() {
     setSeverity('medium')
     setScreenshot(null)
     setPreview(null)
+    setUploadError(null)
+    setDragging(false)
     setSent(false)
   }
 
@@ -85,10 +96,11 @@ export default function FeedbackWidget() {
         body: JSON.stringify({ data: b64, mimeType: file.type || 'image/png' }),
       })
       const json = await res.json()
-      if (!json.success) { console.warn('Screenshot upload failed:', json.error); return undefined }
+      if (!json.success) { setUploadError(json.error || `HTTP ${res.status}`); return undefined }
+      setUploadError(null)
       return json.url
     } catch (e) {
-      console.warn('Screenshot upload failed:', e)
+      setUploadError(e instanceof Error ? e.message : 'network error')
       return undefined
     }
   }
@@ -200,29 +212,52 @@ export default function FeedbackWidget() {
                   }}
                 />
 
-                {/* Screenshot paste area */}
+                {/* Captura: pegar, arrastrar o elegir archivo. Antes SOLO se podía pegar, y quien
+                    guardaba la captura como archivo no tenía por dónde adjuntarla — de ahí los
+                    reportes que dicen "see screenshot" sin ninguna adjunta. */}
                 <div
                   ref={pasteAreaRef}
+                  onClick={() => { if (!screenshotPreview) fileRef.current?.click() }}
+                  onDragOver={e => { e.preventDefault(); setDragging(true) }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={e => {
+                    e.preventDefault(); setDragging(false)
+                    const f = Array.from(e.dataTransfer.files).find(x => x.type.startsWith('image/'))
+                    if (f) tomarImagen(f)
+                  }}
                   style={{
-                    border: `1px dashed ${screenshotPreview ? 'var(--cat-code)' : 'var(--line-2)'}`,
+                    border: `1px dashed ${dragging ? 'var(--action)' : screenshotPreview ? 'var(--cat-code)' : 'var(--line-2)'}`,
                     borderRadius: 6, padding: screenshotPreview ? 0 : '10px 12px',
-                    background: 'var(--bg-2)', overflow: 'hidden', cursor: 'default',
+                    background: dragging ? 'rgba(255,255,255,0.04)' : 'var(--bg-2)',
+                    overflow: 'hidden', cursor: screenshotPreview ? 'default' : 'pointer',
                   }}
                 >
+                  <input
+                    ref={fileRef} type="file" accept="image/*" hidden
+                    onChange={e => { const f = e.target.files?.[0]; if (f) tomarImagen(f); e.target.value = '' }}
+                  />
                   {screenshotPreview ? (
                     <div style={{ position: 'relative' }}>
                       <img src={screenshotPreview} alt="screenshot" style={{ width: '100%', display: 'block', borderRadius: 6, maxHeight: 160, objectFit: 'cover' }} />
                       <button
-                        onClick={() => { setScreenshot(null); setPreview(null) }}
+                        onClick={e => { e.stopPropagation(); setScreenshot(null); setPreview(null); setUploadError(null) }}
                         style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: 99, color: '#fff', fontSize: 11, cursor: 'pointer', padding: '2px 7px' }}
                       >✕</button>
                     </div>
                   ) : (
-                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', margin: 0, textAlign: 'center' }}>
-                      Paste a screenshot here <span style={{ opacity: 0.5 }}>Ctrl+V</span>
+                    <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-3)', margin: 0, textAlign: 'center', lineHeight: 1.6 }}>
+                      Paste <span style={{ opacity: 0.5 }}>Ctrl+V</span>, drop a file, or click to browse
                     </p>
                   )}
                 </div>
+
+                {/* Una subida fallida ya no se pierde en la consola: antes el reporte salía sin
+                    captura y sin aviso, y "no adjunté" era indistinguible de "falló". */}
+                {uploadError && (
+                  <p style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--state-error)', margin: 0, lineHeight: 1.5 }}>
+                    The screenshot could not be uploaded ({uploadError}). Send anyway, or try attaching it again.
+                  </p>
+                )}
 
                 {/* Submit */}
                 <button

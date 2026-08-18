@@ -1534,11 +1534,17 @@ export async function generateItemImage(
 }
 
 export async function getNodeSession(
-  projectId:  string,
-  nodeId:     string,
-  outputKey?: string | null,
+  projectId:      string,
+  nodeId:         string,
+  outputKey?:     string | null,
+  // Con fan-out los lanes instancian el mismo nodo del catálogo: sin la instancia, el lane B
+  // abre la sesión del lane A.
+  projectNodeId?: string | null,
 ): Promise<{ session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: ApprovedAsset | null }> {
-  const qs = outputKey ? `?output_key=${encodeURIComponent(outputKey)}` : ''
+  const params = new URLSearchParams()
+  if (outputKey)     params.set('output_key', outputKey)
+  if (projectNodeId) params.set('project_node_id', projectNodeId)
+  const qs = params.toString() ? `?${params.toString()}` : ''
   return request<{ success: boolean; session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: ApprovedAsset | null }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/session${qs}`,
   )

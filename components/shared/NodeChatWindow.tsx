@@ -28,14 +28,34 @@ function parseJsonArrayItems(content: string): string[] | null {
   try { arr = JSON.parse(text.slice(start, end + 1)) } catch { return null }
   if (!Array.isArray(arr) || arr.length === 0) return null
 
+  // La cabecera va primero y sin rótulo: es lo que identifica al ítem de un vistazo.
   const PREF = ['title', 'name', 'one_liner', 'oneLiner', 'summary', 'description', 'label']
+  // Lo que nunca es contenido: identificadores internos que en la tarjeta son ruido.
+  const OCULTO = new Set(['id', 'key', 'index', 'seed_id', 'uuid'])
+
+  const rotulo = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  const texto  = (v: unknown): string =>
+    Array.isArray(v) ? v.filter(x => x != null).map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' · ')
+    : typeof v === 'string' ? v
+    : (typeof v === 'number' || typeof v === 'boolean') ? String(v)
+    : v && typeof v === 'object' ? Object.entries(v as Record<string, unknown>).map(([k, x]) => `${rotulo(k)}: ${texto(x)}`).join(' · ')
+    : ''
+
   const items = arr.map(el => {
     if (el && typeof el === 'object') {
       const o = el as Record<string, unknown>
-      const picked = PREF.map(k => o[k]).filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-      if (picked.length) return picked.join(' — ')
-      const vals = Object.values(o).filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-      return vals.length ? vals.join(' — ') : JSON.stringify(el)
+      const cabecera = PREF.map(k => o[k]).filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      // El resto del objeto TAMBIÉN es la tarjeta: rationale, género, comparables, modificadores.
+      // Antes se descartaba todo lo que no estuviera en PREF y la galería mostraba dos campos de
+      // ocho — justo la información por la que se abre la tarjeta.
+      const resto = Object.entries(o)
+        .filter(([k, v]) => !PREF.includes(k) && !OCULTO.has(k) && texto(v).trim().length > 0)
+        .map(([k, v]) => `${rotulo(k)}: ${texto(v)}`)
+
+      if (cabecera.length || resto.length) {
+        return [cabecera.join(' — '), ...resto].filter(Boolean).join('\n\n')
+      }
+      return JSON.stringify(el)
     }
     return String(el)
   }).filter(s => s.trim().length > 0)

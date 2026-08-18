@@ -2527,13 +2527,18 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
 
           {/* Modal de texto completo con control de tamaño de fuente */}
           {textModal && (
+            // Solo se cierra con la ✕. Ni clic afuera ni Esc: al redimensionar se suelta el
+            // puntero fuera del panel, y ese gesto terminaba cerrando lo que se estaba agrandando.
             <div
-              onClick={() => setTextModal(null)}
               style={{ position: 'fixed', inset: 0, zIndex: 10004, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}
             >
               <div
                 onClick={e => e.stopPropagation()}
-                style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, width: '100%', maxWidth: 620, maxHeight: '72vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.55)' }}
+                // Redimensionable desde la esquina inferior derecha. Se le da un tamaño concreto
+                // en vez de `width: 100%` porque `resize` no tiene contra qué tirar si el ancho
+                // lo decide el contenedor. Los topes son de viewport: la ficha de un seed con sus
+                // comparables y modificadores pide más alto que el 72vh de antes.
+                style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, width: 620, height: '72vh', minWidth: 320, minHeight: 220, maxWidth: '95vw', maxHeight: '92vh', resize: 'both', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.55)' }}
               >
                 <div style={{ padding: '11px 16px', borderBottom: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: 12 }}>
                   <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{textModal.label}</span>
@@ -2545,7 +2550,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                     <button onClick={() => setTextModal(null)} style={{ background: 'none', border: 'none', color: 'var(--text-3)', fontSize: 16, cursor: 'pointer', lineHeight: 1, padding: '0 0 0 8px' }}>✕</button>
                   </div>
                 </div>
-                <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, fontSize: textFontSize, lineHeight: 1.75, color: 'var(--text-1)', whiteSpace: 'pre-wrap' }}>
+                {/* El padding inferior deja libre la esquina del grip: sin él, la última línea
+                    del texto queda justo debajo y no se puede agarrar. */}
+                <div style={{ padding: '20px 24px 26px', overflowY: 'auto', flex: 1, fontSize: textFontSize, lineHeight: 1.75, color: 'var(--text-1)', whiteSpace: 'pre-wrap' }}>
                   {textModal.text}
                 </div>
               </div>
@@ -4875,7 +4882,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     setSelectedNode(null)
     setChatLoading(true)
     try {
-      const { session, messages, asset } = await getNodeSession(project.id, node.node!.id, outputKey)
+      const { session, messages, asset } = await getNodeSession(project.id, node.node!.id, outputKey, node.project_node_id)
       setChatSessionId(session?.id ?? null)
       setChatMessages(messages)
       setChatOutputImages((session?.output_images as OutputImagesMap) ?? {})
