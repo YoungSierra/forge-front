@@ -26,11 +26,23 @@ import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, ty
 // esconderse: la barra no cambia de forma entre proyectos y se ve qué tipos faltan por producir.
 const TABS: { key: string; label: string; formats: string[] }[] = [
   { key: 'concept', label: 'Concept Art', formats: ['image', 'png', 'jpg', 'jpeg'] },
+  { key: 'refs',    label: 'Ref',         formats: [] },   // ver ARTE: se decide por nodo, no por formato
   { key: '3d',      label: '3D',          formats: ['model_3d', 'glb'] },
   { key: 'audio',   label: 'Audio',       formats: ['audio'] },
   { key: 'video',   label: 'Video',       formats: ['video', 'mp4'] },
   { key: 'docs',    label: 'Docs',        formats: ['document', 'docx', 'pdf', 'pptx', 'md', 'markdown'] },
 ]
+
+// Los nodos cuyas imágenes son ARTE. Todo lo demás que sea imagen es material de referencia y
+// va a `Ref`: las del 1.1 ilustran una semilla de concepto y las del 2.4 orientan, no son la
+// obra. La DNA no tiene un campo de disciplina, así que la lista es explícita a propósito —
+// cuando aparezca un nodo de arte nuevo hay que sumarlo acá.
+//
+// La partición es SOLO entre imágenes. Un GLB o un audio subidos siguen contando por su tipo,
+// que es lo que evitó el problema viejo de que un modelo subido fuera 3D y Ref a la vez y
+// desapareciera de la pestaña 3D.
+const ARTE = new Set(['3.9', '3.20'])
+const ES_IMAGEN = ['image', 'png', 'jpg', 'jpeg']
 
 // El asset se guarda como "<título del nodo> — <label del output>", así que el output es lo
 // que va después del guion largo. Para un documento es el dato que lo identifica: dos ADI
@@ -40,9 +52,15 @@ const outputOf = (a: UnifiedAsset) => {
   return parts.length > 1 ? parts[parts.length - 1].trim() : null
 }
 
-// Qué pestaña: siempre por tipo. La procedencia es el otro eje y vive en el selector de origen.
-const tabOf = (a: UnifiedAsset) =>
-  TABS.find(t => t.formats.includes(String(a.format).toLowerCase()))?.key ?? 'concept'
+// Qué pestaña. Por tipo, salvo las imágenes: esas se parten en dos según de dónde salieron —
+// las de un nodo de arte son Concept Art y el resto es referencia. La procedencia SIGUE siendo
+// el otro eje (de qué nodo vino), y este corte no la reemplaza: una imagen del 1.1 se ve en
+// `Ref` y en el origen `1.1` a la vez.
+const tabOf = (a: UnifiedAsset) => {
+  const f = String(a.format).toLowerCase()
+  if (ES_IMAGEN.includes(f)) return a.node_key && ARTE.has(a.node_key) ? 'concept' : 'refs'
+  return TABS.find(t => t.formats.includes(f))?.key ?? 'concept'
+}
 
 // Cómo se dibuja el activo. Siempre por formato real, nunca por pestaña: una imagen subida
 // vive en Refs pero se sigue viendo como imagen.
@@ -346,7 +364,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             <ViewBtn active={view === 'table'} onClick={() => setView('table')} kind="table" />
           </div>
 
-          {/* Refs a la vista como chip: es un origen, no un tipo, pero sigue a un clic. */}
+          {/* Lo que subió el usuario, a un clic. Se llama Library y NO Ref para no chocar con la
+              pestaña `Ref`, que es otra cosa: ésta es un ORIGEN (quién lo trajo) y aquélla un
+              TIPO (imagen que no salió de un nodo de arte). */}
           {refCount > 0 && (
             <button
               onClick={() => setNode(n => n === 'library' ? 'all' : 'library')}
@@ -360,7 +380,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                 fontWeight: node === 'library' ? 600 : 500,
               }}
             >
-              Refs
+              Library
               <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
                 {refCount}
               </span>
