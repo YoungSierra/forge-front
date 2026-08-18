@@ -224,6 +224,33 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     return (i === -1 ? TABS.length : i) * 2 + (a.source === 'library' ? 1 : 0)
   }
 
+  // Un deck trae su número de página en el nombre: «Art Style Guide — 09_ColorSystem». Dentro
+  // de un mismo output eso es un ORDEN, no una fecha — las 34 páginas se rinden en el mismo
+  // minuto y ordenadas por fecha llegan barajadas, que es ilegible para una guía de estilo.
+  const grupoDe  = (a: UnifiedAsset) => `${a.node_key ?? ''}|${String(a.name || '').split('—')[0].trim()}`
+  const paginaDe = (a: UnifiedAsset) => {
+    const m = /^(\d{1,3})[_\s.-]/.exec(outputOf(a) ?? '')
+    return m ? Number(m[1]) : null
+  }
+  // El grupo se ubica por su página más reciente, y adentro manda el número. Así un deck viejo
+  // no se cuela entre los activos nuevos, y sigue siendo un orden total.
+  const fechaGrupo = useMemo(() => {
+    const m = new Map<string, number>()
+    assets.forEach(a => {
+      const g = grupoDe(a), t = new Date(a.created_at).getTime()
+      if (!m.has(g) || t > (m.get(g) as number)) m.set(g, t)
+    })
+    return m
+  }, [assets])
+
+  const porFechaYPagina = (a: UnifiedAsset, b: UnifiedAsset) => {
+    const ga = grupoDe(a), gb = grupoDe(b)
+    if (ga !== gb) return (fechaGrupo.get(gb) ?? 0) - (fechaGrupo.get(ga) ?? 0)
+    const pa = paginaDe(a), pb = paginaDe(b)
+    if (pa != null && pb != null) return pa - pb
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  }
+
   const filtered = useMemo(() => {
     const base = tab === 'all' ? shownSet : shownSet.filter(a => tabOf(a) === tab)
 
@@ -239,11 +266,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       })
     }
 
-    if (tab !== 'all') return base
-    return [...base].sort((a, b) =>
-      rankOf(a) - rankOf(b) ||
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-  }, [shownSet, tab, view, sort])
+    if (tab !== 'all') return [...base].sort(porFechaYPagina)
+    return [...base].sort((a, b) => rankOf(a) - rankOf(b) || porFechaYPagina(a, b))
+  }, [shownSet, tab, view, sort, fechaGrupo])
 
   // La página es exactamente lo que entra en pantalla: 3 filas de `cols`. Así nunca hay que
   // scrollear dentro de una página — se pasa a la siguiente.
