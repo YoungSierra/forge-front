@@ -1326,15 +1326,19 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   }, [pendingOutputId, pendingOutputKey, canvasNode.project_node_id, clearPendingOutput])
   if (!node) return null
   const isGate = node.role === 'gate'
-  // Si no hay sesión general, verificar si TODOS los outputs tienen per-output session aprobada
+  // TODOS los outputs aprobados ⇒ el nodo está aprobado, y eso gana sobre la sesión general.
+  // Antes mandaba `session?.status` y el respaldo solo entraba si NO había sesión general: una
+  // sesión suelta sin output_key —la que se crea al abrir el chat sin enfocar un output— quedaba
+  // en `active` y dejaba el nodo rotulado "active" para siempre aunque sus dos outputs
+  // estuvieran aprobados. Un run en curso no se pierde: lo muestra `isRunning`, aparte.
   const allOuts = (node.outputs ?? [])
   const allOutsApproved = allOuts.length > 0 && allOuts.every((o: { key?: string }) => {
     const s = outputSessions[(o.key ?? '')]
     return s?.status === 'approved' || s?.status === 'auto_approved'
   })
-  const effectiveStatus: string | null = session?.status ?? (allOutsApproved
+  const effectiveStatus: string | null = allOutsApproved
     ? (allOuts.some((o: { key?: string }) => outputSessions[(o.key ?? '')]?.status === 'auto_approved') ? 'auto_approved' : 'approved')
-    : null)
+    : (session?.status ?? null)
   const status      = effectiveStatus
   const statusColor = locked ? null : isError ? '#EF4444' : isRunning ? '#60A5FA' : (status ? (SESSION_COLOR[status] ?? null) : null)
   const phaseColor  = locked ? '#6B7280' : (PHASE_COLOR[node.phase] ?? '#6B7280')
@@ -1362,7 +1366,10 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   // Mostrar deck cuando hay contenido disponible (aprobado, auto-aprobado, o active con output)
   const isApproved   = !!session?.has_content || Object.values(outputSessions).some(s => s.has_content)
   const [outputOpen, setOutputOpen] = useState(false)
-  const [generatedPdfUrl, setGeneratedPdfUrl] = useState<string | null>(null)
+  // PDFs generados en esta sesión, POR OUTPUT. Antes era una sola URL para toda la tarjeta: al
+  // generar el del pitch_document, la pestaña del elevator_line mostraba ese mismo archivo.
+  // La clave '' es el documento del nodo (la tarjeta, que no tiene pestañas).
+  const [generatedPdfUrls, setGeneratedPdfUrls] = useState<Record<string, string>>({})
   const [pdfLoading, setPdfLoading] = useState(false)
   const [localOutputImages, setLocalOutputImages] = useState<OutputImagesMap>(() => {
     // Merge images de sesión general + todas las sesiones de output
@@ -1477,8 +1484,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   // outSession: sesión del tab activo en el modal de output
   const outSession         = outputSessions[outTab] ?? session ?? null
   // Resolución del PDF URL: del asset (ya guardado) o generado on-demand en esta sesión
-  const effectivePdfUrl    = session?.output_asset?.storage_url || generatedPdfUrl
-  const effectiveOutPdfUrl = outSession?.output_asset?.storage_url || generatedPdfUrl
+  const effectivePdfUrl    = session?.output_asset?.storage_url || generatedPdfUrls['']
+  // Solo el PDF de ESTA pestaña: sin la llave, un output sin documento heredaba el del vecino.
+  const effectiveOutPdfUrl = outSession?.output_asset?.storage_url || generatedPdfUrls[outTab]
 
   // ── Drag / Resize / Maximize del modal de output ─────────────────────────
   const OUT_W = 720, OUT_H = 640, OUT_MARGIN = 12
@@ -1569,20 +1577,22 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  const handleGeneratePdf = useCallback(async (e?: React.MouseEvent) => {
+  // `outputKey` = la pestaña en la que está parado el usuario. Vacío desde la tarjeta, que no
+  // tiene pestañas. El backend genera el PDF si ese output todavía no lo tenía y lo deja guardado.
+  const handleGeneratePdf = useCallback(async (e?: React.MouseEvent, outputKey = '') => {
     e?.stopPropagation()
     if (pdfLoading) return
     setPdfLoading(true)
     try {
-      const r = await generateNodePdf(projectId, node.id)
-      setGeneratedPdfUrl(r.url)
+      const r = await generateNodePdf(projectId, node.id, outputKey || null, canvasNode.project_node_id)
+      setGeneratedPdfUrls(prev => ({ ...prev, [outputKey]: r.url }))
       window.open(r.url, '_blank')
     } catch (err) {
       console.error('[ForgeNodeCard] PDF generation failed:', err)
     } finally {
       setPdfLoading(false)
     }
-  }, [pdfLoading, projectId, node.id])
+  }, [pdfLoading, projectId, node.id, canvasNode.project_node_id])
 
   const keepDeckOpen = useCallback(() => {
     if (closeTimer.current) clearTimeout(closeTimer.current)
@@ -2039,8 +2049,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                   ) : outSession.output_asset.content ? (
                     <button
                       onMouseDown={e => e.stopPropagation()}
-                      onClick={handleGeneratePdf}
+                      onClick={e => handleGeneratePdf(e, outTab)}
                       disabled={pdfLoading}
+                      title={`Generate & download the PDF of: ${outTab.replace(/_/g, ' ')}`}
                       style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', background: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0, cursor: pdfLoading ? 'default' : 'pointer', opacity: pdfLoading ? 0.6 : 1 }}
                     >{pdfLoading ? '…' : '↓ PDF'}</button>
                   ) : null}
@@ -2994,15 +3005,15 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
 
   const { node, session } = canvasNode
   if (!node) return null
-  // Derivar estado efectivo: si no hay sesión general, verificar si TODOS los outputs tienen per-output session aprobada
+  // Misma regla que en la tarjeta: los outputs aprobados ganan sobre una sesión general suelta.
   const _panelAllOuts = (node.outputs ?? [])
   const _panelAllDone = _panelAllOuts.length > 0 && _panelAllOuts.every((o: { key?: string }) => {
     const s = (canvasNode.output_sessions ?? {})[(o.key ?? '')]
     return s?.status === 'approved' || s?.status === 'auto_approved'
   })
-  const effectiveStatus: string | null = session?.status ?? (_panelAllDone
+  const effectiveStatus: string | null = _panelAllDone
     ? (_panelAllOuts.some((o: { key?: string }) => (canvasNode.output_sessions ?? {})[(o.key ?? '')]?.status === 'auto_approved') ? 'auto_approved' : 'approved')
-    : null)
+    : (session?.status ?? null)
   const statusColor = effectiveStatus ? (SESSION_COLOR[effectiveStatus] ?? 'var(--text-3)') : null
   const phaseColor  = PHASE_COLOR[node.phase] ?? 'var(--text-3)'
 
@@ -3039,9 +3050,12 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
                 {node.executor.model ? ` · ${node.executor.model}` : ''}
               </span>
             )}
-            {session && statusColor && (
+            {/* El estado del NODO, no el de la sesión general: con los outputs aprobados el nodo
+                está aprobado aunque quede una sesión suelta en `active`. El bloque "Last Session"
+                de más abajo sí muestra el estado crudo de esa sesión, que es lo que describe. */}
+            {effectiveStatus && statusColor && (
               <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: statusColor, background: `color-mix(in srgb, ${statusColor} 10%, var(--bg-2))`, border: `1px solid color-mix(in srgb, ${statusColor} 28%, transparent)`, padding: '2px 7px', borderRadius: 3 }}>
-                ● {session.status}
+                ● {effectiveStatus}
               </span>
             )}
           </div>

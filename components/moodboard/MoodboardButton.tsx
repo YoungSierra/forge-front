@@ -50,6 +50,22 @@ export default function MoodboardButton({ projectId, projectName, nodeKey }: Pro
     return () => window.removeEventListener('resize', onResize)
   }, [clamp])
 
+  // Ctrl+Alt+M abre el moodboard sin buscar el botón, que el usuario pudo arrastrar a cualquier
+  // lado. Misma combinación que el Ctrl+Alt+P del canvas. Cerrar ya lo hace Escape, adentro.
+  // Solo responde la instancia del proyecto: la de un nodo lleva `nodeKey` y no debe secuestrar
+  // el atajo global si algún día conviven las dos.
+  useEffect(() => {
+    if (nodeKey) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && (e.code === 'KeyM' || e.key.toLowerCase() === 'm')) {
+        e.preventDefault()
+        setOpen(v => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [nodeKey])
+
   useEffect(() => {
     if (!drag) return
     const onMove = (e: PointerEvent) => {
@@ -82,7 +98,7 @@ export default function MoodboardButton({ projectId, projectName, nodeKey }: Pro
         onClick={() => { if (!moved.current) setOpen(true) }}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        title={nodeKey ? `Moodboard — ${nodeKey}` : 'Project moodboard · drag to move'}
+        title={nodeKey ? `Moodboard — ${nodeKey}` : 'Project moodboard · Ctrl+Alt+M · drag to move'}
         style={{
           position: 'fixed', left: pos.x, top: pos.y, zIndex: 400,
           width: SIZE, height: SIZE, borderRadius: '50%',

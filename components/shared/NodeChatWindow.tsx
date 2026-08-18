@@ -12,6 +12,7 @@ import type { Project } from '@/lib/types'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import { jsonToMarkdown } from '@/lib/json-display'
 import AttachmentCard from './AttachmentCard'
+import Moodboard from '@/components/moodboard/Moodboard'
 import { Paperclip } from 'lucide-react'
 
 // ─── Utilidad — parsear items de un output para image gen ────────────────────
@@ -862,6 +863,7 @@ export default function NodeChatWindow({
   isGate, projectNodeId, onOpenOutput,
 }: NodeChatWindowProps) {
   const [messages,        setMessages]        = useState<ChatMessage[]>(initialMessages ?? [])
+  const [moodOpen,        setMoodOpen]        = useState(false)   // moodboard filtrado a este nodo
   const [input,           setInput]           = useState('')
   const [sending,         setSending]         = useState(false)
   const [applying,        setApplying]        = useState(false)
@@ -1317,6 +1319,19 @@ export default function NodeChatWindow({
           )}
           {/* Grip — mano blanca, igual al cursor grab del modal */}
           <span style={{ fontSize: 15, flexShrink: 0, lineHeight: 1, opacity: 0.55, userSelect: 'none', filter: 'brightness(0) invert(1)' }}>🖐️</span>
+          {/* Moodboard del nodo — abre filtrado a lo que ESTE nodo produjo.
+              Va inline y no con el FAB arrastrable: el FAB guarda su posición en una sola clave
+              de localStorage, así que montarlo acá lo dejaría encima del botón del proyecto. */}
+          <button
+            onMouseDown={e => e.stopPropagation()}
+            onClick={() => setMoodOpen(true)}
+            title={`Moodboard — ${stepKey}`}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 6px', borderRadius: 6, flexShrink: 0, display: 'inline-flex', alignItems: 'center', opacity: 0.75 }}
+            onMouseEnter={e => { e.currentTarget.style.opacity = '1' }}
+            onMouseLeave={e => { e.currentTarget.style.opacity = '0.75' }}
+          >
+            <img src="/forgy/forgyi.png" alt="" width={17} height={17} draggable={false} style={{ objectFit: 'contain', display: 'block' }} />
+          </button>
           {/* Botón maximizar */}
           <button
             onMouseDown={e => e.stopPropagation()}
@@ -2147,6 +2162,20 @@ export default function NodeChatWindow({
             ✕
           </button>
         </div>
+      )}
+
+      {/* Por portal y con su propio contexto de apilado: el moodboard vive en z-index 1200 y esta
+          ventana llega a 30000, así que montado adentro quedaría detrás del chat que lo abrió. */}
+      {moodOpen && createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 30001 }}>
+          <Moodboard
+            projectId={project.id}
+            projectName={project.name}
+            nodeKey={stepKey}
+            onClose={() => setMoodOpen(false)}
+          />
+        </div>,
+        document.body,
       )}
     </>
   )

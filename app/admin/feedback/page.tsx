@@ -69,11 +69,14 @@ export default function FeedbackAdminPage() {
       severity: sevFilter    || undefined,
     })
       .then(data => {
+        // Lo pendiente arriba, y dentro de cada grupo lo más RECIENTE primero: un reporte de
+        // hoy importa más que uno de hace un mes, y el backend ya los entrega en ese orden —
+        // acá se invertía al reordenar por resuelto/pendiente.
         const sorted = [...data].sort((a, b) => {
           const aResolved = a.status === 'resolved' ? 1 : 0
           const bResolved = b.status === 'resolved' ? 1 : 0
           if (aResolved !== bResolved) return aResolved - bResolved
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         })
         setItems(sorted)
       })

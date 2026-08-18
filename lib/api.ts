@@ -1504,13 +1504,21 @@ export async function acceptNodeOutput(
   )
 }
 
+// El PDF es de UN output: sin `outputKey` el backend devuelve el documento aprobado más
+// reciente del nodo, que en un nodo de varios outputs es casi siempre el equivocado.
 export async function generateNodePdf(
-  projectId: string,
-  nodeId:    string,
+  projectId:      string,
+  nodeId:         string,
+  outputKey?:     string | null,
+  projectNodeId?: string | null,
 ): Promise<{ url: string }> {
   return request<{ success: boolean; url: string }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/generate-pdf`,
-    { method: 'POST' },
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ output_key: outputKey ?? null, project_node_id: projectNodeId ?? null }),
+    },
   )
 }
 
