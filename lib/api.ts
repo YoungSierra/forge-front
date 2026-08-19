@@ -289,6 +289,8 @@ export interface UnifiedAssetVersion {
   version_number: number
   is_current: boolean
   model_used: string | null
+  /** Aprobada es distinto de vigente: una version puede estar a la vista sin haber sido elegida. */
+  approved_at: string | null
   created_at: string
 }
 

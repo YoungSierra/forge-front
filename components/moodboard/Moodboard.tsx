@@ -590,7 +590,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       )}
       {aviso    && <NoDisponible  que={aviso}      accent={theme.accent} onClose={() => setAviso(null)} />}
 
-      {detail && <Detail asset={detail.asset} from={detail.from} accent={theme.accent}
+      {detail && <Detail asset={detail.asset} from={detail.from} accent={theme.accent} onAprobado={reload}
                          onMenu={(mx, my) => setMenu({ x: mx, y: my, asset: detail.asset })}
                          onClose={() => setDetail(null)} />}
     </div>
@@ -1012,9 +1012,9 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
 // No es un visor a pantalla completa: es una CARD que fluye al frente desde su lugar en la
 // grilla, como en la referencia. La grilla sigue visible detrás, atenuada, así no se pierde
 // el contexto de dónde estaba la imagen. Al cerrar vuelve exactamente a su celda.
-function Detail({ asset, from, accent, onMenu, onClose }: {
+function Detail({ asset, from, accent, onMenu, onClose, onAprobado }: {
   asset: UnifiedAsset; from: DOMRect; accent: string
-  onMenu: (x: number, y: number) => void; onClose: () => void
+  onMenu: (x: number, y: number) => void; onClose: () => void; onAprobado: () => void
 }) {
   const t   = kindOf(asset)
   // Historial de la pieza. Se mira desde aca: el badge de la tarjeta decia que habia dos
@@ -1027,6 +1027,7 @@ function Detail({ asset, from, accent, onMenu, onClose }: {
   const verSel = vers.find(v => v.version_number === verN)
   // Sin historial, lo que se ve ES la vigente.
   const esVigente = !vers.length || !!verSel?.is_current
+  const [aprobando, setAprobando] = useState(false)
   const url = (verSel?.storage_url ?? asset.storage_url) ?? ''
   const texto = useDocContent(kindOf(asset) === 'doc' ? asset.id : '')
   const [open,  setOpen]  = useState(false)
@@ -1126,54 +1127,6 @@ function Detail({ asset, from, accent, onMenu, onClose }: {
         background: 'var(--bg-2)',
         transition: `${FLIGHT}, box-shadow 300ms ease`,
       }}>
-        {/* Versiones: columna a la derecha, la mas nueva arriba. Solo cuando hay historial. */}
-        {vers.length > 1 && (
-          <div
-            onPointerDown={e => e.stopPropagation()}
-            onDoubleClick={e => e.stopPropagation()}
-            style={{
-              position: 'absolute', top: 10, right: 10, bottom: 10, zIndex: 3,
-              width: 74, display: 'flex', flexDirection: 'column', gap: 6,
-              overflowY: 'auto', overflowX: 'hidden', padding: 6, borderRadius: 9,
-              background: 'rgba(6,7,9,0.62)', backdropFilter: 'blur(6px)',
-              border: '1px solid rgba(255,255,255,0.12)',
-            }}
-          >
-            {!esVigente && (
-              <div style={{
-                fontSize: 8.5, lineHeight: 1.35, color: 'var(--text-3)', textAlign: 'center',
-                padding: '2px 1px 4px', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: 2,
-              }}>
-                viewing an earlier version
-              </div>
-            )}
-            {[...vers].reverse().map(v => (
-              <button
-                key={v.id}
-                onClick={e => { e.stopPropagation(); setVerN(v.version_number); setZoom(1); setPan({ x: 0, y: 0 }) }}
-                title={v.is_current ? `v${v.version_number} - current` : `v${v.version_number}`}
-                style={{
-                  position: 'relative', width: '100%', aspectRatio: '4 / 3', flexShrink: 0,
-                  borderRadius: 6, overflow: 'hidden', cursor: 'pointer', padding: 0,
-                  background: 'var(--bg-2)',
-                  border: `1px solid ${v.version_number === verN ? accent : 'rgba(255,255,255,0.16)'}`,
-                  opacity: v.version_number === verN ? 1 : 0.6,
-                }}
-              >
-                {v.storage_url && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={v.storage_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                )}
-                <span style={{
-                  position: 'absolute', left: 0, right: 0, bottom: 0,
-                  fontSize: 8.5, fontFamily: 'var(--font-mono)', lineHeight: '13px',
-                  background: 'rgba(6,7,9,0.8)', color: v.is_current ? accent : '#fff',
-                }}>v{v.version_number}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
         {t === 'image' && url && (
           // Acá se pide la resolución completa: es la vista para juzgar la imagen.
           <img src={url} alt={asset.name}
@@ -1278,6 +1231,86 @@ function Detail({ asset, from, accent, onMenu, onClose }: {
           {' · '}{new Date(asset.created_at).toLocaleDateString()}
         </div>
       </div>
+
+      {/* Versiones: fuera del marco, debajo de la X. Adentro tapaba parte de la imagen. */}
+        {vers.length > 1 && (
+          <div
+            onPointerDown={e => e.stopPropagation()}
+            onDoubleClick={e => e.stopPropagation()}
+            style={{
+              position: 'fixed', zIndex: 1251,
+              left: box.left + box.width + 12, top: box.top + 38,
+              maxHeight: Math.max(120, box.height - 38),
+              width: 74, display: 'flex', flexDirection: 'column', gap: 6,
+              overflowY: 'auto', overflowX: 'hidden', padding: 6, borderRadius: 9,
+              background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.16)',
+              opacity: open ? 1 : 0,
+              transition: `${FLIGHT}, opacity 220ms ease 140ms`,
+            }}
+          >
+            {!esVigente && (
+              <div style={{
+                fontSize: 8.5, lineHeight: 1.35, color: 'var(--text-3)', textAlign: 'center',
+                padding: '2px 1px 4px', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: 2,
+              }}>
+                viewing an earlier version
+              </div>
+            )}
+            {[...vers].reverse().map(v => (
+              <button
+                key={v.id}
+                onClick={e => { e.stopPropagation(); setVerN(v.version_number); setZoom(1); setPan({ x: 0, y: 0 }) }}
+                title={v.is_current ? `v${v.version_number} - current` : `v${v.version_number}`}
+                style={{
+                  position: 'relative', width: '100%', aspectRatio: '4 / 3', flexShrink: 0,
+                  borderRadius: 6, overflow: 'hidden', cursor: 'pointer', padding: 0,
+                  background: 'var(--bg-2)',
+                  border: `1px solid ${v.version_number === verN ? accent : 'rgba(255,255,255,0.16)'}`,
+                  opacity: v.version_number === verN ? 1 : 0.6,
+                }}
+              >
+                {v.storage_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={v.storage_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
+                <span style={{
+                  position: 'absolute', left: 0, right: 0, bottom: 0,
+                  fontSize: 8.5, fontFamily: 'var(--font-mono)', lineHeight: '13px',
+                  background: 'rgba(6,7,9,0.8)', color: v.is_current ? accent : '#fff',
+                }}>v{v.version_number}{v.approved_at ? ' ✓' : ''}</span>
+              </button>
+            ))}
+
+          </div>
+        )}
+
+      {/* Aprobar, fuera del marco y abajo a la derecha. Vive aca y no solo en el modal de
+          iteracion: si se cerraba sin decidir, no habia forma de volver a hacerlo. */}
+      {vers.length > 0 && verSel && (
+        <button
+          onClick={async () => {
+            if (verSel.approved_at || aprobando) return
+            setAprobando(true)
+            try { await approveAssetVersion(asset.project_id!, asset.id, verSel.id); onAprobado() }
+            finally { setAprobando(false) }
+          }}
+          disabled={!!verSel.approved_at || aprobando}
+          title={verSel.approved_at ? 'Already approved' : `Approve version ${verSel.version_number}`}
+          style={{
+            position: 'fixed',
+            left: box.left + box.width, top: box.top + box.height + 10,
+            transform: 'translateX(-100%)',
+            padding: '7px 16px', borderRadius: 8,
+            cursor: verSel.approved_at || aprobando ? 'default' : 'pointer',
+            background: verSel.approved_at ? 'rgba(255,255,255,0.05)' : `${accent}22`,
+            border: `1px solid ${verSel.approved_at ? 'rgba(255,255,255,0.16)' : accent + '88'}`,
+            color: verSel.approved_at ? 'var(--text-3)' : accent,
+            fontSize: 11.5, fontWeight: 600, fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
+            opacity: open ? 1 : 0,
+            transition: `${FLIGHT}, opacity 220ms ease 140ms`,
+          }}
+        >{verSel.approved_at ? `v${verSel.version_number} approved` : aprobando ? 'Approving…' : `Approve v${verSel.version_number}`}</button>
+      )}
 
       {/* Cerrar, fuera del marco */}
       <button
