@@ -1579,8 +1579,12 @@ export async function getNodeSession(
   if (outputKey)     params.set('output_key', outputKey)
   if (projectNodeId) params.set('project_node_id', projectNodeId)
   const qs = params.toString() ? `?${params.toString()}` : ''
+  // `no-store`: esta llamada se usa para SEGUIR un render en curso. Con la cache del navegador
+  // la segunda consulta y las siguientes vuelven 304 y el conteo de paginas se queda congelado
+  // en el primer valor — el trabajo avanza y la pantalla no.
   return request<{ success: boolean; session: { id: string; status: string; iteration_count: number; output_images?: OutputImagesMap | null } | null; messages: ChatMessage[]; asset?: ApprovedAsset | null }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/session${qs}`,
+    { cache: 'no-store' },
   )
 }
 
@@ -1663,10 +1667,13 @@ export async function autoRunNode(
   projectId:     string,
   projectNodeId: string,
   memberId?:     string,
+  /** Corre SOLO ese output. La ruta ya lo aceptaba; sin esto el Run dispara todos los pendientes,
+   *  que en un nodo de decks son decenas de imagenes. */
+  targetOutputKey?: string,
 ): Promise<{ ran?: string[]; skipped?: boolean; session_id?: string; reply?: string; doc_url?: string; doc_format?: string }> {
   return request<{ success: boolean; ran?: string[]; skipped?: boolean; session_id?: string; reply?: string; doc_url?: string; doc_format?: string }>(
     `/api/projects/${projectId}/canvas/nodes/${projectNodeId}/auto-run`,
-    { method: 'POST', body: JSON.stringify({ member_id: memberId }) },
+    { method: 'POST', body: JSON.stringify({ member_id: memberId, target_output_key: targetOutputKey }) },
   )
 }
 

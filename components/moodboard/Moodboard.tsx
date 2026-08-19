@@ -287,7 +287,11 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // minuto y ordenadas por fecha llegan barajadas, que es ilegible para una guía de estilo.
   const grupoDe  = (a: UnifiedAsset) => `${a.node_key ?? ''}|${String(a.name || '').split('—')[0].trim()}`
   const paginaDe = (a: UnifiedAsset) => {
-    const m = /^(\d{1,3})[_\s.-]/.exec(outputOf(a) ?? '')
+    // El número puede venir al principio («09_ColorSystem») o precedido por el resto del
+    // rótulo del output («Content 09_ColorSystem»), según cómo se nombró el asset. Se busca el
+    // patrón NN_ en cualquier posición antes que exigirlo al inicio.
+    const t = outputOf(a) ?? ''
+    const m = /(?:^|\s)(\d{1,3})[_\s.-]\S/.exec(t)
     return m ? Number(m[1]) : null
   }
   // El grupo se ubica por su página más reciente, y adentro manda el número. Así un deck viejo

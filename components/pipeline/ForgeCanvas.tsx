@@ -1374,6 +1374,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   // La clave '' es el documento del nodo (la tarjeta, que no tiene pestañas).
   const [generatedPdfUrls, setGeneratedPdfUrls] = useState<Record<string, string>>({})
   const [pdfLoading, setPdfLoading] = useState(false)
+  // Qué output se está renderizando, para no disparar dos a la vez.
+  const [runningOutput, setRunningOutput] = useState<string | null>(null)
+  const [renderJob, setRenderJob] = useState<{ clave: string; esperadas: number; error?: string } | null>(null)
   const [localOutputImages, setLocalOutputImages] = useState<OutputImagesMap>(() => {
     // Merge images de sesión general + todas las sesiones de output
     const merged: OutputImagesMap = { ...((canvasNode.session?.output_images as OutputImagesMap) ?? {}) }
@@ -2007,6 +2010,18 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
       )}
 
       {/* Modal de output — draggable, resizable, maximizable */}
+      {renderJob && typeof document !== 'undefined' && createPortal(
+        <RenderProgress
+          projectId={projectId}
+          nodeId={node.id}
+          projectNodeId={canvasNode.project_node_id}
+          outputKey={renderJob.clave}
+          esperadas={renderJob.esperadas}
+          error={renderJob.error}
+          onClose={() => setRenderJob(null)}
+          onDone={imgs => onImagesUpdate?.(imgs, renderJob.clave)}
+        />, document.body)}
+
       {outputOpen && typeof document !== 'undefined' && (node.outputs ?? []).length > 0 && createPortal(
         <>
           <div
@@ -2139,6 +2154,44 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 </div>
                 {/* Focus output en chat + toggle gallery/list */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '0 8px', borderLeft: '1px solid var(--line-2)', flexShrink: 0 }}>
+                  {/* Correr SOLO este output. El Run del nodo dispara todos los pendientes: en el
+                      3.20 eso son 55 imágenes. Y el chat no sirve para esto — no despacha nada,
+                      solo llama al modelo. */}
+                  {outTab && (() => {
+                    const o = (node.outputs ?? []).find(x => (x as {key?:string;name:string}).key === outTab || x.name === outTab) as
+                      { key?: string; name?: string; image_gen?: boolean; image_count?: number; production?: string } | undefined
+                    if (!o?.image_gen || o.production === 'deferred') return null
+                    const clave = o.key || o.name || outTab
+                    return (
+                      <button
+                        onClick={async () => {
+                          if (runningOutput) return
+                          setRunningOutput(clave)
+                          try {
+                            // La ruta despacha y responde enseguida; el avance se consulta aparte.
+                            // Antes esperaba los ~4 minutos del render y el navegador soltaba la
+                            // peticion con «Failed to fetch» — sin senal, se apretaba de nuevo y
+                            // salian despachos en paralelo.
+                            const r = await autoRunNode(projectId, canvasNode.project_node_id, undefined, clave)
+                            setRenderJob({ clave, esperadas: (r as { expected?: number }).expected ?? o.image_count ?? 0 })
+                          } catch (e) {
+                            console.error('[run-output]', clave, e)
+                            setRenderJob({ clave, esperadas: o.image_count ?? 0, error: String((e as Error)?.message || e) })
+                          } finally { setRunningOutput(null) }
+                        }}
+                        disabled={!!runningOutput}
+                        title={`Render this output${o.image_count ? ` — ${o.image_count} images` : ''}`}
+                        style={{
+                          border: '1px solid color-mix(in srgb, #F59E0B 35%, var(--line-2))',
+                          background: 'color-mix(in srgb, #F59E0B 10%, var(--bg-2))',
+                          borderRadius: 4, padding: '3px 8px',
+                          cursor: runningOutput ? 'default' : 'pointer',
+                          color: '#F59E0B', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                          lineHeight: 1, marginRight: 4, opacity: runningOutput ? 0.55 : 1,
+                        }}
+                      >{runningOutput === clave ? '…' : `▶ RENDER${o.image_count ? ` ${o.image_count}` : ''}`}</button>
+                    )
+                  })()}
                   {onOpenChat && outTab && (
                     <button
                       onClick={() => {
@@ -2810,6 +2863,95 @@ const EDGE_TYPES = { forgeEdge: ForgeEdge, orthogonalEdge: OrthogonalEdge }
 // (NodeInputsPanel eliminado — inputs se manejan via asset-nodes en el canvas)
 
 // ─── ImportAsOutputButton ─────────────────────────────────────────────────────
+
+// ─── Avance de un render de deck ─────────────────────────────────────────────
+// El despacho ya no viaja en la respuesta: la ruta contesta enseguida y el trabajo sigue en el
+// servidor. El avance se lee de la sesión, donde cada página se anota apenas llega — así el
+// progreso es REAL, y cerrar esto (o la pestaña) no cancela nada.
+function RenderProgress({ projectId, nodeId, projectNodeId, outputKey, esperadas, error, onClose, onDone }: {
+  projectId: string; nodeId: string; projectNodeId: string; outputKey: string
+  esperadas: number; error?: string; onClose: () => void; onDone: (imgs: OutputImagesMap) => void
+}) {
+  const [hechas, setHechas] = useState(0)
+  const [estado, setEstado] = useState<string>('active')
+  const avisado = useRef(false)
+
+  useEffect(() => {
+    if (error) return
+    let vivo = true
+    const mirar = async () => {
+      try {
+        const r = await getNodeSession(projectId, nodeId, outputKey, projectNodeId)
+        if (!vivo) return
+        const n = r.session?.output_images?.[outputKey]?.length ?? 0
+        setHechas(n)
+        setEstado(r.session?.status ?? 'active')
+        if ((r.session?.status === 'auto_approved' || r.session?.status === 'approved') && !avisado.current) {
+          avisado.current = true
+          onDone(r.session?.output_images ?? {})
+        }
+      } catch { /* una consulta perdida no rompe el seguimiento */ }
+    }
+    mirar()
+    const t = setInterval(mirar, 4000)
+    return () => { vivo = false; clearInterval(t) }
+  }, [projectId, nodeId, projectNodeId, outputKey, error, onDone])
+
+  const listo   = estado === 'auto_approved' || estado === 'approved'
+  const fallo   = !!error || estado === 'abandoned'
+  const pct     = esperadas ? Math.round((hechas / esperadas) * 100) : 0
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{
+      position: 'fixed', inset: 0, zIndex: 1450, display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(6,7,9,0.55)', backdropFilter: 'blur(3px)',
+    }}>
+      <div style={{
+        width: 400, padding: '18px 20px', borderRadius: 12,
+        background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+        boxShadow: '0 22px 64px rgba(0,0,0,0.6)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>
+            {fallo ? 'Render failed' : listo ? 'Render complete' : 'Rendering'}
+          </span>
+          <div style={{ flex: 1 }} />
+          <button onClick={onClose} title="Close" style={{
+            width: 24, height: 24, borderRadius: 6, cursor: 'pointer',
+            background: 'transparent', border: '1px solid var(--line-2)',
+            color: 'var(--text-2)', fontSize: 13, lineHeight: 1,
+          }}>×</button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 13 }}>
+          {outputKey}
+        </div>
+
+        {fallo ? (
+          <div style={{ fontSize: 11.5, color: 'var(--text-2)', lineHeight: 1.55 }}>
+            {error || 'The dispatch did not complete. The node chat has the reason.'}
+          </div>
+        ) : (
+          <>
+            <div style={{ height: 5, borderRadius: 3, overflow: 'hidden', background: 'rgba(255,255,255,0.07)', marginBottom: 8 }}>
+              <div style={{
+                width: `${pct}%`, height: '100%', borderRadius: 3,
+                background: 'linear-gradient(90deg, #F59E0B88, #F59E0B)',
+                transition: 'width 400ms ease',
+              }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5 }}>
+              <span style={{ color: 'var(--text-4)' }}>
+                {listo ? 'All pages rendered.' : 'Pages arrive as they finish — closing this does not stop it.'}
+              </span>
+              <span style={{ color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>{hechas}/{esperadas}</span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function ImportAsOutputButton({ projectId, canvasNode, onImported }: {
   projectId:  string
@@ -5165,6 +5307,14 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           imageGenOutputs={(() => {
             const defs: ImageOutputDef[] = []
             for (const out of (chatForgeNode.outputs ?? [])) {
+              const o = out as unknown as { production?: string; pages?: number[] }
+              // `production: deferred` se produce en otra etapa: el Art Bible compone arte
+              // aprobado que en pre-producción no existe. El chat lo intentaba igual y el
+              // servidor respondía 500.
+              if (o.production === 'deferred') continue
+              // Un DECK no se genera ítem por ítem: sus páginas son nodos fijos de un mismo
+              // grafo y se despachan juntas desde el Run. Se reconoce porque declara `pages`.
+              if (Array.isArray(o.pages) && o.pages.length) continue
               if (out.image_gen && out.image_gen_model) {
                 defs.push({ outputKey: out.key || out.name, format: out.format, imageGenModel: out.image_gen_model })
               }
