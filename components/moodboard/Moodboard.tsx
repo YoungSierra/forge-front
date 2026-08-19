@@ -44,6 +44,23 @@ const TABS: { key: string; label: string; formats: string[] }[] = [
 const ARTE = new Set(['3.9', '3.20'])
 const ES_IMAGEN = ['image', 'png', 'jpg', 'jpeg']
 
+// ── Fases ────────────────────────────────────────────────────────────────────
+// El tercer eje. No es un filtro más: es DÓNDE ESTÁS PARADO mirando, y caminar cambia lo que se
+// ve. El backend ya mandaba `phase` en cada activo desde el principio; acá se agrupa en las
+// cuatro etapas con las que trabaja el estudio.
+const FASES: { key: string; label: string; phases: string[] }[] = [
+  { key: 'doc',  label: 'Documentation',   phases: ['ideation', 'concept'] },
+  { key: 'pre',  label: 'Pre-Production',  phases: ['pre-production'] },
+  { key: 'prod', label: 'Production',      phases: ['production'] },
+  { key: 'post', label: 'Post-Production', phases: ['live-ops'] },
+]
+
+// null = el activo no pertenece a una fase. Lo que sube el usuario y lo legacy caen acá, y esa
+// es la regla: una referencia pertenece a su TIPO, no a un momento. Un PDF vive en Docs y se ve
+// camines a donde camines; tampoco cuenta para calcular hasta dónde llegó el proyecto.
+const faseDe = (a: UnifiedAsset) =>
+  FASES.find(f => f.phases.includes(String((a as { phase?: string | null }).phase ?? '')))?.key ?? null
+
 // El asset se guarda como "<título del nodo> — <label del output>", así que el output es lo
 // que va después del guion largo. Para un documento es el dato que lo identifica: dos ADI
 // distintos comparten nodo y solo se diferencian por ahí.
@@ -178,7 +195,25 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose, detail])
 
-  useEffect(() => { setPage(0) }, [tab, node, cols, query, view])
+  // ── Fases ──────────────────────────────────────────────────────────────────
+  // Hasta dónde llegó el proyecto: la fase más avanzada que YA produjo algo. Las referencias no
+  // cuentan — subir un PDF no te hace avanzar de etapa.
+  const alcanzada = useMemo(() => {
+    let max = 0
+    assets.forEach(a => {
+      const i = FASES.findIndex(f => f.key === faseDe(a))
+      if (i > max) max = i
+    })
+    return max
+  }, [assets])
+
+  // Se entra parado donde llegó el proyecto. Solo se re-sincroniza cuando cambia el alcance,
+  // para no arrastrar al usuario de vuelta si eligió mirar una fase anterior.
+  const [faseIdx, setFaseIdx] = useState(0)
+  useEffect(() => { setFaseIdx(alcanzada) }, [alcanzada])
+  const fase = FASES[faseIdx]
+
+  useEffect(() => { setPage(0) }, [tab, node, cols, query, view, faseIdx])
 
   // Cuánto subió el usuario al proyecto: es el contador del chip de Refs.
   const refCount = useMemo(() => assets.filter(a => a.source === 'library').length, [assets])
@@ -198,6 +233,11 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const shownSet = useMemo(() => {
     const q = query.trim().toLowerCase()
     return assets.filter(a => {
+      // La fase manda sobre lo que se ve, PERO las referencias la ignoran: pertenecen a su tipo
+      // y están disponibles desde cualquier etapa a la que camines.
+      const f = faseDe(a)
+      if (f !== null && f !== fase.key) return false
+
       const okOrigin = node === 'all'     ? true
                      : node === 'library' ? a.source === 'library'
                      :                      a.node_key === node
@@ -207,7 +247,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       return [a.name, outputOf(a), a.node_key, a.node_title]
         .filter(Boolean).join(' ').toLowerCase().includes(q)
     })
-  }, [assets, node, query])
+  }, [assets, node, query, fase.key])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: shownSet.length }
@@ -427,7 +467,19 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
         </div>
 
         {/* ── Grid ─────────────────────────────────────────────────────── */}
-        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: 18, position: 'relative' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '18px 58px', position: 'relative' }}>
+          {/* Marcas de agua: a la izquierda de dónde venís, a la derecha hacia dónde seguís.
+              Solo la fase inmediata a cada lado — más allá no se muestra nada, porque el proyecto
+              todavía no llegó ahí. La siguiente aparece apagada hasta que produzca algo. */}
+          <Marca lado="izq"
+                 fase={FASES[faseIdx - 1]}
+                 alcanzable={faseIdx - 1 >= 0}
+                 onClick={() => setFaseIdx(i => Math.max(0, i - 1))} />
+          <Marca lado="der"
+                 fase={FASES[faseIdx + 1]}
+                 alcanzable={faseIdx + 1 <= alcanzada}
+                 onClick={() => setFaseIdx(i => Math.min(alcanzada, i + 1))} />
+
           {loading ? (
             <LoadingWash theme={theme} cols={cols} />
           ) : error ? (
@@ -466,7 +518,15 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           display: 'flex', alignItems: 'center', gap: 10, position: 'relative',
           padding: '12px 18px', borderTop: '1px solid var(--line)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 200 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 200 }}>
+            {/* La etapa que estás mirando —no la del proyecto—, encima de la paginación. */}
+            <span style={{
+              fontSize: 9.5, fontFamily: 'var(--font-mono)', letterSpacing: '.10em',
+              textTransform: 'uppercase', color: theme.accent, opacity: 0.85, lineHeight: 1,
+            }}>
+              {fase.label}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {pages > 1 && (
               <>
                 <PageBtn label="←" disabled={page === 0} onClick={() => setPage(p => p - 1)} />
@@ -476,6 +536,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                 <PageBtn label="→" disabled={page >= pages - 1} onClick={() => setPage(p => p + 1)} />
               </>
             )}
+            </div>
           </div>
 
           <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
@@ -1635,6 +1696,51 @@ function PageBtn({ label, active, disabled, onClick }: {
       color: disabled ? 'var(--text-3)' : active ? 'var(--text-0)' : 'var(--text-2)',
       opacity: disabled ? 0.4 : 1,
     }}>{label}</button>
+  )
+}
+
+// Marca de agua de fase, pegada al borde del área de contenido. Es el letrero de la etapa
+// vecina: a la izquierda de dónde venís, a la derecha hacia dónde seguís. Va vertical y muy
+// tenue porque acompaña, no compite con las tarjetas.
+//
+// `alcanzable` en false = el proyecto todavía no llegó ahí: se ve gris y no responde al clic.
+// Si no hay fase vecina no se dibuja nada — no hay nada más a la derecha hasta que lo haya.
+function Marca({ lado, fase, alcanzable, onClick }: {
+  lado: 'izq' | 'der'
+  fase?: { key: string; label: string }
+  alcanzable: boolean
+  onClick: () => void
+}) {
+  const [hover, setHover] = useState(false)
+  if (!fase) return null
+  const activa = alcanzable
+  return (
+    <div
+      onClick={() => { if (activa) onClick() }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={activa ? `Go to ${fase.label}` : `${fase.label} — the project hasn't reached it yet`}
+      style={{
+        position: 'absolute', top: 0, bottom: 0, [lado === 'izq' ? 'left' : 'right']: 0,
+        width: 54, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: activa ? 'pointer' : 'default',
+        userSelect: 'none', zIndex: 1,
+      }}
+    >
+      <span style={{
+        // Vertical, leyéndose de abajo hacia arriba a la izquierda y al revés a la derecha, así
+        // ambas quedan orientadas hacia el centro.
+        writingMode: 'vertical-rl',
+        transform: lado === 'izq' ? 'rotate(180deg)' : 'none',
+        fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '.26em',
+        textTransform: 'uppercase', whiteSpace: 'nowrap',
+        color: activa ? 'var(--text-1)' : 'var(--text-3)',
+        opacity: activa ? (hover ? 1 : 0.72) : 0.34,
+        transition: 'opacity 160ms ease',
+      }}>
+        {lado === 'izq' ? '← ' : ''}{fase.label}{lado === 'der' ? ' →' : ''}
+      </span>
+    </div>
   )
 }
 

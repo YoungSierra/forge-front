@@ -97,7 +97,10 @@ function isNodeRunnable(n: CanvasNode): boolean {
   // Modelo per-output: un nodo cuya sesión general sigue 'active' pero con TODOS sus outputs
   // aprobados ya está hecho. Mismo criterio que approvedNodeIds (toolbar) — evita contarlo
   // como pendiente. Si está stale, sí se vuelve a correr.
-  const outs = n.node?.outputs ?? []
+  // `production: "deferred"` se produce en otra etapa y NUNCA bloquea al nodo (el Art Bible
+  // compone arte de produccion aprobado, que en pre-produccion no existe). Contarlo como
+  // pendiente dejaria el nodo eternamente por correr.
+  const outs = (n.node?.outputs ?? []).filter(o => (o as unknown as { production?: string }).production !== 'deferred')
   if (outs.length > 0 && !n.is_stale) {
     const allOutputsApproved = outs.every(o => {
       const os = (n.output_sessions ?? {})[o.key ?? '']
@@ -1331,7 +1334,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   // sesión suelta sin output_key —la que se crea al abrir el chat sin enfocar un output— quedaba
   // en `active` y dejaba el nodo rotulado "active" para siempre aunque sus dos outputs
   // estuvieran aprobados. Un run en curso no se pierde: lo muestra `isRunning`, aparte.
-  const allOuts = (node.outputs ?? [])
+  const allOuts = (node.outputs ?? []).filter((o) => (o as unknown as { production?: string }).production !== 'deferred')
   const allOutsApproved = allOuts.length > 0 && allOuts.every((o: { key?: string }) => {
     const s = outputSessions[(o.key ?? '')]
     return s?.status === 'approved' || s?.status === 'auto_approved'
@@ -3006,7 +3009,7 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
   const { node, session } = canvasNode
   if (!node) return null
   // Misma regla que en la tarjeta: los outputs aprobados ganan sobre una sesión general suelta.
-  const _panelAllOuts = (node.outputs ?? [])
+  const _panelAllOuts = (node.outputs ?? []).filter((o) => (o as unknown as { production?: string }).production !== 'deferred')
   const _panelAllDone = _panelAllOuts.length > 0 && _panelAllOuts.every((o: { key?: string }) => {
     const s = (canvasNode.output_sessions ?? {})[(o.key ?? '')]
     return s?.status === 'approved' || s?.status === 'auto_approved'
