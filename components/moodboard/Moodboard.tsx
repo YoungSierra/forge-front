@@ -1466,6 +1466,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: 
   const [pct, setPct] = useState(0)
   const [listo, setListo] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reintento, setReintento] = useState(0)
   // Historial real. Si el asset todavia no tiene versiones, lo que se ve hoy es la v1.
   const [vers, setVers] = useState<{ id: string | null; n: number; url: string | null }[]>(() => {
     const hist = (asset.versions ?? []).map(v => ({ id: v.id, n: v.version_number, url: v.storage_url }))
@@ -1512,7 +1513,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: 
         setPct(100); setListo(true); onListo()
       })
       .catch(e => { setError(e?.message || 'The iteration could not be completed'); setPct(100) })
-  }, [projectId, asset.id, onListo])
+  }, [projectId, asset.id, onListo, reintento])
 
   // Tamano de la caja derivado de la proporcion de la imagen: el visor tiene que entrar entero
   // y ademas conviven la columna de miniaturas (84 + 10 de gap) y el cromo del modal (cabecera,
@@ -1606,7 +1607,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: 
                       cursor: 'move', userSelect: 'none' }}>
           <img src="/forgy/forgyi.png" alt="" width={18} height={18} style={{ objectFit: 'contain' }} />
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>
-            {listo ? 'Iteration ready' : 'Processing iteration'}
+            {error ? 'Iteration failed' : listo ? 'Iteration ready' : 'Processing iteration'}
           </span>
           <div style={{ flex: 1 }} />
           <button
@@ -1626,7 +1627,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: 
 
         {/* El progreso solo existe mientras corre: al terminar estorba y el resultado es lo que
             importa. */}
-        {!listo && (
+        {!listo && !error && (
           <>
             <div style={{
               height: 5, borderRadius: 3, overflow: 'hidden',
@@ -1649,6 +1650,38 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: 
               </span>
             </div>
           </>
+        )}
+
+        {/* Un fallo tiene que decirse. Antes se guardaba el mensaje y no se pintaba: quedaba la
+            barra en 100% y nada mas, que es la peor forma de fallar. */}
+        {error && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{
+              display: 'flex', gap: 9, padding: '11px 12px', borderRadius: 9,
+              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.32)',
+            }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#EF4444"
+                   strokeWidth="1.9" strokeLinecap="round" style={{ flexShrink: 0, marginTop: 1 }}>
+                <circle cx="12" cy="12" r="9" /><path d="M12 8v5" /><path d="M12 16.5v.01" />
+              </svg>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-1)', marginBottom: 3 }}>
+                  The iteration did not complete
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5, wordBreak: 'break-word' }}>
+                  {error}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => { setError(null); setPct(0); lanzada.current = false; setReintento(r => r + 1) }}
+              style={{
+                marginTop: 10, width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer',
+                background: 'transparent', border: `1px solid ${accent}66`, color: accent,
+                fontSize: 12, fontFamily: 'var(--font-sans)',
+              }}
+            >Try again</button>
+          </div>
         )}
 
         {/* Al terminar, la nueva queda VIGENTE pero no aprobada: aprobar es del usuario. Son dos
