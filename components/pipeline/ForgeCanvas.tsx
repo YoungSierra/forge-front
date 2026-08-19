@@ -2903,7 +2903,9 @@ function RenderProgress({ projectId, nodeId, projectNodeId, outputKey, esperadas
 
   return (
     <div onClick={e => e.stopPropagation()} style={{
-      position: 'fixed', inset: 0, zIndex: 1450, display: 'flex',
+      // Por encima del modal de outputs (10001) y del resto de las capas del canvas: es el panel
+      // que dice si el render avanza, y quedaba tapado justo por la ventana desde donde se lanza.
+      position: 'fixed', inset: 0, zIndex: 16000, display: 'flex',
       alignItems: 'center', justifyContent: 'center',
       background: 'rgba(6,7,9,0.55)', backdropFilter: 'blur(3px)',
     }}>
