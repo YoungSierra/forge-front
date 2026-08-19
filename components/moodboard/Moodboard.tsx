@@ -19,7 +19,7 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset } from '@/lib/api'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion } from '@/lib/api'
 
 // ── Pestañas ─────────────────────────────────────────────────────────────────
 // El juego es el de la referencia. Las que no tienen activos se muestran apagadas en vez de
@@ -43,6 +43,20 @@ const TABS: { key: string; label: string; formats: string[] }[] = [
 // desapareciera de la pestaña 3D.
 const ARTE = new Set(['3.9', '3.20'])
 const ES_IMAGEN = ['image', 'png', 'jpg', 'jpeg']
+
+// ── Qué se puede iterar hoy ──────────────────────────────────────────────────
+// MVP: solo las páginas del Art Style Guide. Son las únicas donde la iteración tiene un destino
+// claro — el 3.20 despacha su deck por página, así que rehacer UNA no toca a las demás.
+// Se pide que sea imagen del 3.20 Y que su nombre traiga el número de página; sin ese número no
+// hay forma de decirle al workflow cuál rehacer.
+const ITERABLE_NODO = '3.20'
+function paginaASG(a: UnifiedAsset): { n: number; nombre: string } | null {
+  if (a.node_key !== ITERABLE_NODO) return null
+  if (!ES_IMAGEN.includes(String(a.format).toLowerCase())) return null
+  const out = outputOf(a) ?? ''
+  const m = /^(\d{1,3})[_\s.-]?(.*)$/.exec(out)
+  return m ? { n: Number(m[1]), nombre: out } : null
+}
 
 // ── Fases ────────────────────────────────────────────────────────────────────
 // El tercer eje. No es un filtro más: es DÓNDE ESTÁS PARADO mirando, y caminar cambia lo que se
@@ -128,6 +142,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // Menú de clic derecho. Hoy solo lo usan los documentos, con Descargar; para las imágenes
   // este es el gancho donde entra el menú radial en la Iteración 2.
   const [menu, setMenu] = useState<{ x: number; y: number; asset: UnifiedAsset } | null>(null)
+  // La iteracion vive ACA y no en el radial: el menu se cierra al elegir, y el modal tiene que
+  // sobrevivirlo. `aviso` es el caso de lo que todavia no se puede iterar.
+  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } } | null>(null)
+  const [aviso,    setAviso]    = useState<string | null>(null)
 
   useEffect(() => {
     if (!menu) return
@@ -552,9 +570,27 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
         </div>
       </div>
 
-      {menu && <ContextMenu {...menu} accent={theme.accent} colors={theme.colors} onDone={() => setMenu(null)} />}
+      {menu && <ContextMenu {...menu} accent={theme.accent} colors={theme.colors}
+                            onDone={() => setMenu(null)}
+                            onIterar={a => {
+                              setMenu(null)
+                              const pg = paginaASG(a)
+                              if (pg) setIterando({ asset: a, pagina: pg })
+                              else setAviso(`"${outputOf(a) ?? a.name}" is not one of them.`)
+                            }} />}
+      {iterando && (
+        <IteracionModal
+          asset={iterando.asset}
+          projectId={projectId}
+          pagina={iterando.pagina}
+          accent={theme.accent}
+          onClose={() => setIterando(null)}
+          onListo={reload}
+        />
+      )}
+      {aviso    && <NoDisponible  que={aviso}      accent={theme.accent} onClose={() => setAviso(null)} />}
 
-      {detail && <Detail asset={detail.asset} from={detail.from}
+      {detail && <Detail asset={detail.asset} from={detail.from} accent={theme.accent}
                          onMenu={(mx, my) => setMenu({ x: mx, y: my, asset: detail.asset })}
                          onClose={() => setDetail(null)} />}
     </div>
@@ -842,6 +878,22 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
         animation: `mb-in 320ms ease ${index * 32}ms backwards`,
       }}
     >
+      {/* Marca de versión: solo aparece cuando hay historial de verdad. El endpoint ya devuelve
+          `versions`; hoy la tabla está vacía, así que no se ve nada — y eso es lo correcto. */}
+      {asset.versions?.length > 1 && (
+        <div style={{
+          position: 'absolute', top: 7, left: 7, zIndex: 2,
+          display: 'flex', alignItems: 'center', gap: 4,
+          padding: '2px 7px', borderRadius: 5,
+          background: 'rgba(6,7,9,0.72)', backdropFilter: 'blur(3px)',
+          border: '1px solid rgba(255,255,255,0.14)',
+          fontSize: 9.5, fontFamily: 'var(--font-mono)', color: '#fff', letterSpacing: '.04em',
+        }}>
+          v{asset.versions.find(v => v.is_current)?.version_number ?? asset.versions.length}
+          <span style={{ opacity: 0.5 }}>of {asset.versions.length}</span>
+        </div>
+      )}
+
       {kind === 'image' && url ? (
         <Image src={url} alt={asset.name} fill sizes="(max-width: 1100px) 50vw, 320px"
                style={{ objectFit: 'cover' }} />
@@ -960,11 +1012,22 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
 // No es un visor a pantalla completa: es una CARD que fluye al frente desde su lugar en la
 // grilla, como en la referencia. La grilla sigue visible detrás, atenuada, así no se pierde
 // el contexto de dónde estaba la imagen. Al cerrar vuelve exactamente a su celda.
-function Detail({ asset, from, onMenu, onClose }: {
-  asset: UnifiedAsset; from: DOMRect; onMenu: (x: number, y: number) => void; onClose: () => void
+function Detail({ asset, from, accent, onMenu, onClose }: {
+  asset: UnifiedAsset; from: DOMRect; accent: string
+  onMenu: (x: number, y: number) => void; onClose: () => void
 }) {
   const t   = kindOf(asset)
-  const url = asset.storage_url ?? ''
+  // Historial de la pieza. Se mira desde aca: el badge de la tarjeta decia que habia dos
+  // versiones y no habia forma de llegar a la anterior sin volver a iterar.
+  const vers = useMemo(
+    () => [...(asset.versions ?? [])].sort((a, b) => a.version_number - b.version_number),
+    [asset.versions])
+  const [verN, setVerN] = useState<number | null>(
+    () => vers.find(v => v.is_current)?.version_number ?? null)
+  const verSel = vers.find(v => v.version_number === verN)
+  // Sin historial, lo que se ve ES la vigente.
+  const esVigente = !vers.length || !!verSel?.is_current
+  const url = (verSel?.storage_url ?? asset.storage_url) ?? ''
   const texto = useDocContent(kindOf(asset) === 'doc' ? asset.id : '')
   const [open,  setOpen]  = useState(false)
   // Zoom dentro de la card, para mirar el detalle fino de un arte sin abrir otra ventana.
@@ -1047,7 +1110,13 @@ function Detail({ asset, from, onMenu, onClose }: {
         onPointerMove={e => { if (panning.current) setPan({ x: e.clientX - panning.current.x, y: e.clientY - panning.current.y }) }}
         onPointerUp={() => { panning.current = null }}
         onDoubleClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}
-        onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onMenu(e.clientX, e.clientY) }}
+        // El menu solo sobre la VIGENTE. Iterar no ramifica desde la version que estas mirando:
+        // vuelve a ejecutar el prompt de la pagina contra su plantilla, asi que hacerlo parado en
+        // la v1 o en la v3 da lo mismo. Ofrecerlo ahi prometeria algo que no pasa.
+        onContextMenu={e => {
+          e.preventDefault(); e.stopPropagation()
+          if (esVigente) onMenu(e.clientX, e.clientY)
+        }}
         style={{
         position: 'fixed', ...box,
         borderRadius: 16, overflow: 'hidden',
@@ -1057,6 +1126,54 @@ function Detail({ asset, from, onMenu, onClose }: {
         background: 'var(--bg-2)',
         transition: `${FLIGHT}, box-shadow 300ms ease`,
       }}>
+        {/* Versiones: columna a la derecha, la mas nueva arriba. Solo cuando hay historial. */}
+        {vers.length > 1 && (
+          <div
+            onPointerDown={e => e.stopPropagation()}
+            onDoubleClick={e => e.stopPropagation()}
+            style={{
+              position: 'absolute', top: 10, right: 10, bottom: 10, zIndex: 3,
+              width: 74, display: 'flex', flexDirection: 'column', gap: 6,
+              overflowY: 'auto', overflowX: 'hidden', padding: 6, borderRadius: 9,
+              background: 'rgba(6,7,9,0.62)', backdropFilter: 'blur(6px)',
+              border: '1px solid rgba(255,255,255,0.12)',
+            }}
+          >
+            {!esVigente && (
+              <div style={{
+                fontSize: 8.5, lineHeight: 1.35, color: 'var(--text-3)', textAlign: 'center',
+                padding: '2px 1px 4px', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: 2,
+              }}>
+                viewing an earlier version
+              </div>
+            )}
+            {[...vers].reverse().map(v => (
+              <button
+                key={v.id}
+                onClick={e => { e.stopPropagation(); setVerN(v.version_number); setZoom(1); setPan({ x: 0, y: 0 }) }}
+                title={v.is_current ? `v${v.version_number} - current` : `v${v.version_number}`}
+                style={{
+                  position: 'relative', width: '100%', aspectRatio: '4 / 3', flexShrink: 0,
+                  borderRadius: 6, overflow: 'hidden', cursor: 'pointer', padding: 0,
+                  background: 'var(--bg-2)',
+                  border: `1px solid ${v.version_number === verN ? accent : 'rgba(255,255,255,0.16)'}`,
+                  opacity: v.version_number === verN ? 1 : 0.6,
+                }}
+              >
+                {v.storage_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={v.storage_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
+                <span style={{
+                  position: 'absolute', left: 0, right: 0, bottom: 0,
+                  fontSize: 8.5, fontFamily: 'var(--font-mono)', lineHeight: '13px',
+                  background: 'rgba(6,7,9,0.8)', color: v.is_current ? accent : '#fff',
+                }}>v{v.version_number}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {t === 'image' && url && (
           // Acá se pide la resolución completa: es la vista para juzgar la imagen.
           <img src={url} alt={asset.name}
@@ -1196,13 +1313,14 @@ function Detail({ asset, from, onMenu, onClose }: {
 //   visual    — el menú radial de la referencia, con las cuatro acciones de la v.3.
 // Las acciones del radial todavía no hacen nada: se cablean en la Iteración 2 (contexto y
 // output) y en la 3 (edición). Se muestran apagadas en vez de simular que responden.
-function ContextMenu({ x, y, asset, accent, colors, onDone }: {
-  x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]; onDone: () => void
+function ContextMenu({ x, y, asset, accent, colors, onDone, onIterar }: {
+  x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
+  onDone: () => void; onIterar: (a: UnifiedAsset) => void
 }) {
   // La descarga directa es solo para documentos; lo visual abre el radial.
   return kindOf(asset) === 'doc'
     ? <DownloadMenu x={x} y={y} asset={asset} onDone={onDone} />
-    : <RadialMenu   x={x} y={y} asset={asset} accent={accent} colors={colors} onDone={onDone} />
+    : <RadialMenu   x={x} y={y} asset={asset} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} />
 }
 
 function DownloadMenu({ x, y, asset, onDone }: {
@@ -1272,6 +1390,52 @@ const RADIAL = [
   { key: 'library', label: 'Asset Library', hint: 'Iteration 3', pos: 'left'   },
 ] as const
 
+// ── Submenú de «Edit», contextual por tipo de asset ──────────────────────────
+// Definición del documento de menús radiales del equipo. La primera opción es siempre Nueva
+// Iteración y la última Subir ajustes manuales, en los cinco tipos.
+//
+// Hoy SOLO se habilita la primera: es la única que tiene a dónde ir — vuelve a invocar el
+// workflow de ComfyUI para ESA página. Las otras cuatro se muestran apagadas en vez de
+// esconderse, para que se vea qué va a venir y qué no responde todavía.
+const SUBMENU: Record<string, { label: string; items: string[] }> = {
+  text:  { label: 'Edit Text',  items: ['New Iteration', 'Crop & extract', 'Format settings', 'Coherence & length review', 'Upload manual edits'] },
+  image: { label: 'Edit 2D',    items: ['New Iteration', 'Design edits (masking)', 'New angle', 'Segmentation (masking)', 'Upload manual edits'] },
+  '3d':  { label: 'Edit 3D',    items: ['New Iteration', '3D viewer (layers & maps)', 'Retexture', 'Download FBX or GLB', 'Upload manual edits'] },
+  video: { label: 'Edit Video', items: ['New Iteration', 'Trim', 'Replace assets', 'Extract frames', 'Upload manual edits'] },
+  audio: { label: 'Edit Audio', items: ['New Iteration', 'Trim', 'Transcribe', 'Replace track', 'Upload manual edits'] },
+}
+const submenuDe = (a: UnifiedAsset) => SUBMENU[kindOf(a) === 'doc' ? 'text' : kindOf(a)] ?? SUBMENU.image
+
+// El radial principal son cuatro cuadrantes fijos; el submenú son cinco. Se calculan: un sector
+// es el centro más un arco, y el arco se aproxima con puntos porque `clip-path` no traza curvas.
+// El aro toma los colores del proyecto, pero solo los que tienen luz: una paleta de juego trae
+// fondos casi negros (#050A14) y esos tramos se leían como mordidas en el círculo.
+function anilloDe(colors: string[], accent: string): string {
+  const lum = (h: string) => {
+    const n = parseInt(h.replace('#', ''), 16)
+    return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)
+  }
+  const bright = colors.filter(c => /^#[0-9a-f]{6}$/i.test(c) && lum(c) > 90)
+  const stops  = bright.length >= 2 ? bright : [accent, '#ffffffaa', accent]
+  return `conic-gradient(from 0deg, ${[...stops, stops[0]].join(', ')})`
+}
+
+const ARCO = 10
+function sectorPath(i: number, n: number): string {
+  const paso = 360 / n
+  const desde = -90 - paso / 2 + i * paso
+  const pts = ['50% 50%']
+  for (let k = 0; k <= ARCO; k++) {
+    const a = ((desde + (paso * k) / ARCO) * Math.PI) / 180
+    pts.push(`${(50 + 50 * Math.cos(a)).toFixed(2)}% ${(50 + 50 * Math.sin(a)).toFixed(2)}%`)
+  }
+  return `polygon(${pts.join(', ')})`
+}
+function sectorAt(i: number, n: number, radio = 0.63) {
+  const a = ((-90 + i * (360 / n)) * Math.PI) / 180
+  return { left: `${50 + radio * 50 * Math.cos(a)}%`, top: `${50 + radio * 50 * Math.sin(a)}%` }
+}
+
 // Cada sector es un triángulo desde el centro hacia un lado: así el hover ilumina el cuadrante
 // entero y no solo la etiqueta.
 const SECTOR: Record<string, string> = {
@@ -1291,28 +1455,533 @@ const FROM: Record<string, [number, number]> = {
   top: [0, 46], right: [-46, 0], bottom: [0, -46], left: [46, 0],
 }
 
-function RadialMenu({ x, y, asset, accent, colors, onDone }: {
-  x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]; onDone: () => void
+// ── Modal de iteración ───────────────────────────────────────────────────────
+// Chico y centrado: no es una pantalla de trabajo, es el aviso de que algo está corriendo.
+// MUESTRA: el progreso todavía no viene del despacho real, se simula con el ritmo medido —
+// 34 páginas en 220 s da ~6,5 s por página. Cuando se cablee, el porcentaje sale del job.
+function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: {
+  asset: UnifiedAsset; projectId: string; pagina: { n: number; nombre: string }; accent: string
+  onClose: () => void; onListo: () => void
+}) {
+  const [pct, setPct] = useState(0)
+  const [listo, setListo] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // Historial real. Si el asset todavia no tiene versiones, lo que se ve hoy es la v1.
+  const [vers, setVers] = useState<{ id: string | null; n: number; url: string | null }[]>(() => {
+    const hist = (asset.versions ?? []).map(v => ({ id: v.id, n: v.version_number, url: v.storage_url }))
+    return hist.length ? hist : [{ id: null, n: 1, url: asset.storage_url }]
+  })
+  const version = Math.max(...vers.map(v => v.n))
+  // Que version se esta mirando. Arranca en la recien generada, que es lo que uno viene a ver.
+  const [viendo, setViendo] = useState(version)
+  useEffect(() => { setViendo(version) }, [version])
+  const actual = vers.find(v => v.n === viendo) ?? vers[vers.length - 1]
+  // Zoom del visor. Una página de guía de estilo tiene texto chico: sin acercar no se juzga.
+  const [zoom, setZoom] = useState(1)
+  // Proporcion real de la imagen. El modal se dimensiona a partir de ella para no mostrarla mas
+  // chica de lo que se veia en la galeria, que es de donde uno viene.
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null)
+  const [desp, setDesp] = useState({ x: 0, y: 0 })
+  const paneo = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
+  // Al cambiar de versión se vuelve a encuadrar: seguir con el zoom de la anterior desorienta.
+  useEffect(() => { setZoom(1); setDesp({ x: 0, y: 0 }) }, [viendo])
+
+  // El progreso se estima contra los 35 s medidos para una pagina, pero NO llega solo al final:
+  // se frena en 95 y el 100 lo pone la respuesta. Una barra que se completa antes que el trabajo
+  // es peor que una lenta.
+  const ESPERADO = 35_000
+  useEffect(() => {
+    const t0 = Date.now()
+    const t = setInterval(() => {
+      const f = Math.min(1, (Date.now() - t0) / ESPERADO)
+      setPct(p => Math.max(p, Math.min(95, f * 95)))
+    }, 200)
+    return () => clearInterval(t)
+  }, [])
+
+  // La iteracion real. Se dispara una sola vez al abrir.
+  const lanzada = useRef(false)
+  useEffect(() => {
+    if (lanzada.current) return
+    lanzada.current = true
+    iterateAssetPage(projectId, asset.id)
+      .then(r => {
+        setVers(v => [...v.filter(x => x.n !== r.version.version_number),
+                      { id: r.version.id, n: r.version.version_number, url: r.version.storage_url }]
+                     .sort((a, b) => a.n - b.n))
+        setPct(100); setListo(true); onListo()
+      })
+      .catch(e => { setError(e?.message || 'The iteration could not be completed'); setPct(100) })
+  }, [projectId, asset.id, onListo])
+
+  // Tamano de la caja derivado de la proporcion de la imagen: el visor tiene que entrar entero
+  // y ademas conviven la columna de miniaturas (84 + 10 de gap) y el cromo del modal (cabecera,
+  // fila de estado y padding). Se acota a la ventana para no desbordarla.
+  const medida = useMemo(() => {
+    const CROMO_H = 132, CROMO_W = 94 + 40
+    const maxW = Math.min(1240, window.innerWidth  * 0.9) - CROMO_W
+    const maxH = Math.min(920,  window.innerHeight * 0.88) - CROMO_H
+    const rel  = nat ? nat.w / nat.h : 16 / 10
+    let vw = maxW, vh = vw / rel
+    if (vh > maxH) { vh = maxH; vw = vh * rel }
+    return { w: Math.round(vw + CROMO_W), h: Math.round(vh + CROMO_H) }
+  }, [nat])
+
+  // Arrastre desde la cabecera. El tamaño lo maneja CSS con `resize: both`, que ya se usa en el
+  // modal de texto del chat: menos código que un manejador propio y con el mismo comportamiento.
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const arrastre = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
+  const caja = useRef<HTMLDivElement>(null)
+
+  // El modal esta centrado por flex y se mueve con `transform`, asi que el desplazamiento se
+  // acota contra el centro. Sin esto se puede empujar arriba del borde y queda debajo de la barra
+  // del navegador, desde donde ya no se recupera.
+  const acotar = useCallback((x: number, y: number) => {
+    const el = caja.current
+    if (!el) return { x, y }
+    const w = el.offsetWidth, h = el.offsetHeight
+    const M = 10
+    const cx = (window.innerWidth  - w) / 2
+    const cy = (window.innerHeight - h) / 2
+    return {
+      x: Math.min(Math.max(x, M - cx), window.innerWidth  - w - M - cx),
+      y: Math.min(Math.max(y, M - cy), window.innerHeight - h - M - cy),
+    }
+  }, [])
+
+  const onDragStart = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return
+    const p = pos ?? { x: 0, y: 0 }
+    arrastre.current = { sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y }
+    e.preventDefault()
+  }
+  useEffect(() => {
+    const mover = (e: MouseEvent) => {
+      if (!arrastre.current) return
+      const a = arrastre.current
+      setPos(acotar(a.ox + e.clientX - a.sx, a.oy + e.clientY - a.sy))
+    }
+    const soltar = () => { arrastre.current = null }
+    window.addEventListener('mousemove', mover)
+    window.addEventListener('mouseup', soltar)
+    return () => { window.removeEventListener('mousemove', mover); window.removeEventListener('mouseup', soltar) }
+  }, [acotar])
+
+  // Al crecer de chico a grande, o si cambia el tamano de la ventana, se vuelve a acotar: el
+  // modal puede haber quedado fuera sin que nadie lo arrastre.
+  useEffect(() => {
+    const r = () => setPos(p => (p ? acotar(p.x, p.y) : p))
+    window.addEventListener('resize', r)
+    return () => window.removeEventListener('resize', r)
+  }, [acotar])
+  useEffect(() => { setPos(p => (p ? acotar(p.x, p.y) : p)) }, [listo, acotar])
+
+  return (
+    <div
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1400, display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(6,7,9,0.55)', backdropFilter: 'blur(3px)',
+      }}
+    >
+      <div ref={caja} style={{
+        // Mientras procesa alcanza con la barra: un modal grande y vacio esperando es peor que
+        // uno chico que dice que esta trabajando. Crece cuando ya hay algo que mirar.
+        width:  listo ? medida.w : 392,
+        height: listo ? medida.h : 'auto',
+        minWidth: listo ? 520 : undefined, minHeight: listo ? 420 : undefined,
+        maxWidth: '94vw', maxHeight: '92vh',
+        padding: '18px 20px 20px', borderRadius: 13,
+        display: 'flex', flexDirection: 'column',
+        // El tamano lo da el navegador; el arrastre, la cabecera.
+        resize: listo ? 'both' : 'none', overflow: 'auto',
+        transition: 'width 260ms ease, height 260ms ease',
+        transform: pos ? `translate(${pos.x}px, ${pos.y}px)` : undefined,
+        background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+        boxShadow: '0 22px 64px rgba(0,0,0,0.6)', animation: 'mb-in 180ms ease',
+      }}>
+        <div onMouseDown={onDragStart}
+             style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 4,
+                      cursor: 'move', userSelect: 'none' }}>
+          <img src="/forgy/forgyi.png" alt="" width={18} height={18} style={{ objectFit: 'contain' }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>
+            {listo ? 'Iteration ready' : 'Processing iteration'}
+          </span>
+          <div style={{ flex: 1 }} />
+          <button
+            onClick={onClose}
+            title="Close"
+            style={{
+              width: 25, height: 25, borderRadius: 6, cursor: 'pointer', flexShrink: 0,
+              background: 'transparent', border: '1px solid var(--line-2)',
+              color: 'var(--text-2)', fontSize: 14, lineHeight: 1,
+            }}
+          >×</button>
+        </div>
+
+        <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginBottom: 14, fontFamily: 'var(--font-mono)' }}>
+          Page {String(pagina.n).padStart(2, '0')} · {pagina.nombre.replace(/^\d+[_\s.-]?/, '')}
+        </div>
+
+        {/* El progreso solo existe mientras corre: al terminar estorba y el resultado es lo que
+            importa. */}
+        {!listo && (
+          <>
+            <div style={{
+              height: 5, borderRadius: 3, overflow: 'hidden',
+              background: 'rgba(255,255,255,0.07)', marginBottom: 9,
+            }}>
+              <div style={{
+                width: `${pct}%`, height: '100%', borderRadius: 3,
+                background: `linear-gradient(90deg, ${accent}88, ${accent})`,
+                transition: 'width 300ms ease',
+                boxShadow: `0 0 12px ${accent}66`,
+              }} />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
+                Re-running this page through its workflow…
+              </span>
+              <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                {Math.round(pct)}%
+              </span>
+            </div>
+          </>
+        )}
+
+        {/* Al terminar, la nueva queda VIGENTE pero no aprobada: aprobar es del usuario. Son dos
+            estados distintos y la decisión no se toma sola.
+            Se muestra UNA sola imagen y el resto se navega como páginas. Lado a lado no escala:
+            a la versión 20 no hay pantalla que alcance. */}
+        {listo && (
+          <div style={{ marginTop: 12, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {/* La generada, sola y grande; el resto como miniaturas en columna a la derecha,
+                con scroll. Es lo único que escala: a la versión 20, una paginación de botones ya
+                no se lee y un lado a lado no entra en pantalla. */}
+            <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
+              <div
+                onWheel={e => {
+                  // Rueda = zoom, sin scroll de por medio: el visor no tiene nada que scrollear.
+                  const paso = e.deltaY < 0 ? 1.18 : 1 / 1.18
+                  setZoom(z => Math.min(6, Math.max(1, z * paso)))
+                }}
+                onMouseDown={e => {
+                  if (zoom <= 1) return
+                  paneo.current = { sx: e.clientX, sy: e.clientY, ox: desp.x, oy: desp.y }
+                  e.preventDefault()
+                }}
+                onMouseMove={e => {
+                  if (!paneo.current) return
+                  const p = paneo.current
+                  setDesp({ x: p.ox + e.clientX - p.sx, y: p.oy + e.clientY - p.sy })
+                }}
+                onMouseUp={() => { paneo.current = null }}
+                onMouseLeave={() => { paneo.current = null }}
+                onDoubleClick={() => { setZoom(1); setDesp({ x: 0, y: 0 }) }}
+                style={{
+                  position: 'relative', flex: 1, minHeight: 0, borderRadius: 9,
+                  overflow: 'hidden', background: 'var(--bg-2)',
+                  border: `1px solid ${viendo === version ? accent + '88' : 'var(--line-2)'}`,
+                  cursor: zoom > 1 ? (paneo.current ? 'grabbing' : 'grab') : 'zoom-in',
+                }}>
+                {actual?.url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={actual.url} alt={`v${viendo}`} draggable={false}
+                       onLoad={e => {
+                         const el = e.currentTarget
+                         if (el.naturalWidth) setNat({ w: el.naturalWidth, h: el.naturalHeight })
+                       }}
+                       style={{ width: '100%', height: '100%', objectFit: 'contain',
+                                transform: `translate(${desp.x}px, ${desp.y}px) scale(${zoom})`,
+                                transition: paneo.current ? 'none' : 'transform 120ms ease',
+                                userSelect: 'none' }} />
+                )}
+
+                {/* Solo aparece con zoom: un control permanente compite con la imagen. */}
+                {zoom > 1 && (
+                  <div style={{
+                    position: 'absolute', right: 8, bottom: 8, display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '3px 8px', borderRadius: 6, pointerEvents: 'none',
+                    background: 'rgba(6,7,9,0.74)', border: '1px solid rgba(255,255,255,0.14)',
+                    fontSize: 9.5, fontFamily: 'var(--font-mono)', color: '#fff',
+                  }}>
+                    {zoom.toFixed(1)}×
+                    <span style={{ opacity: 0.55 }}>double-click to reset</span>
+                  </div>
+                )}
+
+              </div>
+
+              {/* Carrusel vertical: la más nueva arriba */}
+              <div style={{
+                width: 84, overflowY: 'auto', overflowX: 'hidden',
+                display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 2,
+                scrollbarWidth: 'thin',
+              }}>
+                {[...vers].reverse().map(({ n: v, url }) => (
+                  <button
+                    key={v}
+                    onClick={() => setViendo(v)}
+                    title={v === version ? `v${v} — current` : `v${v}`}
+                    style={{
+                      position: 'relative', width: '100%', aspectRatio: '4 / 3', flexShrink: 0,
+                      borderRadius: 6, overflow: 'hidden', cursor: 'pointer', padding: 0,
+                      background: 'var(--bg-2)',
+                      border: `1px solid ${v === viendo ? accent : 'var(--line-2)'}`,
+                      boxShadow: v === viendo ? `0 0 0 1px ${accent}66` : 'none',
+                      opacity: v === viendo ? 1 : 0.62,
+                      transition: 'opacity 140ms ease, border-color 140ms ease',
+                    }}
+                  >
+                    {url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    )}
+                    <span style={{
+                      position: 'absolute', left: 0, right: 0, bottom: 0,
+                      fontSize: 8.5, fontFamily: 'var(--font-mono)', lineHeight: '13px',
+                      background: 'rgba(6,7,9,0.78)', color: v === version ? accent : '#fff',
+                    }}>v{v}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Estado y acción en la MISMA fila: el alto del modal lo tiene que gastar la imagen,
+                no dos renglones de controles. */}
+            {/* `paddingRight` = ancho de la columna de miniaturas (84) + su gap (10): con eso
+                el borde derecho del boton cae justo sobre el borde derecho de la imagen. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, paddingRight: 94 }}>
+              <span style={{
+                fontSize: 9.5, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.05em',
+                padding: '3px 7px', borderRadius: 4, flexShrink: 0,
+                background: `${accent}1c`, color: accent, border: `1px solid ${accent}44`,
+              }}>v{viendo}</span>
+
+              {viendo === version
+                ? <>
+                    <span style={{ fontSize: 11, color: 'var(--text-2)', flexShrink: 0 }}>current</span>
+                    <span style={{
+                      fontSize: 9.5, fontFamily: 'var(--font-mono)', color: '#F59E0B', flexShrink: 0,
+                      border: '1px solid color-mix(in srgb, #F59E0B 40%, transparent)',
+                      borderRadius: 4, padding: '3px 7px',
+                    }}>pending approval</span>
+                  </>
+                : <span style={{ fontSize: 11, color: 'var(--text-4)', flexShrink: 0 }}>earlier version</span>}
+
+              <div style={{ flex: 1 }} />
+
+              <button
+                onClick={async () => {
+                  const v = vers.find(x => x.n === viendo)
+                  if (!v?.id) return
+                  await approveAssetVersion(projectId, asset.id, v.id)
+                  onListo()
+                  onClose()
+                }}
+                style={{
+                  padding: '8px 20px', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+                  background: `${accent}1c`, border: `1px solid ${accent}88`, color: accent,
+                  fontSize: 12.5, fontWeight: 600, fontFamily: 'var(--font-sans)',
+                }}
+              >Approve v{viendo}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Aviso para lo que todavía no se puede iterar. No se disfraza de error: dice qué falta.
+function NoDisponible({ que, accent, onClose }: { que: string; accent: string; onClose: () => void }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1400, display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(6,7,9,0.5)', backdropFilter: 'blur(3px)',
+      }}
+    >
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 352, padding: '20px 22px', borderRadius: 13, textAlign: 'center',
+        background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+        boxShadow: '0 22px 64px rgba(0,0,0,0.6)', animation: 'mb-in 180ms ease',
+      }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: '50%', margin: '0 auto 12px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: `${accent}14`, border: `1px solid ${accent}44`,
+        }}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={accent}
+               strokeWidth="1.8" strokeLinecap="round">
+            <rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          </svg>
+        </div>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-0)', marginBottom: 6 }}>
+          Not available yet
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.55, marginBottom: 16 }}>
+          Iteration currently runs on <strong style={{ color: 'var(--text-1)' }}>Art Style Guide</strong> pages,
+          where a single page can be re-rendered on its own. {que}
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer',
+            background: 'transparent', border: `1px solid ${accent}66`, color: accent,
+            fontSize: 12, fontFamily: 'var(--font-sans)',
+          }}
+        >Got it</button>
+      </div>
+    </div>
+  )
+}
+
+// Submenú de «Edit»: cinco sectores, contextual por tipo. Solo la primera opción responde.
+// Vuelve al radial principal con Escape o con el botón del centro, para no dejar sin salida a
+// quien entró por error.
+function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewIteration }: {
+  x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
+  onBack: () => void; onDone: () => void; onNewIteration: () => void
+}) {
+  const [shown, setShown] = useState(false)
+  const [hot,   setHot]   = useState<number | null>(null)
+  useEffect(() => { const r = requestAnimationFrame(() => setShown(true)); return () => cancelAnimationFrame(r) }, [])
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onBack() } }
+    window.addEventListener('keydown', k, true)
+    return () => window.removeEventListener('keydown', k, true)
+  }, [onBack])
+
+  const cfg = submenuDe(asset)
+  const N = cfg.items.length
+  const R  = 172
+  const cx = Math.min(Math.max(x, R + 12), window.innerWidth  - R - 12)
+  const cy = Math.min(Math.max(y, R + 12), window.innerHeight - R - 12)
+  const ring = anilloDe(colors, accent)
+
+  return (
+    <div
+      data-mb-menu
+      onClick={e => { e.stopPropagation(); onDone() }}
+      style={{
+        position: 'fixed', left: cx - R, top: cy - R, width: R * 2, height: R * 2, zIndex: 1310,
+        transform: shown ? 'scale(1)' : 'scale(0.42)',
+        opacity: shown ? 1 : 0,
+        transition: 'transform 520ms cubic-bezier(0.34,1.56,0.44,1), opacity 220ms ease',
+      }}
+    >
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: '50%', background: ring,
+        animation: 'mb-sweep 760ms ease-out backwards, mb-spin 11s linear 760ms infinite',
+        filter: 'saturate(1.15)', boxShadow: `0 0 34px ${accent}44, 0 24px 70px rgba(0,0,0,0.6)`,
+      }} />
+      <div style={{
+        position: 'absolute', inset: 3, borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(14,17,22,0.97) 62%, rgba(14,17,22,0.9) 100%)',
+        backdropFilter: 'blur(4px)',
+      }} />
+
+      {cfg.items.map((label, i) => {
+        const activa = i === 0                       // solo Nueva Iteración
+        const pos = sectorAt(i, N)
+        return (
+          <div key={label}>
+            <div
+              onMouseEnter={() => setHot(i)}
+              onMouseLeave={() => setHot(null)}
+              // Siempre se corta la propagación: una opción bloqueada no hace nada, y menos
+              // todavía cerrar el menú por el clic de fondo.
+              onClick={e => { e.stopPropagation(); if (activa) onNewIteration() }}
+              title={activa ? 'Re-run this page through its workflow' : `${label} — not available yet`}
+              style={{
+                position: 'absolute', inset: 3, borderRadius: '50%',
+                clipPath: sectorPath(i, N),
+                background: hot === i && activa
+                  ? `radial-gradient(circle at center, ${accent}00 34%, ${accent}30 100%)`
+                  : 'transparent',
+                transition: 'background 160ms ease',
+                cursor: activa ? 'pointer' : 'not-allowed',
+              }}
+            />
+            <div style={{
+              position: 'absolute', ...pos, transform: 'translate(-50%, -50%)',
+              width: 104, textAlign: 'center', pointerEvents: 'none',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+              opacity: activa ? (hot === i ? 1 : 0.9) : 0.34,
+              transition: 'opacity 160ms ease',
+              animation: `mb-pop 480ms cubic-bezier(0.22,1,0.36,1) ${160 + i * 70}ms backwards`,
+            }}>
+              {!activa && (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     strokeWidth="2" style={{ color: '#fff', opacity: 0.75 }}>
+                  <rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                </svg>
+              )}
+              <span style={{
+                fontSize: 11, color: '#fff', lineHeight: 1.25,
+                fontWeight: activa ? 600 : 400,
+              }}>{label}</span>
+            </div>
+          </div>
+        )
+      })}
+
+      {/* Centro: vuelve al menú principal */}
+      <button
+        onClick={e => { e.stopPropagation(); onBack() }}
+        title="Back"
+        style={{
+          position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+          width: 74, height: 74, borderRadius: '50%', cursor: 'pointer',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+          background: 'radial-gradient(circle, rgba(22,28,34,0.98), rgba(12,15,19,0.98))',
+          border: `1px solid ${accent}aa`,
+          boxShadow: `0 0 24px ${accent}66, inset 0 0 18px ${accent}22`,
+          animation: 'mb-pop 520ms cubic-bezier(0.34,1.56,0.44,1) 100ms backwards',
+        }}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={accent}
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m15 18-6-6 6-6" />
+        </svg>
+        <span style={{ fontSize: 8, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', letterSpacing: '.06em' }}>
+          {cfg.label.replace(/^Edit /, '').toUpperCase()}
+        </span>
+      </button>
+    </div>
+  )
+}
+
+function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar }: {
+  x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
+  onDone: () => void; onIterar: (a: UnifiedAsset) => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<string | null>(null)
+  const [sub,   setSub]   = useState(false)
   useEffect(() => { const r = requestAnimationFrame(() => setShown(true)); return () => cancelAnimationFrame(r) }, [])
 
   const R  = 152
   const cx = Math.min(Math.max(x, R + 12), window.innerWidth  - R - 12)
   const cy = Math.min(Math.max(y, R + 12), window.innerHeight - R - 12)
 
-  // El aro toma los colores del proyecto, pero solo los que tienen luz: una paleta de juego
-  // trae fondos casi negros (#050A14) y esos tramos se leían como mordidas en el círculo.
-  const ring = useMemo(() => {
-    const lum = (h: string) => {
-      const n = parseInt(h.replace('#', ''), 16)
-      return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)
-    }
-    const bright = colors.filter(c => /^#[0-9a-f]{6}$/i.test(c) && lum(c) > 90)
-    const stops  = bright.length >= 2 ? bright : [accent, '#ffffffaa', accent]
-    return `conic-gradient(from 0deg, ${[...stops, stops[0]].join(', ')})`
-  }, [colors, accent])
+  const ring = useMemo(() => anilloDe(colors, accent), [colors, accent])
+
+  // El submenú REEMPLAZA al principal en vez de superponerse: dos aros girando encima del otro
+  // no se leen, y el centro ya sirve de vuelta atrás.
+  if (sub) return (
+    <RadialSubmenu
+      x={x} y={y} asset={asset} accent={accent} colors={colors}
+      onBack={() => setSub(false)}
+      onDone={onDone}
+      onNewIteration={() => onIterar(asset)}
+    />
+  )
 
   return (
     <div
@@ -1363,7 +2032,8 @@ function RadialMenu({ x, y, asset, accent, colors, onDone }: {
           <div
             onMouseEnter={() => setHot(q.key)}
             onMouseLeave={() => setHot(null)}
-            title={`${q.label} — coming in ${q.hint}`}
+            onClick={e => { if (q.key === 'edit') { e.stopPropagation(); setSub(true) } }}
+            title={q.key === 'edit' ? `${q.label} — open the editing menu` : `${q.label} — coming in ${q.hint}`}
             style={{
               position: 'absolute', inset: 3, borderRadius: '50%',
               clipPath: SECTOR[q.pos],
@@ -1371,7 +2041,7 @@ function RadialMenu({ x, y, asset, accent, colors, onDone }: {
                 ? `radial-gradient(circle at center, ${accent}00 34%, ${accent}26 100%)`
                 : 'transparent',
               transition: 'background 160ms ease',
-              cursor: 'default',
+              cursor: q.key === 'edit' ? 'pointer' : 'default',
             }}
           />
           <div style={{

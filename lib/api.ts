@@ -1522,6 +1522,30 @@ export async function generateNodePdf(
   )
 }
 
+// ─── Iteración de una página de deck ─────────────────────────────────────────
+// Re-renderiza UNA página y la guarda como versión nueva. La llamada espera: medido, una página
+// tarda 33–36 s (las 34 juntas tardan 220 porque van en paralelo, una sola no aprovecha eso).
+export interface IteracionResultado {
+  version: { id: string; version_number: number; storage_url: string }
+  pagina:  { indice: number; nombre: string }
+  job: string
+  segundos: number
+}
+
+export async function iterateAssetPage(projectId: string, assetId: string, memberId?: string | null) {
+  return request<{ success: boolean } & IteracionResultado>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/iterate`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ member_id: memberId ?? null }) },
+  )
+}
+
+export async function approveAssetVersion(projectId: string, assetId: string, versionId: string, memberId?: string | null) {
+  return request<{ success: boolean; version_number: number; storage_url: string }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/versions/${versionId}/approve`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ member_id: memberId ?? null }) },
+  )
+}
+
 export interface OutputImageVariation { url: string; condition?: string | null }
 export interface OutputImageItem     { index: number; variations: OutputImageVariation[] }
 export type    OutputImagesMap       = Record<string, OutputImageItem[]>
