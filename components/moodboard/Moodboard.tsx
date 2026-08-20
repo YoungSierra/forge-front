@@ -62,6 +62,18 @@ function paginaASG(a: UnifiedAsset): { n: number; nombre: string } | null {
 // El tercer eje. No es un filtro más: es DÓNDE ESTÁS PARADO mirando, y caminar cambia lo que se
 // ve. El backend ya mandaba `phase` en cada activo desde el principio; acá se agrupa en las
 // cuatro etapas con las que trabaja el estudio.
+// Fecha y hora de una versión, corta pero sin ambigüedad: «20 Aug, 14:32». El día solo no sirve
+// cuando se itera varias veces en una tarde, que es el caso normal.
+const fechaLarga = (iso?: string | null) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const dia = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  const hora = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  const esteAno = d.getFullYear() === new Date().getFullYear()
+  return `${dia}${esteAno ? '' : ' ' + d.getFullYear()}, ${hora}`
+}
+
 const FASES: { key: string; label: string; phases: string[] }[] = [
   { key: 'doc',  label: 'Documentation',   phases: ['ideation', 'concept'] },
   { key: 'pre',  label: 'Pre-Production',  phases: ['pre-production'] },
@@ -1290,7 +1302,11 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado }: {
               <button
                 key={v.id}
                 onClick={e => { e.stopPropagation(); setVerN(v.version_number); setZoom(1); setPan({ x: 0, y: 0 }) }}
-                title={v.is_current ? `v${v.version_number} - current` : `v${v.version_number}`}
+                title={[
+                  `v${v.version_number}${v.is_current ? ' · current' : ''}${v.approved_at ? ' · approved' : ''}`,
+                  v.author ? `by ${v.author}` : null,
+                  fechaLarga(v.created_at),
+                ].filter(Boolean).join('\n')}
                 style={{
                   position: 'relative', width: '100%', aspectRatio: '4 / 3', flexShrink: 0,
                   borderRadius: 6, overflow: 'hidden', cursor: 'pointer', padding: 0,
@@ -1313,6 +1329,48 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado }: {
 
           </div>
         )}
+
+      {/* Autoría de la versión que se está mirando, abajo a la izquierda —enfrente del botón de
+          aprobar—. En la tira solo caben 74 px, así que el nombre y la hora van acá, donde se leen
+          sin pasar el mouse por encima. */}
+      {vers.length > 1 && verSel && (
+        <div
+          onPointerDown={e => e.stopPropagation()}
+          style={{
+            position: 'fixed',
+            left: box.left, top: box.top + box.height + 10,
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '6px 12px 6px 8px', borderRadius: 999,
+            background: 'rgba(6,7,9,0.82)',
+            border: `1px solid ${verSel.is_current ? accent + '66' : 'rgba(255,255,255,0.16)'}`,
+            boxShadow: '0 6px 18px rgba(0,0,0,0.45)',
+            backdropFilter: 'blur(6px)',
+            fontSize: 11, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap',
+            color: 'var(--text-2)',
+            opacity: open ? 1 : 0,
+            transition: `${FLIGHT}, opacity 220ms ease 140ms`,
+          }}
+        >
+          {/* El número, en su propia pastilla: es lo que se busca primero al comparar versiones. */}
+          <span style={{
+            padding: '2px 8px', borderRadius: 999, fontWeight: 700,
+            background: verSel.is_current ? `${accent}22` : 'rgba(255,255,255,0.07)',
+            color: verSel.is_current ? accent : 'var(--text-1)',
+          }}>
+            v{verSel.version_number}
+          </span>
+          {verSel.author && (
+            <span style={{ color: 'var(--text-1)' }}>{verSel.author}</span>
+          )}
+          <span style={{ opacity: 0.55 }}>{fechaLarga(verSel.created_at)}</span>
+          {verSel.approved_at && (
+            <span style={{
+              padding: '2px 7px', borderRadius: 999, fontSize: 9.5, letterSpacing: '.06em',
+              background: `${accent}1f`, border: `1px solid ${accent}55`, color: accent,
+            }}>APPROVED</span>
+          )}
+        </div>
+      )}
 
       {/* Aprobar, fuera del marco y abajo a la derecha. Vive aca y no solo en el modal de
           iteracion: si se cerraba sin decidir, no habia forma de volver a hacerlo. */}
@@ -1568,7 +1626,9 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: 
   useEffect(() => {
     if (lanzada.current) return
     lanzada.current = true
-    iterateAssetPage(projectId, asset.id)
+    // Sin el miembro, la versión queda sin autor: las 29 que ya existen están así porque nadie
+    // lo mandaba. Es el mismo id que usa el resto del front para atribuir el gasto.
+    iterateAssetPage(projectId, asset.id, typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null)
       .then(r => {
         setVers(v => [...v.filter(x => x.n !== r.version.version_number),
                       { id: r.version.id, n: r.version.version_number, url: r.version.storage_url }]

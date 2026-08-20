@@ -292,6 +292,8 @@ export interface UnifiedAssetVersion {
   /** Aprobada es distinto de vigente: una version puede estar a la vista sin haber sido elegida. */
   approved_at: string | null
   created_at: string
+  /** Quién la generó. Null en las versiones anteriores a que se registrara el autor. */
+  author?: string | null
 }
 
 export interface UnifiedAsset {
