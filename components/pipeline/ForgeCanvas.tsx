@@ -2040,6 +2040,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
       {isApproved && deckAnchor && (
         <AssetCardDeck
           nodeId={node.id}
+          projectNodeId={canvasNode.project_node_id}
           projectId={projectId}
           anchorX={deckAnchor.x}
           anchorY={deckAnchor.y}

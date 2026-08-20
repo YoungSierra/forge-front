@@ -101,6 +101,7 @@ const CARD_W      = 108
 
 interface Props {
   nodeId:          string
+  projectNodeId:   string   // la INSTANCIA: con fan-out el mismo nodo vive en varios lanes
   projectId:       string
   anchorX:         number   // centro X del nodo en coords de pantalla
   anchorY:         number   // top Y del nodo en coords de pantalla
@@ -109,7 +110,7 @@ interface Props {
 }
 
 export default function AssetCardDeck({
-  nodeId, projectId, anchorX, anchorY, onKeepOpen, onScheduleClose,
+  nodeId, projectNodeId, projectId, anchorX, anchorY, onKeepOpen, onScheduleClose,
 }: Props) {
   const [deck,     setDeck]     = useState<DeckState>({ status: 'loading' })
   const [hovered,  setHovered]  = useState<number | null>(null)
@@ -126,7 +127,8 @@ export default function AssetCardDeck({
   // Cargar asset al montar — con caché
   useEffect(() => {
     let cancelled = false
-    const key = `${projectId}:${nodeId}`
+    // La caché va por instancia: con la clave por nodo, los dos lanes compartían baraja.
+    const key = `${projectId}:${nodeId}:${projectNodeId}`
     const cached = CACHE.get(key)
 
     // Solo usar caché si tiene contenido — resultados vacíos se reintentan siempre
@@ -137,9 +139,10 @@ export default function AssetCardDeck({
 
     async function load() {
       try {
-        const res  = await fetch(`${BACKEND_URL}/api/projects/${projectId}/canvas/nodes/${nodeId}/session`, {
-          headers: await authHeaders(),
-        })
+        const res  = await fetch(
+          `${BACKEND_URL}/api/projects/${projectId}/canvas/nodes/${nodeId}/session?project_node_id=${projectNodeId}`,
+          { headers: await authHeaders() },
+        )
         const data = await res.json()
 
         if (!data.success) {
@@ -207,7 +210,7 @@ export default function AssetCardDeck({
 
     load()
     return () => { cancelled = true }
-  }, [nodeId, projectId])
+  }, [nodeId, projectId, projectNodeId])
 
   if (deck.status === 'empty') return null
 
