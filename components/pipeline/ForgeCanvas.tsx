@@ -3785,6 +3785,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [pendingOutputModalKey, setPendingOutputModalKey] = useState<string | null>(null)
   const clearPendingOutputModal = useCallback(() => { setPendingOutputModalId(null); setPendingOutputModalKey(null) }, [])
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
+  // Nodo aprobado que se intentó soltar en el panel para borrarlo: se avisa por qué no se fue.
+  const [bloqueado, setBloqueado] = useState<string | null>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
   const [textSize,   setTextSize]  = useState<TextSize>(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem(TEXT_SIZE_KEY) : null
@@ -3879,6 +3881,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       if (!silent) setLoading(false)
     }
   }, [project.id])
+
+  // La X del lane no borra: pregunta. Lo que hay detrás no es «quitar del canvas» — el endpoint
+  // elimina TODOS los nodos miembro con sus sesiones, mensajes e imágenes, y no hay vuelta atrás.
+  // Borrar un solo nodo ya avisaba; borrar tres de un clic no avisaba nada.
+  const [pendingLaneId, setPendingLaneId] = useState<string | null>(null)
 
   const dismissLane = useCallback(async (laneId: string) => {
     try {
@@ -4205,8 +4212,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     // se reemplazan por edges virtuales en los bordes del LaneGroupNode (simétrico: salida e entrada).
     // Salientes: (srcLane → external target) → virtual desde lane-out
     // Entrantes: (external source → tgtLane)  → virtual hacia lane-in
-    const outgoingLanePairs = new Map<string, { laneGroupId: string; targetId: string; color: string }>()
-    const incomingLanePairs = new Map<string, { sourceId: string; laneGroupId: string; color: string }>()
+    // `reales` guarda qué nodos DE ADENTRO del lane representa cada cable virtual. Sin eso, pasar
+    // el mouse por un nodo del lane no encendía sus cables hacia afuera: el resaltado compara
+    // contra los extremos del cable, y los del virtual son el contenedor, no el nodo.
+    const outgoingLanePairs = new Map<string, { laneGroupId: string; targetId: string; color: string; reales: Set<string> }>()
+    const incomingLanePairs = new Map<string, { sourceId: string; laneGroupId: string; color: string; reales: Set<string> }>()
 
     // Waypoints guardados en canvas_layout (localStorage) por edge id
     const savedLayout    = loadLayout(project.id)
@@ -4243,8 +4253,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               laneGroupId: `lane-${srcLane}`,
               targetId:    e.target,
               color:       laneColor.get(srcLane) ?? '#6b7280',
+              reales:      new Set(),
             })
           }
+          outgoingLanePairs.get(pairKey)!.reales.add(e.source)
         }
 
         if (isIncoming) {
@@ -4254,8 +4266,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               sourceId:    e.source,
               laneGroupId: `lane-${tgtLane}`,
               color:       laneColor.get(tgtLane) ?? '#6b7280',
+              reales:      new Set(),
             })
           }
+          incomingLanePairs.get(pairKey)!.reales.add(e.target)
         }
 
         const isHidden = isOutgoing || isIncoming
@@ -4274,7 +4288,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       })
 
     // Edges virtuales salientes: uno por (srcLane, target), desde el borde derecho del lane
-    for (const [pairKey, { laneGroupId, targetId, color }] of outgoingLanePairs) {
+    for (const [pairKey, { laneGroupId, targetId, color, reales }] of outgoingLanePairs) {
       const eid = `virtual-out-${pairKey}`
       const waypoints = savedWaypoints.get(eid)
       dbEdges.push({
@@ -4285,12 +4299,12 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         type:         edgeType,
         deletable:    false,
         selectable:   false,
-        data:         makeEdgeData(color, waypoints ? { waypoints } : {}),
+        data:         makeEdgeData(color, { reales: [...reales], ...(waypoints ? { waypoints } : {}) }),
       })
     }
 
     // Edges virtuales entrantes: uno por (source, tgtLane), hacia el borde izquierdo del lane
-    for (const [pairKey, { sourceId, laneGroupId, color }] of incomingLanePairs) {
+    for (const [pairKey, { sourceId, laneGroupId, color, reales }] of incomingLanePairs) {
       const eid = `virtual-in-${pairKey}`
       const waypoints = savedWaypoints.get(eid)
       dbEdges.push({
@@ -4306,7 +4320,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         type:         edgeType,
         deletable:    false,
         selectable:   false,
-        data:         makeEdgeData(color, waypoints ? { waypoints } : {}),
+        data:         makeEdgeData(color, { reales: [...reales], ...(waypoints ? { waypoints } : {}) }),
       })
     }
 
@@ -4546,7 +4560,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
         const minX = Math.min(...memberNodes.map(n => n.position.x))
         const minY = Math.min(...memberNodes.map(n => n.position.y))
-        const maxX = Math.max(...memberNodes.map(n => n.position.x + NODE_W))
+        const maxX = Math.max(...memberNodes.map(n => n.position.x + (n.measured?.width ?? NODE_W)))
 
         if (isCollapsed) {
           // Posición y ancho del node existente; fallback al bounding box de miembros
@@ -4565,12 +4579,15 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             draggable: true, selectable: false, zIndex: 0,
             dragHandle: '.lane-drag-handle',
             position: colPos, style: { width: colW, height: COLLAPSED_H, zIndex: 0 },
-            data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current, collapsed: true, onToggle: () => toggleLane(lane.id), onDismiss: () => dismissLane(lane.id), onRun: () => runScopeRef.current({ type: 'lane', lane_id: lane.id }) } as LaneGroupData,
+            data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current, collapsed: true, onToggle: () => toggleLane(lane.id), onDismiss: () => setPendingLaneId(lane.id), onRun: () => runScopeRef.current({ type: 'lane', lane_id: lane.id }) } as LaneGroupData,
           }
         }
 
         // Expandido: calcular bounding box desde nodos miembro
-        const maxY   = Math.max(...memberNodes.map(n => n.position.y + (n.height ?? NODE_H_FALLBACK)))
+        // React Flow v12 mide en `measured`; `n.height` solo tiene valor si se fija a mano, así
+        // que leyéndolo se caía siempre al fallback de 90 px y el marco quedaba corto — un nodo
+        // que crece (la fila de imágenes generadas) se salía por abajo.
+        const maxY   = Math.max(...memberNodes.map(n => n.position.y + (n.measured?.height ?? n.height ?? NODE_H_FALLBACK)))
         const newPos = { x: minX - PADDING.left, y: minY - PADDING.top }
         const newW   = maxX - minX + PADDING.left + PADDING.right
         const newH   = maxY - minY + PADDING.top + PADDING.bottom
@@ -4586,7 +4603,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           draggable: true, selectable: false, zIndex: 0,
           dragHandle: '.lane-drag-handle',
           position: newPos, style: { width: newW, height: newH, zIndex: 0 },
-          data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current, collapsed: false, onToggle: () => toggleLane(lane.id), onDismiss: () => dismissLane(lane.id), onRun: () => runScopeRef.current({ type: 'lane', lane_id: lane.id }) } as LaneGroupData,
+          data: { lane, memberNodeIds: memberIds, onDragEnd: persistLayoutRef.current, collapsed: false, onToggle: () => toggleLane(lane.id), onDismiss: () => setPendingLaneId(lane.id), onRun: () => runScopeRef.current({ type: 'lane', lane_id: lane.id }) } as LaneGroupData,
         }
       }).filter(Boolean) as typeof prev
 
@@ -4616,9 +4633,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
   // Re-sincronizar cuando React Flow mide las alturas reales de los nodos por primera vez
   // o cuando cambian (nodo aprobado agrega la fila de output y crece)
+  // Misma corrección que arriba: con `n.height` (vacío en v12) esta clave salía siempre igual y el
+  // efecto no volvía a correr nunca, así que el marco se calculaba una vez y se quedaba ahí.
   const _laneNodeHeightKey = nodes
-    .filter(n => !n.id.startsWith('lane-') && !!n.height)
-    .map(n => `${n.id}:${n.height}`)
+    .filter(n => !n.id.startsWith('lane-'))
+    .map(n => `${n.id}:${n.measured?.height ?? n.height ?? 0}`)
     .join('|')
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (_laneNodeHeightKey) syncLaneNodes() }, [_laneNodeHeightKey])
@@ -4658,7 +4677,12 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       const focusId = hoveredNodeId ?? selectedNode?.project_node_id ?? null
       return edges.map(e => {
         const approved = forgyiSourceIds.has(e.source)
-        const touches  = focusId != null && (e.source === focusId || e.target === focusId)
+        // Un cable que cruza la frontera de un lane se dibuja como virtual entre el contenedor y
+        // el nodo de afuera, así que sus extremos NO son el nodo que uno está mirando. `reales`
+        // dice a qué nodos de adentro representa, y con eso el hover vuelve a encenderlo.
+        const reales   = (e.data as { reales?: string[] } | undefined)?.reales
+        const touches  = focusId != null &&
+          (e.source === focusId || e.target === focusId || !!reales?.includes(focusId))
         return {
           ...e,
           selected: e.id === selectedEdgeId,
@@ -4798,7 +4822,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       )
       requestAnimationFrame(persistLayout)
     } catch (e) {
+      // El servidor rechaza borrar un nodo aprobado. Sin decirlo, el nodo se quedaba en pantalla
+      // y parecía que el clic no había hecho nada.
       console.error('[forge-canvas] remove failed', e)
+      const msg = String((e as Error)?.message || e)
+      if (/approved output/i.test(msg)) alert('This node has approved output and cannot be removed.\nReopen it and undo the approval first.')
     }
   }
 
@@ -4813,7 +4841,12 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     if (!cn) return false
     const gs = cn.session?.status
     if (gs === 'approved' || gs === 'auto_approved') return true
-    const aOuts = (cn.node?.outputs ?? [])
+    // Los outputs `deferred` se producen en otra etapa y NUNCA se aprueban acá. Contarlos hacía
+    // que un nodo aprobado no diera aprobado para esta comprobación: el panel escondía el botón
+    // de borrar y el arrastre al panel izquierdo sí lo dejaba pasar. Misma regla que la tarjeta.
+    const aOuts = (cn.node?.outputs ?? []).filter(
+      o => (o as unknown as { production?: string }).production !== 'deferred',
+    )
     return aOuts.length > 0 && aOuts.every((o: { key?: string }) => {
       const s = (cn.output_sessions ?? {})[(o.key ?? '')]?.status
       return s === 'approved' || s === 'auto_approved'
@@ -4875,11 +4908,13 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         event.clientY >= rect.top  && event.clientY <= rect.bottom
       ) {
         if (nodeIsApproved(node.id)) {
-          // Nodo aprobado — no se puede eliminar
-        } else if (nodeHasContent(node.id)) {
-          setPendingRemoveId(node.id)
+          // Antes no pasaba nada y en silencio: soltarlo ahí se leía como que el arrastre había
+          // fallado, no como que el nodo está protegido.
+          setBloqueado(node.id)
         } else {
-          removeNodeById(node.id)
+          // Siempre pregunta. Un nodo sin contenido se borraba de una al soltarlo, y soltar es
+          // fácil de hacer sin querer mientras se acomoda el canvas.
+          setPendingRemoveId(node.id)
         }
       }
     }
@@ -5926,6 +5961,78 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       />
     )}
 
+    {/* Aviso: se soltó un nodo aprobado en la zona de borrado */}
+    {bloqueado && (() => {
+      const cn = canvasData?.nodes.find(n => n.project_node_id === bloqueado)
+      return (
+        <div
+          onClick={() => setBloqueado(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 15000, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, padding: '24px 28px', width: 380, boxShadow: '0 24px 64px rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', gap: 14 }}
+          >
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, fontWeight: 700, color: 'var(--action)', letterSpacing: '0.04em' }}>
+              {cn?.node?.node_key ? `${cn.node.node_key} IS APPROVED` : 'NODE IS APPROVED'}
+            </span>
+            <span style={{ fontSize: 13, color: 'var(--text-1)', lineHeight: 1.5 }}>
+              An approved node cannot be removed from the canvas — everything downstream was built on
+              top of it. Reopen it and undo the approval first.
+            </span>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setBloqueado(null)}
+                style={{ padding: '7px 18px', borderRadius: 7, border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-1)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+              >Got it</button>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
+
+    {/* Confirmación de borrado de un lane completo — dice CUÁNTOS nodos se lleva por delante */}
+    {pendingLaneId && (() => {
+      const lane   = (canvasData?.lanes ?? []).find(l => l.id === pendingLaneId)
+      const miembros = (canvasData?.nodes ?? []).filter(n => n.lane_id === pendingLaneId)
+      const conObra  = miembros.filter(n => n.session?.has_content || Object.values(n.output_sessions ?? {}).some(s => s.has_content))
+      return (
+        <div
+          onClick={() => setPendingLaneId(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 15000, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: 'var(--bg-1)', border: '1px solid var(--line-2)', borderRadius: 12, padding: '28px 32px', width: 400, boxShadow: '0 24px 64px rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', gap: 16 }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#EF4444', letterSpacing: '0.04em' }}>DELETE LANE</span>
+              <span style={{ fontSize: 13, color: 'var(--text-1)', lineHeight: 1.5 }}>
+                {lane ? `Lane ${lane.lane_key} · ${lane.label}` : 'This lane'} and its {miembros.length} node{miembros.length === 1 ? '' : 's'} will be deleted.
+                {conObra.length > 0 && ` ${conObra.length} of them ${conObra.length === 1 ? 'has' : 'have'} generated content — sessions, messages and approved outputs go with them.`}
+                {' '}This cannot be undone.
+              </span>
+              {miembros.length > 0 && (
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', lineHeight: 1.6 }}>
+                  {miembros.map(n => n.node?.node_key ?? '·').join('  ')}
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setPendingLaneId(null)}
+                style={{ padding: '7px 16px', borderRadius: 7, border: '1px solid var(--line-2)', background: 'none', color: 'var(--text-2)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+              >Cancel</button>
+              <button
+                onClick={() => { const id = pendingLaneId; setPendingLaneId(null); dismissLane(id) }}
+                style={{ padding: '7px 16px', borderRadius: 7, border: 'none', background: '#EF4444', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+              >Delete lane</button>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
+
     {/* Confirmación de borrado para nodos con contenido generado */}
     {pendingRemoveId && (
       <div
@@ -5939,7 +6046,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#EF4444', letterSpacing: '0.04em' }}>REMOVE NODE</span>
             <span style={{ fontSize: 13, color: 'var(--text-1)', lineHeight: 1.5 }}>
-              This node has generated content. Removing it will permanently delete all sessions, messages and approved outputs.
+              {/* El aviso cambia según haya trabajo detrás: si no lo hay, no tiene sentido hablar
+                  de sesiones ni de outputs que no existen. */}
+              {nodeHasContent(pendingRemoveId)
+                ? 'This node has generated content. Removing it will permanently delete all sessions, messages and approved outputs.'
+                : 'Remove this node from the canvas? It has not generated anything yet, so nothing is lost — but its connections go with it.'}
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -5950,7 +6061,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             <button
               onClick={async () => { const id = pendingRemoveId; setPendingRemoveId(null); setRemoving(true); try { await removeNodeById(id) } finally { setRemoving(false) } }}
               style={{ padding: '7px 16px', borderRadius: 7, border: 'none', background: '#EF4444', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
-            >Remove anyway</button>
+            >{nodeHasContent(pendingRemoveId) ? 'Remove anyway' : 'Remove node'}</button>
           </div>
         </div>
       </div>
