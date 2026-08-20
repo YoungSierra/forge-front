@@ -346,7 +346,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     // El fondo no cierra el moodboard: es un espacio de trabajo, no un aviso. Se sale por la X.
     <div
       style={{
-        position: 'fixed', inset: 0, zIndex: 1200,   // por encima del widget de Feedback (900)
+        // El moodboard tapa la pantalla entera: nada del canvas puede quedar flotando encima.
+        // El botón del gate (9000) y el modal de outputs (10001) se colaban sobre las imágenes.
+        // Sigue por debajo del chat de nodo (30000) y del panel de render (16000).
+        position: 'fixed', inset: 0, zIndex: 12000,
         background: entered ? 'rgba(6,7,9,0.74)' : 'rgba(6,7,9,0)',
         backdropFilter: entered ? 'blur(7px)' : 'blur(0px)',
         transition: 'background 380ms ease, backdrop-filter 380ms ease',
@@ -1103,7 +1106,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado }: {
     // disparar sin querer y se perdía la vista. Se sale por la X o con Esc.
     <div
       style={{
-        position: 'fixed', inset: 0, zIndex: 1250,
+        position: 'fixed', inset: 0, zIndex: 12050,   // sobre la grilla (12000)
         background: open ? 'rgba(6,7,9,0.62)' : 'rgba(6,7,9,0)',
         backdropFilter: open ? 'blur(3px)' : 'blur(0px)',
         transition: 'background 300ms ease, backdrop-filter 300ms ease',
@@ -1242,7 +1245,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado }: {
             onPointerDown={e => e.stopPropagation()}
             onDoubleClick={e => e.stopPropagation()}
             style={{
-              position: 'fixed', zIndex: 1251,
+              position: 'fixed', zIndex: 12051,
               left: box.left + box.width + 12, top: box.top + 38,
               maxHeight: Math.max(120, box.height - 38),
               width: 74, display: 'flex', flexDirection: 'column', gap: 6,
@@ -1391,7 +1394,7 @@ function DownloadMenu({ x, y, asset, onDone }: {
 
   return (
     <div data-mb-menu onClick={e => e.stopPropagation()} style={{
-      position: 'fixed', left, top, zIndex: 1300, width: W,
+      position: 'fixed', left, top, zIndex: 12100, width: W,
       padding: 5, borderRadius: 10,
       background: 'var(--bg-3)', border: '1px solid var(--line-2)',
       boxShadow: '0 14px 40px rgba(0,0,0,0.55)', animation: 'mb-in 140ms ease',
@@ -1618,7 +1621,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: 
     <div
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'fixed', inset: 0, zIndex: 1400, display: 'flex',
+        position: 'fixed', inset: 0, zIndex: 12200, display: 'flex',
         alignItems: 'center', justifyContent: 'center',
         background: 'rgba(6,7,9,0.55)', backdropFilter: 'blur(3px)',
       }}
@@ -1871,7 +1874,7 @@ function NoDisponible({ que, accent, onClose }: { que: string; accent: string; o
     <div
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, zIndex: 1400, display: 'flex',
+        position: 'fixed', inset: 0, zIndex: 12200, display: 'flex',
         alignItems: 'center', justifyContent: 'center',
         background: 'rgba(6,7,9,0.5)', backdropFilter: 'blur(3px)',
       }}
@@ -1939,7 +1942,7 @@ function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewItera
       data-mb-menu
       onClick={e => { e.stopPropagation(); onDone() }}
       style={{
-        position: 'fixed', left: cx - R, top: cy - R, width: R * 2, height: R * 2, zIndex: 1310,
+        position: 'fixed', left: cx - R, top: cy - R, width: R * 2, height: R * 2, zIndex: 12110,
         transform: shown ? 'scale(1)' : 'scale(0.42)',
         opacity: shown ? 1 : 0,
         transition: 'transform 520ms cubic-bezier(0.34,1.56,0.44,1), opacity 220ms ease',
@@ -2058,7 +2061,7 @@ function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar }: {
       data-mb-menu
       onClick={e => { e.stopPropagation(); onDone() }}
       style={{
-        position: 'fixed', left: cx - R, top: cy - R, width: R * 2, height: R * 2, zIndex: 1300,
+        position: 'fixed', left: cx - R, top: cy - R, width: R * 2, height: R * 2, zIndex: 12100,
         // Sobrepasa apenas el tamaño final antes de asentarse: es lo que le da el golpe.
         transform: shown ? 'scale(1)' : 'scale(0.38)',
         opacity: shown ? 1 : 0,

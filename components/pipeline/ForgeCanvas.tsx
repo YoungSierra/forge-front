@@ -1377,6 +1377,45 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   // Qué output se está renderizando, para no disparar dos a la vez.
   const [runningOutput, setRunningOutput] = useState<string | null>(null)
   const [renderJob, setRenderJob] = useState<{ clave: string; esperadas: number; error?: string } | null>(null)
+  // Despachos de este nodo que siguen corriendo en el servidor. `runningOutput` solo dura lo que
+  // dura la petición (~1 s desde que despacha en segundo plano), así que por sí solo no protege
+  // nada: el render sigue 4 minutos más con el botón habilitado.
+  const [vivos, setVivos] = useState<Record<string, Despacho>>({})
+  const marcarVivo = useCallback((clave: string, esperadas: number) => {
+    const t = leerDespachos()
+    t[`${canvasNode.project_node_id}:${clave}`] = { esperadas, desde: Date.now() }
+    guardarDespachos(t)
+    setVivos(v => ({ ...v, [clave]: { esperadas, desde: Date.now() } }))
+  }, [canvasNode.project_node_id])
+  const marcarMuerto = useCallback((clave: string) => {
+    const t = leerDespachos()
+    delete t[`${canvasNode.project_node_id}:${clave}`]
+    guardarDespachos(t)
+    setVivos(v => { const n = { ...v }; delete n[clave]; return n })
+  }, [canvasNode.project_node_id])
+  // Al montar (y al reabrir el modal) se recuperan los despachos anotados y se contrastan con la
+  // sesión: si ya no está `active`, terminó mientras el modal estaba cerrado.
+  useEffect(() => {
+    if (!outputOpen) return
+    const pref = `${canvasNode.project_node_id}:`
+    const anotados = Object.entries(leerDespachos())
+      .filter(([k]) => k.startsWith(pref))
+      .map(([k, v]) => [k.slice(pref.length), v] as const)
+    if (!anotados.length) { setVivos({}); return }
+    let cancelado = false
+    ;(async () => {
+      const confirmados: Record<string, Despacho> = {}
+      for (const [clave, d] of anotados) {
+        try {
+          const r = await getNodeSession(projectId, node.id, clave, canvasNode.project_node_id)
+          if ((r.session?.status ?? 'active') === 'active') confirmados[clave] = d
+          else marcarMuerto(clave)
+        } catch { confirmados[clave] = d }   // sin respuesta, se asume vivo: bloquear es lo barato
+      }
+      if (!cancelado) setVivos(confirmados)
+    })()
+    return () => { cancelado = true }
+  }, [outputOpen, projectId, node.id, canvasNode.project_node_id, marcarMuerto])
   const [localOutputImages, setLocalOutputImages] = useState<OutputImagesMap>(() => {
     // Merge images de sesión general + todas las sesiones de output
     const merged: OutputImagesMap = { ...((canvasNode.session?.output_images as OutputImagesMap) ?? {}) }
@@ -2020,6 +2059,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
           error={renderJob.error}
           onClose={() => setRenderJob(null)}
           onDone={imgs => onImagesUpdate?.(imgs, renderJob.clave)}
+          onSettled={() => marcarMuerto(renderJob.clave)}
         />, document.body)}
 
       {outputOpen && typeof document !== 'undefined' && (node.outputs ?? []).length > 0 && createPortal(
@@ -2162,9 +2202,13 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       { key?: string; name?: string; image_gen?: boolean; image_count?: number; production?: string } | undefined
                     if (!o?.image_gen || o.production === 'deferred') return null
                     const clave = o.key || o.name || outTab
+                    const vivo  = vivos[clave]
                     return (
                       <button
                         onClick={async () => {
+                          // Con un despacho vivo el botón no re-dispara: muestra en qué va. Volver
+                          // a apretarlo fue exactamente lo que produjo tres renders en paralelo.
+                          if (vivo) { setRenderJob({ clave, esperadas: vivo.esperadas }); return }
                           if (runningOutput) return
                           setRunningOutput(clave)
                           try {
@@ -2173,23 +2217,28 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                             // peticion con «Failed to fetch» — sin senal, se apretaba de nuevo y
                             // salian despachos en paralelo.
                             const r = await autoRunNode(projectId, canvasNode.project_node_id, undefined, clave)
-                            setRenderJob({ clave, esperadas: (r as { expected?: number }).expected ?? o.image_count ?? 0 })
+                            const esperadas = (r as { expected?: number }).expected ?? o.image_count ?? 0
+                            marcarVivo(clave, esperadas)
+                            setRenderJob({ clave, esperadas })
                           } catch (e) {
                             console.error('[run-output]', clave, e)
+                            marcarMuerto(clave)
                             setRenderJob({ clave, esperadas: o.image_count ?? 0, error: String((e as Error)?.message || e) })
                           } finally { setRunningOutput(null) }
                         }}
-                        disabled={!!runningOutput}
-                        title={`Render this output${o.image_count ? ` — ${o.image_count} images` : ''}`}
+                        disabled={!!runningOutput && !vivo}
+                        title={vivo
+                          ? 'This output is already rendering — click to see progress'
+                          : `Render this output${o.image_count ? ` — ${o.image_count} images` : ''}`}
                         style={{
                           border: '1px solid color-mix(in srgb, #F59E0B 35%, var(--line-2))',
                           background: 'color-mix(in srgb, #F59E0B 10%, var(--bg-2))',
                           borderRadius: 4, padding: '3px 8px',
-                          cursor: runningOutput ? 'default' : 'pointer',
+                          cursor: runningOutput && !vivo ? 'default' : 'pointer',
                           color: '#F59E0B', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                          lineHeight: 1, marginRight: 4, opacity: runningOutput ? 0.55 : 1,
+                          lineHeight: 1, marginRight: 4, opacity: runningOutput || vivo ? 0.55 : 1,
                         }}
-                      >{runningOutput === clave ? '…' : `▶ RENDER${o.image_count ? ` ${o.image_count}` : ''}`}</button>
+                      >{vivo ? '◷ RENDERING…' : runningOutput === clave ? '…' : `▶ RENDER${o.image_count ? ` ${o.image_count}` : ''}`}</button>
                     )
                   })()}
                   {onOpenChat && outTab && (
@@ -2868,9 +2917,32 @@ const EDGE_TYPES = { forgeEdge: ForgeEdge, orthogonalEdge: OrthogonalEdge }
 // El despacho ya no viaja en la respuesta: la ruta contesta enseguida y el trabajo sigue en el
 // servidor. El avance se lee de la sesión, donde cada página se anota apenas llega — así el
 // progreso es REAL, y cerrar esto (o la pestaña) no cancela nada.
-function RenderProgress({ projectId, nodeId, projectNodeId, outputKey, esperadas, error, onClose, onDone }: {
+// ── Despachos vivos ──────────────────────────────────────────────────────────
+// Un deck tarda ~4 minutos del lado del servidor y este componente no sobrevive a cerrar el modal:
+// el botón volvía a quedar habilitado con el render todavía corriendo, que es justo lo que llevó a
+// despachar tres veces lo mismo. Se anota en localStorage y se limpia cuando la sesión deja de
+// estar activa, así el bloqueo aguanta cerrar el modal e incluso recargar.
+const CLAVE_DESPACHOS = 'forge:renders'
+const VENCE_DESPACHO  = 30 * 60 * 1000   // más que cualquier deck; evita bloqueos eternos
+type Despacho = { esperadas: number; desde: number }
+
+function leerDespachos(): Record<string, Despacho> {
+  if (typeof localStorage === 'undefined') return {}
+  try {
+    const raw = JSON.parse(localStorage.getItem(CLAVE_DESPACHOS) || '{}') as Record<string, Despacho>
+    const vivos: Record<string, Despacho> = {}
+    for (const [k, v] of Object.entries(raw)) if (Date.now() - (v?.desde ?? 0) < VENCE_DESPACHO) vivos[k] = v
+    return vivos
+  } catch { return {} }
+}
+function guardarDespachos(t: Record<string, Despacho>) {
+  try { localStorage.setItem(CLAVE_DESPACHOS, JSON.stringify(t)) } catch { /* modo privado */ }
+}
+
+function RenderProgress({ projectId, nodeId, projectNodeId, outputKey, esperadas, error, onClose, onDone, onSettled }: {
   projectId: string; nodeId: string; projectNodeId: string; outputKey: string
   esperadas: number; error?: string; onClose: () => void; onDone: (imgs: OutputImagesMap) => void
+  onSettled?: () => void
 }) {
   const [hechas, setHechas] = useState(0)
   const [estado, setEstado] = useState<string>('active')
@@ -2886,16 +2958,20 @@ function RenderProgress({ projectId, nodeId, projectNodeId, outputKey, esperadas
         const n = r.session?.output_images?.[outputKey]?.length ?? 0
         setHechas(n)
         setEstado(r.session?.status ?? 'active')
-        if ((r.session?.status === 'auto_approved' || r.session?.status === 'approved') && !avisado.current) {
+        const st = r.session?.status
+        if ((st === 'auto_approved' || st === 'approved') && !avisado.current) {
           avisado.current = true
           onDone(r.session?.output_images ?? {})
+          onSettled?.()
         }
+        // Un despacho abandonado también cierra: si no, el botón queda bloqueado hasta que venza.
+        if (st === 'abandoned' && !avisado.current) { avisado.current = true; onSettled?.() }
       } catch { /* una consulta perdida no rompe el seguimiento */ }
     }
     mirar()
     const t = setInterval(mirar, 4000)
     return () => { vivo = false; clearInterval(t) }
-  }, [projectId, nodeId, projectNodeId, outputKey, error, onDone])
+  }, [projectId, nodeId, projectNodeId, outputKey, error, onDone, onSettled])
 
   const listo   = estado === 'auto_approved' || estado === 'approved'
   const fallo   = !!error || estado === 'abandoned'
