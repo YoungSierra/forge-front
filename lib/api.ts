@@ -1393,10 +1393,14 @@ export interface ApprovedAsset {
 }
 
 export interface ChatMessage {
+  id?:          string
   role:         'user' | 'assistant'
   content:      string
   attachments?: ChatAttachment[]
   tool_calls?:  ChatToolCall[]
+  // Lo que generó ESTE turno. El mapa de la sesión es lo último vigente; esto es el historial,
+  // y es lo que evita que una respuesta nueva se pinte con las imágenes de la anterior.
+  output_images?: OutputImagesMap
 }
 
 export async function saveChatHistory(
@@ -1435,7 +1439,7 @@ export async function chatWithForgeNode(
   attachmentUrl?:   string,
   targetOutputKey?: string | null,
   projectNodeId?:   string | null,
-): Promise<{ reply: string; session_id: string; doc_url?: string; doc_format?: string; attachment?: ChatAttachment }> {
+): Promise<{ reply: string; session_id: string; message_id?: string; output_images?: OutputImagesMap; doc_url?: string; doc_format?: string; attachment?: ChatAttachment }> {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
 
   let body: BodyInit
@@ -1560,10 +1564,11 @@ export async function generateItemImage(
   itemIndex:  number,
   itemText:   string,
   condition?: string,
+  messageId?: string,
 ): Promise<{ image_url: string; output_images: OutputImagesMap }> {
   return request<{ success: boolean; image_url: string; output_images: OutputImagesMap }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/sessions/${sessionId}/generate-item-image`,
-    { method: 'POST', body: JSON.stringify({ output_key: outputKey, item_index: itemIndex, item_text: itemText, condition }) },
+    { method: 'POST', body: JSON.stringify({ output_key: outputKey, item_index: itemIndex, item_text: itemText, condition, message_id: messageId ?? null }) },
   )
 }
 

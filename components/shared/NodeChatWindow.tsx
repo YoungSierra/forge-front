@@ -835,7 +835,7 @@ export interface NodeChatWindowProps {
   validateOutput?:   (data: unknown) => string | null  // null = válido, string = mensaje de error
   onClose:           () => void
   // Si se provee, reemplaza la llamada interna a chatWithNode
-  onSend?:          (userMessage: string, file?: File | null, attachmentUrl?: string) => Promise<{ reply: string; attachment?: ChatAttachment }>
+  onSend?:          (userMessage: string, file?: File | null, attachmentUrl?: string) => Promise<{ reply: string; attachment?: ChatAttachment; messageId?: string }>
   onAccept?:        (content: string) => Promise<void>
   docUrl?:          string
   docFormat?:       string
@@ -843,7 +843,7 @@ export interface NodeChatWindowProps {
   // Image gen por item
   imageGenOutputs?:     ImageOutputDef[]
   outputImages?:        OutputImagesMap
-  onGenerateItemImage?: (outputKey: string, itemIndex: number, itemText: string, condition?: string) => Promise<{ image_url: string; output_images: OutputImagesMap }>
+  onGenerateItemImage?: (outputKey: string, itemIndex: number, itemText: string, condition?: string, messageId?: string) => Promise<{ image_url: string; output_images: OutputImagesMap }>
   // Output enfocado: el chat trabaja sobre un output específico del nodo
   targetOutputKey?:     string | null
   targetOutputLabel?:   string | null
@@ -887,6 +887,10 @@ export default function NodeChatWindow({
   const [pendingUrl,      setPendingUrl]      = useState<string | null>(null)
   const [dropTarget,      setDropTarget]      = useState(false)
   const [outputImages,    setOutputImages]    = useState<OutputImagesMap>(outputImagesProp ?? {})
+  // Lo generado en esta pantalla, por turno. El backend ya lo guarda en el mensaje, pero la
+  // respuesta del generador trae el mapa de la SESIÓN: sin esto, la imagen recién hecha no
+  // aparecería en su turno hasta recargar.
+  const [imgsPorMsg,      setImgsPorMsg]      = useState<Record<string, OutputImagesMap>>({})
   const [generatingImgKeys, setGeneratingImgKeys] = useState<Set<string>>(new Set())  // set de "outputKey:index" en progreso
   const [zoomImageUrl,    setZoomImageUrl]    = useState<string | null>(null)
   // Panel de contexto (gate nodes)
@@ -1032,7 +1036,21 @@ export default function NodeChatWindow({
 
   // ── Auto-generación de imágenes al recibir respuesta del asistente ──────────
 
-  const triggerAutoImageGen = (content: string) => {
+  // Texto de los ítems del turno anterior, por output. Es lo que permite saber qué cambió de
+  // verdad en una iteración: los índices no se mueven, así que sin comparar el texto no hay forma
+  // de distinguir «este prompt es otro» de «este quedó igual».
+  const textoItemsPrevios = (outputKey: string, format: string): string[] => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role !== 'assistant') continue
+      const m = outputHeaderRx(outputKey).exec(messages[i].content)
+      const sec = m ? messages[i].content.slice(m.index + m[0].length) : messages[i].content
+      const items = parseOutputItems(sec.trim() || messages[i].content, format)
+      if (items.length) return items
+    }
+    return []
+  }
+
+  const triggerAutoImageGen = (content: string, messageId?: string) => {
     if (!imageGenOutputs?.length || !onGenerateItemImage) return
     const autoItems: Array<{ outputKey: string; idx: number; text: string; key: string }> = []
 
@@ -1073,18 +1091,37 @@ export default function NodeChatWindow({
           })()
         : content
 
+      const previos = textoItemsPrevios(def.outputKey, def.format)
       parseOutputItems(section, def.format).forEach((text, idx) => {
-        // Fix 1: no regenerar si ya existe imagen para este ítem
-        const alreadySaved = (outputImages[def.outputKey] ?? []).some(s => s.index === idx && s.variations?.length > 0)
-        if (alreadySaved) return
+        const tieneImagen = (outputImages[def.outputKey] ?? []).some(s => s.index === idx && s.variations?.length > 0)
+        // Antes bastaba con tener imagen para saltarlo, y eso volvía inútil TODA iteración: la
+        // primera corrida llenaba los N ítems y de ahí en más ninguna respuesta generaba nada,
+        // así que el prompt nuevo se seguía mostrando con la imagen vieja. Ahora lo que decide es
+        // si el prompt CAMBIÓ; un ítem idéntico conserva su imagen, porque volver a pedirla cuesta
+        // y además devuelve otra cosa (la generación no es reproducible).
+        const sinCambios = previos[idx] != null && previos[idx].trim() === text.trim()
+        if (tieneImagen && sinCambios) return
         autoItems.push({ outputKey: def.outputKey, idx, text, key: `${def.outputKey}:${idx}` })
       })
     }
     if (!autoItems.length) return
     setGeneratingImgKeys(new Set(autoItems.map(i => i.key)))
     for (const { outputKey, idx, text, key } of autoItems) {
-      onGenerateItemImage(outputKey, idx, text)
-        .then(r => setOutputImages(r.output_images))
+      onGenerateItemImage(outputKey, idx, text, undefined, messageId)
+        .then(r => {
+          setOutputImages(r.output_images)
+          // La imagen queda colgada del turno que la produjo: la sesión guarda «lo último
+          // vigente» y cada respuesta conserva lo suyo.
+          if (messageId) setImgsPorMsg(prev => {
+            const mapa  = { ...(prev[messageId] ?? {}) }
+            const lista = [...(mapa[outputKey] ?? [])]
+            const j     = lista.findIndex(s => s.index === idx)
+            const nueva = { url: r.image_url, condition: null }
+            if (j >= 0) lista[j] = { ...lista[j], variations: [...(lista[j].variations ?? []), nueva] }
+            else        lista.push({ index: idx, variations: [nueva] })
+            return { ...prev, [messageId]: { ...mapa, [outputKey]: lista.sort((a, b) => a.index - b.index) } }
+          })
+        })
         .catch(e => console.error('[auto-image-gen]', outputKey, idx, e))
         .finally(() => setGeneratingImgKeys(prev => { const n = new Set(prev); n.delete(key); return n }))
     }
@@ -1106,6 +1143,10 @@ export default function NodeChatWindow({
     try {
       if (onSend) {
         const result = await onSend(text, file, urlAtt ?? undefined)
+        // El id del turno se calcula ANTES de agregarlo al historial: `triggerAutoImageGen` mira
+        // los mensajes previos para saber qué cambió, y si el nuevo ya estuviera ahí se compararía
+        // contra sí mismo — todo saldría «sin cambios» y no se generaría nada.
+        triggerAutoImageGen(result.reply, result.messageId)
         setMessages(prev => {
           // Adjuntar info de attachment al último mensaje humano si la respuesta lo incluye
           const updated = result.attachment
@@ -1114,10 +1155,9 @@ export default function NodeChatWindow({
                 : m
               )
             : [...prev]
-          return [...updated, { role: 'assistant', content: result.reply }]
+          return [...updated, { id: result.messageId, role: 'assistant', content: result.reply }]
         })
         setHasNewResponse(true)
-        triggerAutoImageGen(result.reply)
       } else {
         const res = await chatWithNode(stepKey, messages, text, currentOutput, project.id)
         setMessages(prev => [...prev, { role: 'assistant', content: res.reply }])
@@ -1520,7 +1560,12 @@ export default function NodeChatWindow({
 
                 const parsed = parseOutputItems(section, def.format)
 
-                const savedList = outputImages[def.outputKey] ?? []
+                // Lo que generó ESTE turno manda. Iterar reescribe los prompts sin mover los
+                // índices, así que leer siempre el mapa de la sesión emparejaba la respuesta nueva
+                // con la imagen de la anterior. El mapa de la sesión queda como respaldo para los
+                // turnos anteriores a este historial.
+                const propias   = (msg.id ? imgsPorMsg[msg.id]?.[def.outputKey] : undefined) ?? msg.output_images?.[def.outputKey]
+                const savedList = propias ?? (isLastAssistant ? (outputImages[def.outputKey] ?? []) : [])
                 for (let idx = 0; idx < parsed.length; idx++) {
                   const itemText   = parsed[idx]
                   const saved      = savedList.find(s => s.index === idx)
@@ -1537,8 +1582,17 @@ export default function NodeChatWindow({
                     onGenerate:   async (condition?: string) => {
                       setGeneratingImgKeys(prev => new Set(prev).add(key))
                       try {
-                        const r = await onGenerateItemImage(def.outputKey, idx, itemText, condition)
+                        const r = await onGenerateItemImage(def.outputKey, idx, itemText, condition, msg.id)
                         setOutputImages(r.output_images)
+                        if (msg.id) setImgsPorMsg(prev => {
+                          const mapa  = { ...(prev[msg.id!] ?? {}) }
+                          const lista = [...(mapa[def.outputKey] ?? savedList)]
+                          const j     = lista.findIndex(s => s.index === idx)
+                          const nueva = { url: r.image_url, condition: condition?.trim() || null }
+                          if (j >= 0) lista[j] = { ...lista[j], variations: [...(lista[j].variations ?? []), nueva] }
+                          else        lista.push({ index: idx, variations: [nueva] })
+                          return { ...prev, [msg.id!]: { ...mapa, [def.outputKey]: lista.sort((a, b) => a.index - b.index) } }
+                        })
                       } catch (e) {
                         setError(e instanceof Error ? e.message : 'Image generation failed')
                       } finally {
@@ -1551,8 +1605,11 @@ export default function NodeChatWindow({
               return items.length > 0 ? items : undefined
             }
 
-            // Computar items una vez: se usa para el grid inline y para el expand modal
-            const imageItems = isLastAssistant ? buildItems() : undefined
+            // Computar items una vez: se usa para el grid inline y para el expand modal.
+            // Ya no es solo el último turno: una respuesta que generó imágenes las conserva y las
+            // sigue mostrando cuando la conversación avanza.
+            const tieneImagenesPropias = !!(msg.id && imgsPorMsg[msg.id]) || !!msg.output_images
+            const imageItems = (isLastAssistant || tieneImagenesPropias) ? buildItems() : undefined
 
             return (
               <React.Fragment key={i}>
@@ -1560,7 +1617,9 @@ export default function NodeChatWindow({
                   msg={msg}
                   onExpand={() => setExpandedContent({ content: msg.content, imageItems: imageItems ?? buildItems(), pngImages: visibleOutputImages })}
                 />
-                {isLastAssistant && <ImageThumbnailRow items={imageItems} />}
+                {/* Cada respuesta pinta lo suyo. Atar esto al último turno era lo que hacía
+                    desaparecer las imágenes de las respuestas anteriores al seguir conversando. */}
+                {imageItems && <ImageThumbnailRow items={imageItems} />}
               </React.Fragment>
             )
           })}

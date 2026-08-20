@@ -338,6 +338,26 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const pages   = Math.max(1, Math.ceil(filtered.length / perPage))
   const visible = filtered.slice(page * perPage, (page + 1) * perPage)
 
+  // ── Rueda del mouse = pasar página ──────────────────────────────────────────
+  // La grilla no tiene scroll (cabe entera, 4×3), así que la rueda no hacía nada. Ahora avanza y
+  // retrocede la paginación, que es lo que uno espera al girarla sobre un tablero de páginas.
+  //
+  // Se acumula el desplazamiento en vez de reaccionar a cada evento: un trackpad manda decenas de
+  // deltas pequeños por gesto y saltarían varias páginas de un tirón. Al cruzar el umbral se pasa
+  // UNA página y el acumulador se reinicia.
+  const rueda = useRef(0)
+  const onRueda = useCallback((e: React.WheelEvent) => {
+    if (pages <= 1) return
+    // El zoom del navegador (Ctrl+rueda) y el scroll horizontal no son navegación.
+    if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+    rueda.current += e.deltaY
+    const UMBRAL = 120   // una muesca de rueda de mouse; varios deltas de trackpad
+    if (Math.abs(rueda.current) < UMBRAL) return
+    const dir = rueda.current > 0 ? 1 : -1
+    rueda.current = 0
+    setPage(p => Math.min(pages - 1, Math.max(0, p + dir)))
+  }, [pages])
+
   // La animación nace en el botón: el panel escala desde ese punto en vez de aparecer centrado.
   const ox = origin ? `${origin.x}px` : '100%'
   const oy = origin ? `${origin.y}px` : '100%'
@@ -492,7 +512,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
         </div>
 
         {/* ── Grid ─────────────────────────────────────────────────────── */}
-        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '18px 58px', position: 'relative' }}>
+        <div
+          onWheel={onRueda}
+          style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '18px 58px', position: 'relative' }}
+        >
           {/* Marcas de agua: a la izquierda de dónde venís, a la derecha hacia dónde seguís.
               Solo la fase inmediata a cada lado — más allá no se muestra nada, porque el proyecto
               todavía no llegó ahí. La siguiente aparece apagada hasta que produzca algo. */}
@@ -2448,6 +2471,26 @@ function PageBtn({ label, active, disabled, onClick }: {
 //
 // `alcanzable` en false = el proyecto todavía no llegó ahí: se ve gris y no responde al clic.
 // Si no hay fase vecina no se dibuja nada — no hay nada más a la derecha hasta que lo haya.
+// Un ícono por fase. El texto vertical se descartó —el equipo lo rechazó y además obliga a girar
+// la cabeza para leer dos palabras—; el nombre vive ahora en el tooltip, que es donde se lee sin
+// esfuerzo y solo cuando hace falta.
+function IconoFase({ clave, size = 27 }: { clave: string; size?: number }) {
+  const p = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  const svg = (d: React.ReactNode) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...p}>{d}</svg>
+  )
+  switch (clave) {
+    // Documentación: una hoja escrita.
+    case 'doc':  return svg(<><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /><path d="M9 12h6M9 16h6" /></>)
+    // Pre-producción: el plano, con su escuadra.
+    case 'pre':  return svg(<><rect x="3" y="5" width="18" height="14" rx="1.5" /><path d="M7 15l4-6 3 4 1.5-2" /><path d="M3 10h4M17 5v4" /></>)
+    // Producción: el engranaje, la máquina andando.
+    case 'prod': return svg(<><circle cx="12" cy="12" r="3.2" /><path d="M12 3v2.4M12 18.6V21M21 12h-2.4M5.4 12H3M18.4 5.6l-1.7 1.7M7.3 16.7l-1.7 1.7M18.4 18.4l-1.7-1.7M7.3 7.3L5.6 5.6" /></>)
+    // Post-producción / live-ops: la señal al aire.
+    default:     return svg(<><circle cx="12" cy="12" r="2" /><path d="M8.4 8.4a5 5 0 000 7.2M15.6 8.4a5 5 0 010 7.2" /><path d="M5.6 5.6a9 9 0 000 12.8M18.4 5.6a9 9 0 010 12.8" /></>)
+  }
+}
+
 function Marca({ lado, fase, alcanzable, onClick }: {
   lado: 'izq' | 'der'
   fase?: { key: string; label: string }
@@ -2455,34 +2498,61 @@ function Marca({ lado, fase, alcanzable, onClick }: {
   onClick: () => void
 }) {
   const [hover, setHover] = useState(false)
+  // Al caminar de fase, este mismo componente pasa a representar OTRA fase sin que el puntero se
+  // mueva, así que el `onMouseLeave` nunca llega y el tooltip se quedaba abierto mostrando el
+  // nombre de la fase anterior. Cambió la fase ⇒ el hover ya no significa nada.
+  useEffect(() => { setHover(false) }, [fase?.key, alcanzable])
   if (!fase) return null
   const activa = alcanzable
+  const izq    = lado === 'izq'
   return (
     <div
-      onClick={() => { if (activa) onClick() }}
+      onClick={() => { if (activa) { setHover(false); onClick() } }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      title={activa ? `Go to ${fase.label}` : `${fase.label} — the project hasn't reached it yet`}
       style={{
-        position: 'absolute', top: 0, bottom: 0, [lado === 'izq' ? 'left' : 'right']: 0,
-        width: 54, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        position: 'absolute', top: 0, bottom: 0, [izq ? 'left' : 'right']: 0,
+        width: 56, display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: activa ? 'pointer' : 'default',
         userSelect: 'none', zIndex: 1,
       }}
     >
-      <span style={{
-        // Vertical, leyéndose de abajo hacia arriba a la izquierda y al revés a la derecha, así
-        // ambas quedan orientadas hacia el centro.
-        writingMode: 'vertical-rl',
-        transform: lado === 'izq' ? 'rotate(180deg)' : 'none',
-        fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '.26em',
-        textTransform: 'uppercase', whiteSpace: 'nowrap',
-        color: activa ? 'var(--text-1)' : 'var(--text-3)',
-        opacity: activa ? (hover ? 1 : 0.72) : 0.34,
-        transition: 'opacity 160ms ease',
-      }}>
-        {lado === 'izq' ? '← ' : ''}{fase.label}{lado === 'der' ? ' →' : ''}
-      </span>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <div style={{
+          width: 46, height: 46, borderRadius: 12,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          // Naranja de Forge cuando se puede ir; apagado cuando el proyecto no llegó ahí. El color
+          // dice «esto se puede tocar» sin necesidad de leer nada.
+          border: `1px solid ${activa ? 'color-mix(in srgb, var(--action) 45%, var(--line-2))' : 'var(--line-2)'}`,
+          background: activa
+            ? (hover ? 'color-mix(in srgb, var(--action) 16%, var(--bg-2))' : 'color-mix(in srgb, var(--action) 7%, var(--bg-2))')
+            : 'var(--bg-2)',
+          color: activa ? 'var(--action)' : 'var(--text-3)',
+          opacity: activa ? (hover ? 1 : 0.85) : 0.32,
+          transition: 'opacity 160ms ease, background 160ms ease, border-color 160ms ease',
+        }}>
+          <IconoFase clave={fase.key} />
+        </div>
+
+        {/* El nombre aparece al pasar el mouse, hacia el centro del tablero para no salirse. */}
+        {hover && (
+          <div style={{
+            position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+            [izq ? 'left' : 'right']: 54, whiteSpace: 'nowrap',
+            padding: '5px 9px', borderRadius: 7,
+            background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+            boxShadow: '0 8px 22px rgba(0,0,0,0.45)',
+            fontSize: 10.5, fontFamily: 'var(--font-mono)', letterSpacing: '.06em',
+            color: activa ? 'var(--action)' : 'var(--text-3)',
+            pointerEvents: 'none',
+          }}>
+            {izq ? '← ' : ''}{fase.label}{izq ? '' : ' →'}
+            {!activa && (
+              <span style={{ color: 'var(--text-4)' }}> · not reached yet</span>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

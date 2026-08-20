@@ -1381,6 +1381,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   // dura la petición (~1 s desde que despacha en segundo plano), así que por sí solo no protege
   // nada: el render sigue 4 minutos más con el botón habilitado.
   const [vivos, setVivos] = useState<Record<string, Despacho>>({})
+  // Despacho pendiente de confirmar. Un render cuesta crédito y no se puede deshacer, así que no
+  // sale de un solo clic.
+  const [confirmar, setConfirmar] = useState<{ clave: string; etiqueta: string; cuantas: number } | null>(null)
   const marcarVivo = useCallback((clave: string, esperadas: number) => {
     const t = leerDespachos()
     t[`${canvasNode.project_node_id}:${clave}`] = { esperadas, desde: Date.now() }
@@ -1393,6 +1396,23 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
     guardarDespachos(t)
     setVivos(v => { const n = { ...v }; delete n[clave]; return n })
   }, [canvasNode.project_node_id])
+  const despacharOutput = useCallback(async (clave: string, cuantas: number) => {
+    setRunningOutput(clave)
+    try {
+      // La ruta despacha y responde enseguida; el avance se consulta aparte. Antes esperaba los
+      // ~4 minutos del render y el navegador soltaba la petición con «Failed to fetch» — sin
+      // señal, se apretaba de nuevo y salían despachos en paralelo.
+      const r = await autoRunNode(projectId, canvasNode.project_node_id, undefined, clave)
+      const esperadas = (r as { expected?: number }).expected ?? cuantas
+      marcarVivo(clave, esperadas)
+      setRenderJob({ clave, esperadas })
+    } catch (e) {
+      console.error('[run-output]', clave, e)
+      marcarMuerto(clave)
+      setRenderJob({ clave, esperadas: cuantas, error: String((e as Error)?.message || e) })
+    } finally { setRunningOutput(null) }
+  }, [projectId, canvasNode.project_node_id, marcarVivo, marcarMuerto])
+
   // Al montar (y al reabrir el modal) se recuperan los despachos anotados y se contrastan con la
   // sesión: si ya no está `active`, terminó mientras el modal estaba cerrado.
   useEffect(() => {
@@ -2063,6 +2083,14 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
           onSettled={() => marcarMuerto(renderJob.clave)}
         />, document.body)}
 
+      {confirmar && typeof document !== 'undefined' && createPortal(
+        <ConfirmarRender
+          etiqueta={confirmar.etiqueta}
+          cuantas={confirmar.cuantas}
+          onCancel={() => setConfirmar(null)}
+          onOk={() => { const c = confirmar; setConfirmar(null); despacharOutput(c.clave, c.cuantas) }}
+        />, document.body)}
+
       {outputOpen && typeof document !== 'undefined' && (node.outputs ?? []).length > 0 && createPortal(
         <>
           <div
@@ -2200,32 +2228,27 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       solo llama al modelo. */}
                   {outTab && (() => {
                     const o = (node.outputs ?? []).find(x => (x as {key?:string;name:string}).key === outTab || x.name === outTab) as
-                      { key?: string; name?: string; image_gen?: boolean; image_count?: number; production?: string } | undefined
+                      { key?: string; name?: string; label?: string; image_gen?: boolean; image_count?: number; production?: string } | undefined
                     if (!o?.image_gen || o.production === 'deferred') return null
                     const clave = o.key || o.name || outTab
                     const vivo  = vivos[clave]
+                    // El botón es para PRODUCIR lo que falta, no para rehacer lo que ya está: con
+                    // imágenes en el output desaparece. Rehacer cuesta crédito y además no
+                    // devuelve lo mismo — ComfyUI no reproduce un render —, así que no puede
+                    // quedar a un clic de distancia. Para rehacer está el radial del moodboard,
+                    // que versiona en vez de pisar.
+                    // Mientras hay un despacho vivo se mantiene aunque ya lleguen imágenes: es la
+                    // única puerta al panel de progreso.
+                    if (!vivo && (localOutputImages[clave] ?? []).length > 0) return null
                     return (
                       <button
-                        onClick={async () => {
+                        onClick={() => {
                           // Con un despacho vivo el botón no re-dispara: muestra en qué va. Volver
                           // a apretarlo fue exactamente lo que produjo tres renders en paralelo.
                           if (vivo) { setRenderJob({ clave, esperadas: vivo.esperadas }); return }
                           if (runningOutput) return
-                          setRunningOutput(clave)
-                          try {
-                            // La ruta despacha y responde enseguida; el avance se consulta aparte.
-                            // Antes esperaba los ~4 minutos del render y el navegador soltaba la
-                            // peticion con «Failed to fetch» — sin senal, se apretaba de nuevo y
-                            // salian despachos en paralelo.
-                            const r = await autoRunNode(projectId, canvasNode.project_node_id, undefined, clave)
-                            const esperadas = (r as { expected?: number }).expected ?? o.image_count ?? 0
-                            marcarVivo(clave, esperadas)
-                            setRenderJob({ clave, esperadas })
-                          } catch (e) {
-                            console.error('[run-output]', clave, e)
-                            marcarMuerto(clave)
-                            setRenderJob({ clave, esperadas: o.image_count ?? 0, error: String((e as Error)?.message || e) })
-                          } finally { setRunningOutput(null) }
+                          // Nunca despacha de una: primero dice qué va a hacer y cuánto.
+                          setConfirmar({ clave, etiqueta: o.label || o.name || clave, cuantas: o.image_count ?? 0 })
                         }}
                         disabled={!!runningOutput && !vivo}
                         title={vivo
@@ -2938,6 +2961,55 @@ function leerDespachos(): Record<string, Despacho> {
 }
 function guardarDespachos(t: Record<string, Despacho>) {
   try { localStorage.setItem(CLAVE_DESPACHOS, JSON.stringify(t)) } catch { /* modo privado */ }
+}
+
+// Confirmación antes de gastar. Los dos botones van separados y el destructivo no es el que queda
+// bajo el cursor: el clic accidental fue el que costó tres despachos en paralelo.
+function ConfirmarRender({ etiqueta, cuantas, onCancel, onOk }: {
+  etiqueta: string; cuantas: number; onCancel: () => void; onOk: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
+  return (
+    <div onClick={onCancel} style={{
+      position: 'fixed', inset: 0, zIndex: 16000, display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(6,7,9,0.55)', backdropFilter: 'blur(3px)',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 400, padding: '18px 20px', borderRadius: 12,
+        background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+        boxShadow: '0 22px 64px rgba(0,0,0,0.6)',
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', marginBottom: 3 }}>
+          Render {cuantas ? `${cuantas} image${cuantas > 1 ? 's' : ''}` : 'this output'}?
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 12 }}>
+          {etiqueta}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 16 }}>
+          This spends credit and cannot be undone. Image generation is not reproducible — a second
+          run returns different images, not the same ones.
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} style={{
+            padding: '6px 14px', borderRadius: 6, cursor: 'pointer',
+            background: 'transparent', border: '1px solid var(--line-2)',
+            color: 'var(--text-2)', fontSize: 11, fontFamily: 'var(--font-mono)',
+          }}>Cancel</button>
+          <button onClick={onOk} style={{
+            padding: '6px 14px', borderRadius: 6, cursor: 'pointer',
+            background: '#F59E0B', border: '1px solid #F59E0B',
+            color: '#000', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
+          }}>▶ Render</button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function RenderProgress({ projectId, nodeId, projectNodeId, outputKey, esperadas, error, onClose, onDone, onSettled }: {
@@ -4224,7 +4296,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       dbEdges.push({
         id:           eid,
         source:       sourceId,
-        sourceHandle: 'out',
+        // Sin handle fijo: React Flow toma el único de salida que tenga el nodo. Forzar 'out'
+        // servía para los forge-nodes y dejaba fuera a los de asset y texto, cuyo handle no lleva
+        // id — el cable real queda oculto y el virtual apunta a un handle inexistente, así que no
+        // se dibuja ninguno de los dos. Ese era el «no sale el cable» al conectar una imagen de la
+        // librería con un nodo dentro de un lane.
         target:       laneGroupId,
         targetHandle: 'lane-in',
         type:         edgeType,
@@ -4485,7 +4561,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
           changed = true
           return {
-            id: laneId, type: 'laneGroup' as const,
+            id: laneId, type: 'laneGroup' as const, connectable: false,
             draggable: true, selectable: false, zIndex: 0,
             dragHandle: '.lane-drag-handle',
             position: colPos, style: { width: colW, height: COLLAPSED_H, zIndex: 0 },
@@ -4506,7 +4582,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
         changed = true
         return {
-          id: laneId, type: 'laneGroup' as const,
+          id: laneId, type: 'laneGroup' as const, connectable: false,
           draggable: true, selectable: false, zIndex: 0,
           dragHandle: '.lane-drag-handle',
           position: newPos, style: { width: newW, height: newH, zIndex: 0 },
@@ -4601,6 +4677,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   )
 
   const onConnect = useCallback((connection: Connection) => {
+    // Los handles del contenedor de lane son anclas de dibujo para los edges virtuales, no puertos
+    // conectables: un cable que termine ahí se ve un instante y `persistEdges` lo descarta por no
+    // ser un uuid — el usuario lo dibuja y desaparece sin explicación.
+    if (connection.source.startsWith('lane-') || connection.target.startsWith('lane-')) return
     const handleSuffix = [connection.sourceHandle, connection.targetHandle].filter(Boolean).join('-')
     const id = handleSuffix
       ? `e-${connection.source}-${handleSuffix}-${connection.target}`
@@ -5291,7 +5371,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             nodesDraggable
             nodesConnectable
             deleteKeyCode={null}
-            isValidConnection={c => c.source !== c.target}
+            isValidConnection={c => c.source !== c.target && !c.target.startsWith('lane-')}
+            // Los puntos de conexión miden 10 px y el default de captura son 20: adentro de un
+            // lane, con el fondo del contenedor detrás, el punto se ve poco y es fácil soltar
+            // fuera — y soltar fuera es el cable rojo, sin cable.
+            connectionRadius={45}
             style={{ background: 'transparent' }}
           />
         </div>
@@ -5365,7 +5449,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             } else {
               setChatSessionId(r.session_id)
             }
-            return { reply: r.reply, attachment: r.attachment }
+            return { reply: r.reply, attachment: r.attachment, messageId: r.message_id }
           }}
           onAccept={async (content) => {
             if (!chatSessionId) return
@@ -5401,10 +5485,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             return defs.length > 0 ? defs : undefined
           })()}
           outputImages={chatOutputImages}
-          onGenerateItemImage={async (outputKey, itemIndex, itemText, condition) => {
+          onGenerateItemImage={async (outputKey, itemIndex, itemText, condition, messageId) => {
             const sid = chatSessionIdRef.current ?? chatSessionId
             if (!sid) return { output_images: {} } as never
-            const r = await generateItemImage(project.id, chatForgeNode.id, sid, outputKey, itemIndex, itemText, condition)
+            const r = await generateItemImage(project.id, chatForgeNode.id, sid, outputKey, itemIndex, itemText, condition, messageId)
             const imgs = r.output_images
             setChatOutputImages(imgs)
             setCanvasData(prev => prev ? {
