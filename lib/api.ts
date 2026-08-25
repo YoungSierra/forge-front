@@ -1540,6 +1540,21 @@ export interface IteracionResultado {
   segundos: number
 }
 
+/** Acomodo del moodboard: dónde quedó cada hoja, por etapa. Es del proyecto, lo ve todo el equipo. */
+export type MoodboardLayout = Record<string, { x: number; y: number }>
+
+export async function getMoodboardLayout(projectId: string) {
+  const r = await request<{ success: boolean; layout: MoodboardLayout }>(`/api/projects/${projectId}/moodboard-layout`)
+  return r.layout ?? {}
+}
+
+export async function saveMoodboardLayout(projectId: string, layout: MoodboardLayout) {
+  return request<{ success: boolean }>(
+    `/api/projects/${projectId}/moodboard-layout`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ layout }) },
+  )
+}
+
 /** Notas del moodboard. Son del PROYECTO: una indicación que solo ve quien la escribió no sirve. */
 export interface AssetNote { id: string; asset_id: string; member_id: string | null; body: string; updated_at: string; author?: string | null }
 

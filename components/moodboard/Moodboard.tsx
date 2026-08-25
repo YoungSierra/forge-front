@@ -19,7 +19,7 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, type AssetNote } from '@/lib/api'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, type AssetNote } from '@/lib/api'
 
 // ── Pestañas ─────────────────────────────────────────────────────────────────
 // El juego es el de la referencia. Las que no tienen activos se muestran apagadas en vez de
@@ -325,10 +325,23 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   useEffect(() => { setFaseIdx(alcanzada) }, [alcanzada])
   const fase = FASES[faseIdx]
   // La posición de una hoja: la que el usuario le dio, o su lugar en la cuadrícula inicial.
-  const claveMB = `forge:mb:pos:${projectId}`
+  // El acomodo es del PROYECTO (decisión del equipo, 25-ago): si alguien mueve una hoja, el resto
+  // la encuentra ahí. Se guarda al SOLTAR, no en cada píxel del arrastre.
   useEffect(() => {
-    try { setPosiciones(JSON.parse(localStorage.getItem(claveMB) || '{}')) } catch { setPosiciones({}) }
-  }, [claveMB])
+    let vivo = true
+    getMoodboardLayout(projectId)
+      .then(l => { if (vivo) setPosiciones(l) })
+      .catch(e => console.error('[moodboard] layout', e))
+    return () => { vivo = false }
+  }, [projectId])
+
+  const posicionesRef = useRef<Record<string, { x: number; y: number }>>({})
+  useEffect(() => { posicionesRef.current = posiciones }, [posiciones])
+
+  const guardarLayout = useCallback(() => {
+    saveMoodboardLayout(projectId, posicionesRef.current)
+      .catch(e => console.error('[moodboard] guardar layout', e))
+  }, [projectId])
 
   // Las notas del proyecto, TODAS las de cada hoja: una por persona. Aplanarlas a una sola por
   // activo hacía que ganara la última en llegar, y abrir el modal te ponía a editar el texto de
@@ -424,12 +437,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   }, [posiciones, fase.key, disposicion])
 
   const moverElemento = useCallback((id: string, p: { x: number; y: number }) => {
-    setPosiciones(m => {
-      const n = { ...m, [`${fase.key}:${id}`]: p }
-      try { localStorage.setItem(claveMB, JSON.stringify(n)) } catch { /* modo privado */ }
-      return n
-    })
-  }, [fase.key, claveMB])
+    setPosiciones(m => ({ ...m, [`${fase.key}:${id}`]: p }))
+  }, [fase.key])
 
   // Un arrastre no debe terminar abriendo la tarjeta que acabás de soltar.
   const arrastrado = useRef(false)
@@ -921,7 +930,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           window.removeEventListener('pointerup', soltar)
                           // Si se arrastró, el clic que viene detrás abriría la tarjeta encima de
                           // donde acabás de soltarla. Se descarta ese único clic.
-                          if (movido) arrastrado.current = true
+                          if (movido) { arrastrado.current = true; guardarLayout() }
                         }
                         window.addEventListener('pointermove', mover)
                         window.addEventListener('pointerup', soltar)
