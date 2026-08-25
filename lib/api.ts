@@ -1540,6 +1540,21 @@ export interface IteracionResultado {
   segundos: number
 }
 
+/** Notas del moodboard. Son del PROYECTO: una indicación que solo ve quien la escribió no sirve. */
+export interface AssetNote { id: string; asset_id: string; member_id: string | null; body: string; updated_at: string; author?: string | null }
+
+export async function getAssetNotes(projectId: string) {
+  const r = await request<{ success: boolean; notes: AssetNote[] }>(`/api/assets/notes?project_id=${projectId}`)
+  return r.notes
+}
+
+export async function saveAssetNote(projectId: string, assetId: string, body: string, memberId?: string | null) {
+  return request<{ success: boolean; deleted?: boolean }>(
+    `/api/assets/${assetId}/note`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId, body, member_id: memberId ?? null }) },
+  )
+}
+
 /**
  * «Design Edits» del moodboard: se describe el cambio en palabras y la imagen se regenera
  * aplicando SOLO eso. A diferencia de `iterateAssetPage`, no rehace la página desde el documento

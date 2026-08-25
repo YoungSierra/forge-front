@@ -19,7 +19,7 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset } from '@/lib/api'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, type AssetNote } from '@/lib/api'
 
 // ── Pestañas ─────────────────────────────────────────────────────────────────
 // El juego es el de la referencia. Las que no tienen activos se muestran apagadas en vez de
@@ -217,9 +217,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // si el orden del lienzo es del proyecto (compartido) o de cada quien; la estructura ya está
   // lista para mudarla al servidor sin tocar el resto.
   const [posiciones, setPosiciones] = useState<Record<string, { x: number; y: number }>>({})
-  // Notas por elemento. Igual que las posiciones: en el navegador hasta que se decida si el
-  // lienzo es del proyecto o de cada quien.
-  const [notas, setNotas] = useState<Record<string, string>>({})
+  // Notas por elemento, en la BD y del proyecto: se pidieron para dejar indicaciones, y una
+  // indicación que solo ve quien la escribió no es una indicación. Las posiciones siguen en el
+  // navegador — eso es encuadre personal, no contenido.
   const [notando, setNotando] = useState<UnifiedAsset | null>(null)
   const [maximizado, setMaximizado] = useState(false)
   useEffect(() => { setMaximizado(localStorage.getItem('forge:mb:max') === '1') }, [])
@@ -326,20 +326,49 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const fase = FASES[faseIdx]
   // La posición de una hoja: la que el usuario le dio, o su lugar en la cuadrícula inicial.
   const claveMB = `forge:mb:pos:${projectId}`
-  const claveNotas = `forge:mb:notas:${projectId}`
   useEffect(() => {
     try { setPosiciones(JSON.parse(localStorage.getItem(claveMB) || '{}')) } catch { setPosiciones({}) }
-    try { setNotas(JSON.parse(localStorage.getItem(claveNotas) || '{}')) } catch { setNotas({}) }
-  }, [claveMB, claveNotas])
+  }, [claveMB])
+
+  // Las notas del proyecto, TODAS las de cada hoja: una por persona. Aplanarlas a una sola por
+  // activo hacía que ganara la última en llegar, y abrir el modal te ponía a editar el texto de
+  // otro para guardarlo como tuyo. Cada quien edita la suya; las demás se leen.
+  const [notasPorHoja, setNotasPorHoja] = useState<Record<string, AssetNote[]>>({})
+  const miMiembro = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+
+  const cargarNotas = useCallback(() => {
+    getAssetNotes(projectId)
+      .then(ns => {
+        const m: Record<string, AssetNote[]> = {}
+        for (const n of ns) (m[n.asset_id] ??= []).push(n)
+        setNotasPorHoja(m)
+      })
+      .catch(e => console.error('[moodboard] notas', e))
+  }, [projectId])
+  useEffect(() => { cargarNotas() }, [cargarNotas])
+
+  const miNota = useCallback(
+    (id: string) => (notasPorHoja[id] ?? []).find(n => (n.member_id ?? null) === miMiembro)?.body ?? '',
+    [notasPorHoja, miMiembro],
+  )
+  const otrasNotas = useCallback(
+    (id: string) => (notasPorHoja[id] ?? []).filter(n => (n.member_id ?? null) !== miMiembro),
+    [notasPorHoja, miMiembro],
+  )
 
   const guardarNota = useCallback((id: string, texto: string) => {
-    setNotas(m => {
-      const n = { ...m }
-      if (texto.trim()) n[id] = texto.trim(); else delete n[id]
-      try { localStorage.setItem(claveNotas, JSON.stringify(n)) } catch { /* modo privado */ }
-      return n
+    // Optimista sobre MI nota: esperar a la red para ver el ícono marcado se siente roto.
+    setNotasPorHoja(m => {
+      const lista = (m[id] ?? []).filter(n => (n.member_id ?? null) !== miMiembro)
+      if (texto.trim()) {
+        lista.push({ id: 'local', asset_id: id, member_id: miMiembro, body: texto.trim(), updated_at: new Date().toISOString(), author: null })
+      }
+      return { ...m, [id]: lista }
     })
-  }, [claveNotas])
+    saveAssetNote(projectId, id, texto, miMiembro)
+      .then(cargarNotas)   // relee: así aparece el autor y el id reales
+      .catch(e => console.error('[moodboard] guardar nota', e))
+  }, [projectId, miMiembro, cargarNotas])
 
   // ── Zonas por documento ─────────────────────────────────────────────────────
   // El lienzo no arranca como una grilla única: arranca como el trabajo está organizado — un
@@ -930,7 +959,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             const caja = (e.currentTarget as HTMLElement).closest('[data-hoja]')?.getBoundingClientRect()
                             if (caja) { setSel(a.id); setDetail({ asset: a, from: caja }) }
                           }}>⛶</BarraBtn>
-                          <BarraBtn titulo={notas[a.id] ? 'Notes — has one' : 'Notes'} activo={!!notas[a.id]} onClick={() => setNotando(a)}>✎</BarraBtn>
+                          <BarraBtn titulo={(notasPorHoja[a.id]?.length ?? 0) > 0 ? `Notes (${notasPorHoja[a.id].length})` : 'Notes'} activo={(notasPorHoja[a.id]?.length ?? 0) > 0} onClick={() => setNotando(a)}>✎</BarraBtn>
                           <BarraBtn titulo="Save to my computer" onClick={() => bajarActivo(a)}>↓</BarraBtn>
                           <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.14)', margin: '0 3px' }} />
                           <BarraBtn titulo="Design edits" onClick={() => setEditando(a)}>✦</BarraBtn>
@@ -1067,7 +1096,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       {notando && (
         <NotaModal
           asset={notando}
-          valor={notas[notando.id] ?? ''}
+          valor={miNota(notando.id)}
+          otras={otrasNotas(notando.id)}
           accent={theme.accent}
           onClose={() => setNotando(null)}
           onGuardar={t => { guardarNota(notando.id, t); setNotando(null) }}
@@ -1096,7 +1126,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       {aviso    && <NoDisponible  que={aviso}      accent={theme.accent} onClose={() => setAviso(null)} />}
 
       {detail && <Detail asset={detail.asset} from={detail.from} accent={theme.accent} onAprobado={reload}
-                         nota={notas[detail.asset.id]}
+                         notas={notasPorHoja[detail.asset.id] ?? []}
                          onNota={() => setNotando(detail.asset)}
                          onDesignEdit={() => setEditando(detail.asset)}
                          onMenu={(mx, my) => setMenu({ x: mx, y: my, asset: detail.asset })}
@@ -1524,12 +1554,12 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
 // No es un visor a pantalla completa: es una CARD que fluye al frente desde su lugar en la
 // grilla, como en la referencia. La grilla sigue visible detrás, atenuada, así no se pierde
 // el contexto de dónde estaba la imagen. Al cerrar vuelve exactamente a su celda.
-function Detail({ asset, from, accent, onMenu, onClose, onAprobado, nota, onNota, onDesignEdit }: {
+function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNota, onDesignEdit }: {
   asset: UnifiedAsset; from: DOMRect; accent: string
   onMenu: (x: number, y: number) => void; onClose: () => void; onAprobado: () => void
   // Las mismas acciones que en el lienzo. Al abrir la hoja no se pierden: es la misma pieza,
   // vista más grande, y tener que cerrarla para poder anotarla era el camino largo.
-  nota?: string; onNota: () => void; onDesignEdit: () => void
+  notas: AssetNote[]; onNota: () => void; onDesignEdit: () => void
 }) {
   const t   = kindOf(asset)
   // Historial de la pieza. Se mira desde aca: el badge de la tarjeta decia que habia dos
@@ -1889,7 +1919,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, nota, onNota
           transition: `${FLIGHT}, opacity 220ms ease 140ms`,
         }}
       >
-        <BarraBtn titulo={nota ? 'Notes — has one' : 'Notes'} activo={!!nota} onClick={onNota}>✎</BarraBtn>
+        <BarraBtn titulo={notas.length ? `Notes (${notas.length})` : 'Notes'} activo={notas.length > 0} onClick={onNota}>✎</BarraBtn>
         <BarraBtn titulo="Save to my computer" onClick={() => bajarActivo(asset)}>↓</BarraBtn>
         <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.14)', margin: '0 3px' }} />
         <BarraBtn titulo="Design edits" onClick={onDesignEdit}>✦</BarraBtn>
@@ -2077,8 +2107,8 @@ const FROM: Record<string, [number, number]> = {
 // 34 páginas en 220 s da ~6,5 s por página. Cuando se cablee, el porcentaje sale del job.
 // Nota de un elemento: una indicación pegada a la hoja sin tocar la imagen. Vacía = se borra;
 // no tiene sentido guardar una nota en blanco y que el ícono siga marcado.
-function NotaModal({ asset, valor, accent, onClose, onGuardar }: {
-  asset: UnifiedAsset; valor: string; accent: string
+function NotaModal({ asset, valor, otras, accent, onClose, onGuardar }: {
+  asset: UnifiedAsset; valor: string; otras: AssetNote[]; accent: string
   onClose: () => void; onGuardar: (t: string) => void
 }) {
   const [texto, setTexto] = useState(valor)
@@ -2099,10 +2129,36 @@ function NotaModal({ asset, valor, accent, onClose, onGuardar }: {
         boxShadow: '0 24px 64px rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', gap: 11,
       }}>
         <div>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-0)' }}>Note</div>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-0)' }}>Notes</div>
           <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 2 }}>
             {nombreDeHoja(asset)}
           </div>
+        </div>
+        {/* Lo que dejó el resto del equipo, de más nueva a más vieja. Se lee, no se edita: la
+            nota de otro no se toca, se responde con la propia. */}
+        {otras.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, maxHeight: 190, overflowY: 'auto' }}>
+            {[...otras]
+              .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+              .map(n => (
+                <div key={n.id} style={{
+                  padding: '8px 10px', borderRadius: 8,
+                  background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+                }}>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginBottom: 3 }}>
+                    {n.author ?? 'Someone'}
+                    <span style={{ color: 'var(--text-4)' }}> · {fechaLarga(n.updated_at)}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-1)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                    {n.body}
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
+
+        <div style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', letterSpacing: '.04em' }}>
+          {otras.length > 0 ? 'YOUR NOTE' : ''}
         </div>
         <textarea
           autoFocus value={texto} onChange={e => setTexto(e.target.value)}
