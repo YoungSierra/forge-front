@@ -19,18 +19,20 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion } from '@/lib/api'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset } from '@/lib/api'
 
 // ── Pestañas ─────────────────────────────────────────────────────────────────
 // El juego es el de la referencia. Las que no tienen activos se muestran apagadas en vez de
 // esconderse: la barra no cambia de forma entre proyectos y se ve qué tipos faltan por producir.
+// Orden pedido por el equipo (24-ago): Refs, Docs, Concept Art, 3D, Audio, Video — de lo que se
+// consulta a lo que se produce.
 const TABS: { key: string; label: string; formats: string[] }[] = [
+  { key: 'refs',    label: 'Refs',        formats: [] },   // ver ARTE: se decide por nodo, no por formato
+  { key: 'docs',    label: 'Docs',        formats: ['document', 'docx', 'pdf', 'pptx', 'md', 'markdown'] },
   { key: 'concept', label: 'Concept Art', formats: ['image', 'png', 'jpg', 'jpeg'] },
-  { key: 'refs',    label: 'Ref',         formats: [] },   // ver ARTE: se decide por nodo, no por formato
   { key: '3d',      label: '3D',          formats: ['model_3d', 'glb'] },
   { key: 'audio',   label: 'Audio',       formats: ['audio'] },
   { key: 'video',   label: 'Video',       formats: ['video', 'mp4'] },
-  { key: 'docs',    label: 'Docs',        formats: ['document', 'docx', 'pdf', 'pptx', 'md', 'markdown'] },
 ]
 
 // Los nodos cuyas imágenes son ARTE. Todo lo demás que sea imagen es material de referencia y
@@ -74,11 +76,13 @@ const fechaLarga = (iso?: string | null) => {
   return `${dia}${esteAno ? '' : ' ' + d.getFullYear()}, ${hora}`
 }
 
+// Las páginas raíz del espacio de trabajo. Son TRES, no cuatro: Post-Producción no existe todavía
+// como etapa con nodos, y una página vacía permanente solo estorba (equipo, 24-ago). Estas páginas
+// son la única paginación: la numérica de abajo desapareció con el lienzo.
 const FASES: { key: string; label: string; phases: string[] }[] = [
-  { key: 'doc',  label: 'Documentation',   phases: ['ideation', 'concept'] },
-  { key: 'pre',  label: 'Pre-Production',  phases: ['pre-production'] },
-  { key: 'prod', label: 'Production',      phases: ['production'] },
-  { key: 'post', label: 'Post-Production', phases: ['live-ops'] },
+  { key: 'doc',  label: 'Documentation',  phases: ['ideation', 'concept'] },
+  { key: 'pre',  label: 'Pre-Production', phases: ['pre-production'] },
+  { key: 'prod', label: 'Production',     phases: ['production', 'live-ops'] },
 ]
 
 // null = el activo no pertenece a una fase. Lo que sube el usuario y lo legacy caen acá, y esa
@@ -120,8 +124,71 @@ const kindOf = (a: UnifiedAsset): 'image' | 'video' | 'audio' | '3d' | 'doc' => 
 const originOf = (a: UnifiedAsset) =>
   a.node_key ? `${a.node_key} ${a.node_title ?? ''}`.trim() : (a.node_title || 'Library')
 
+// El nombre visible de una hoja. Las 34 páginas de un deck se llaman todas «Art Style Guide —
+// 01_KeyArt», así que pintar el nodo dejaba las 34 tarjetas con la MISMA etiqueta y el número de
+// nodo por delante. El nombre propio ya está guardado, después del guion: se usa ese, legible y
+// sin la clave técnica, que a quien mira el moodboard no le dice nada.
+//
+//   «Art Style Guide — 01_KeyArt»  ->  «01 · Key Art»
+//   «Concept Development — Output» ->  «Output»
+const nombreDeHoja = (a: UnifiedAsset) => {
+  const crudo = String(a.name || '')
+  const partes = crudo.split(/\s+[—–-]\s+/)
+  const cola = partes.length > 1 ? partes[partes.length - 1] : crudo
+  const m = cola.match(/^(\d{1,2})[_\s-]+(.+)$/)
+  const cuerpo = (m ? m[2] : cola)
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')   // KeyArt -> Key Art
+    .replace(/\s+/g, ' ')
+    .trim()
+  return m ? `${m[1]} · ${cuerpo}` : cuerpo
+}
+
 const COLS = 4   // como la referencia
 const ROWS = 3   // 4 x 3 = 12 en pantalla, sin scroll vertical
+
+// Tamaño de una hoja en el lienzo y separación de la cuadrícula inicial. En coordenadas del
+// lienzo, no de pantalla: el zoom las escala.
+const HOJA_W = 300
+const HOJA_H = 225
+const HOJA_GAP = 26
+
+// Bajar el activo a la máquina del usuario. Pasa por el proxy del servidor: el bucket es otro
+// origen y un <a download> directo termina abriendo el archivo en vez de bajarlo.
+async function bajarActivo(asset: UnifiedAsset) {
+  if (!asset.storage_url) return
+  try {
+    const res  = await fetch(`/api/proxy-image?url=${encodeURIComponent(asset.storage_url)}`)
+    const blob = await res.blob()
+    const href = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    const ext  = asset.storage_url.match(/\.[a-z0-9]{2,5}(?=$|\?)/i)?.[0] ?? ''
+    a.href = href
+    a.download = (outputOf(asset) ?? asset.name).replace(/[^\w.\- ]+/g, '_') + ext
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(href)
+  } catch (e) { console.error('[moodboard] descarga', e) }
+}
+
+function BarraBtn({ children, titulo, activo, onClick }: {
+  children: React.ReactNode; titulo: string; activo?: boolean
+  onClick: (e: React.MouseEvent) => void
+}) {
+  const [hot, setHot] = useState(false)
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); onClick(e) }}
+      onMouseEnter={() => setHot(true)} onMouseLeave={() => setHot(false)}
+      title={titulo}
+      style={{
+        width: 28, height: 28, borderRadius: 7, cursor: 'pointer', border: 'none',
+        background: hot ? 'rgba(255,255,255,0.10)' : 'transparent',
+        color: activo ? 'var(--action)' : 'rgba(255,255,255,0.82)',
+        fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >{children}</button>
+  )
+}
 
 interface Props {
   projectId:    string
@@ -143,6 +210,19 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // Origen: 'all' · una clave de nodo · 'library' (lo que subió el usuario al proyecto).
   const [node,    setNode]    = useState<string>(nodeKey ?? 'all')
   const [page,    setPage]    = useState(0)
+  // Encuadre del lienzo: escala y desplazamiento. Uno por etapa — cada página raíz conserva dónde
+  // la dejaste, porque volver a una etapa y encontrarla movida se siente como perder el trabajo.
+  const [vistas, setVistas] = useState<Record<string, { z: number; x: number; y: number }>>({})
+  // Dónde puso el usuario cada hoja, por etapa. Vive en el navegador hasta que el equipo decida
+  // si el orden del lienzo es del proyecto (compartido) o de cada quien; la estructura ya está
+  // lista para mudarla al servidor sin tocar el resto.
+  const [posiciones, setPosiciones] = useState<Record<string, { x: number; y: number }>>({})
+  // Notas por elemento. Igual que las posiciones: en el navegador hasta que se decida si el
+  // lienzo es del proyecto o de cada quien.
+  const [notas, setNotas] = useState<Record<string, string>>({})
+  const [notando, setNotando] = useState<UnifiedAsset | null>(null)
+  const [maximizado, setMaximizado] = useState(false)
+  useEffect(() => { setMaximizado(localStorage.getItem('forge:mb:max') === '1') }, [])
   const [sel,     setSel]     = useState<string | null>(null)
   // Al abrir se guarda el rectángulo de la tarjeta: la imagen crece DESDE ahí, no aparece
   // centrada de golpe. Es el 'fluye al frente' de la referencia.
@@ -156,7 +236,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const [menu, setMenu] = useState<{ x: number; y: number; asset: UnifiedAsset } | null>(null)
   // La iteracion vive ACA y no en el radial: el menu se cierra al elegir, y el modal tiene que
   // sobrevivirlo. `aviso` es el caso de lo que todavia no se puede iterar.
-  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } } | null>(null)
+  // `pagina` solo existe cuando se rehace una hoja de un deck; en Design Edits va `pedido`.
+  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string } | null>(null)
+  const [editando, setEditando] = useState<UnifiedAsset | null>(null)
   const [aviso,    setAviso]    = useState<string | null>(null)
 
   useEffect(() => {
@@ -242,6 +324,119 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const [faseIdx, setFaseIdx] = useState(0)
   useEffect(() => { setFaseIdx(alcanzada) }, [alcanzada])
   const fase = FASES[faseIdx]
+  // La posición de una hoja: la que el usuario le dio, o su lugar en la cuadrícula inicial.
+  const claveMB = `forge:mb:pos:${projectId}`
+  const claveNotas = `forge:mb:notas:${projectId}`
+  useEffect(() => {
+    try { setPosiciones(JSON.parse(localStorage.getItem(claveMB) || '{}')) } catch { setPosiciones({}) }
+    try { setNotas(JSON.parse(localStorage.getItem(claveNotas) || '{}')) } catch { setNotas({}) }
+  }, [claveMB, claveNotas])
+
+  const guardarNota = useCallback((id: string, texto: string) => {
+    setNotas(m => {
+      const n = { ...m }
+      if (texto.trim()) n[id] = texto.trim(); else delete n[id]
+      try { localStorage.setItem(claveNotas, JSON.stringify(n)) } catch { /* modo privado */ }
+      return n
+    })
+  }, [claveNotas])
+
+  // ── Zonas por documento ─────────────────────────────────────────────────────
+  // El lienzo no arranca como una grilla única: arranca como el trabajo está organizado — un
+  // bloque por documento (Art Style Guide, GDD Art Style, Art Bible, Refs), sus hojas en
+  // cuadrícula adentro, y los bloques separados entre sí. Al encuadrar se ve la ESTRUCTURA —
+  // cuántos documentos hay y qué tamaño tiene cada uno—, que es lo que una galería no dice.
+  const zonaDe = (a: UnifiedAsset) => a.node_title || (a.source === 'library' ? 'Refs' : 'Other')
+
+  // Las zonas se calculan sobre TODA la etapa, no sobre lo filtrado: si se armaran con el filtro
+  // puesto, cada vez que cambiaras de pestaña las hojas saltarían de sitio.
+  const deLaFase = useMemo(
+    () => assets.filter(a => { const f = faseDe(a); return f === null || f === fase.key }),
+    [assets, fase.key],
+  )
+
+  const disposicion = useMemo(() => {
+    const grupos = new Map<string, UnifiedAsset[]>()
+    for (const a of deLaFase) {
+      const z = zonaDe(a)
+      if (!grupos.has(z)) grupos.set(z, [])
+      grupos.get(z)!.push(a)
+    }
+    const SEP = 90            // aire entre zonas
+    const TITULO = 46         // alto reservado para el nombre de la zona
+    const pos = new Map<string, { x: number; y: number }>()
+    const zonas: { nombre: string; x: number; y: number; w: number; h: number }[] = []
+    let cursorX = 0
+    for (const [nombre, items] of grupos) {
+      // Bloque lo más cuadrado posible: una fila de 30 hojas no se lee, una columna tampoco.
+      const cols = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(items.length))))
+      items.forEach((a, i) => {
+        pos.set(a.id, {
+          x: cursorX + (i % cols) * (HOJA_W + HOJA_GAP),
+          y: TITULO + Math.floor(i / cols) * (HOJA_H + HOJA_GAP),
+        })
+      })
+      const filas = Math.ceil(items.length / cols)
+      const w = cols * HOJA_W + (cols - 1) * HOJA_GAP
+      const h = filas * HOJA_H + (filas - 1) * HOJA_GAP
+      zonas.push({ nombre, x: cursorX, y: 0, w, h: h + TITULO })
+      cursorX += w + SEP
+    }
+    return { pos, zonas }
+  }, [deLaFase])
+
+  const posicionDe = useCallback((id: string, i: number) => {
+    const guardada = posiciones[`${fase.key}:${id}`]
+    if (guardada) return guardada
+    return disposicion.pos.get(id) ?? {
+      x: (i % COLS) * (HOJA_W + HOJA_GAP),
+      y: Math.floor(i / COLS) * (HOJA_H + HOJA_GAP),
+    }
+  }, [posiciones, fase.key, disposicion])
+
+  const moverElemento = useCallback((id: string, p: { x: number; y: number }) => {
+    setPosiciones(m => {
+      const n = { ...m, [`${fase.key}:${id}`]: p }
+      try { localStorage.setItem(claveMB, JSON.stringify(n)) } catch { /* modo privado */ }
+      return n
+    })
+  }, [fase.key, claveMB])
+
+  // Un arrastre no debe terminar abriendo la tarjeta que acabás de soltar.
+  const arrastrado = useRef(false)
+  // La caja del lienzo en pantalla, para poder encuadrar contra su tamaño real.
+  const lienzoRef = useRef<HTMLDivElement | null>(null)
+
+  // El encuadre de la etapa que se está mirando. `setVista` escribe solo el de esta página.
+  const vista = vistas[fase.key] ?? { z: 1, x: 0, y: 0 }
+  const setVista = useCallback(
+    (f: (v: { z: number; x: number; y: number }) => { z: number; x: number; y: number }) =>
+      setVistas(m => ({ ...m, [fase.key]: f(m[fase.key] ?? { z: 1, x: 0, y: 0 }) })),
+    [fase.key],
+  )
+
+  // ── Encuadrar ───────────────────────────────────────────────────────────────
+  // Todo el contenido de la etapa, centrado y entero. Es también el estado inicial: abrir el
+  // lienzo al 100 % lo deja pareciendo la galería de antes —cuatro tarjetas grandes y el resto
+  // fuera de pantalla—, cuando lo que uno necesita al entrar es ver de qué tamaño es el trabajo.
+  const encuadrar = useCallback((items: UnifiedAsset[]) => {
+    const caja = lienzoRef.current?.getBoundingClientRect()
+    if (!caja || !items.length) return
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    items.forEach((a, i) => {
+      const p = posicionDe(a.id, i)
+      x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y)
+      x1 = Math.max(x1, p.x + HOJA_W); y1 = Math.max(y1, p.y + HOJA_H)
+    })
+    const M = 48
+    const z = Math.min(1, Math.max(0.08,
+      Math.min((caja.width - M * 2) / (x1 - x0), (caja.height - M * 2) / (y1 - y0))))
+    setVista(() => ({
+      z,
+      x: (caja.width  - (x1 - x0) * z) / 2 - x0 * z,
+      y: (caja.height - (y1 - y0) * z) / 2 - y0 * z,
+    }))
+  }, [posicionDe, setVista])
 
   useEffect(() => { setPage(0) }, [tab, node, cols, query, view, faseIdx])
 
@@ -249,6 +444,26 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const refCount = useMemo(() => assets.filter(a => a.source === 'library').length, [assets])
 
   // Nodos presentes, ordenados por clave (3.2 antes que 3.13, no alfabético)
+  // Las fuentes, agrupadas por ETAPA. El selector plano listaba 3.0…3.13 seguidos y no decía a
+  // qué momento de la producción pertenece cada uno; agrupado, encontrar la hoja que buscas es
+  // mirar la etapa y no recorrer la lista. Una fuente puede aportar a más de una etapa: aparece
+  // en cada una, porque el usuario la busca donde la está viendo.
+  const fuentesPorFase = useMemo(() => {
+    const m = new Map<string, Map<string, string>>()
+    for (const a of assets) {
+      if (!a.node_key) continue
+      const f = faseDe(a) ?? '__sin'
+      if (!m.has(f)) m.set(f, new Map())
+      m.get(f)!.set(a.node_key, a.node_title || a.node_key)
+    }
+    const ver = (k: string) => k.split('.').map(Number)
+    const orden = (e: [string, string][]) => e.sort((a, b) =>
+      (ver(a[0])[0] - ver(b[0])[0]) || ((ver(a[0])[1] ?? 0) - (ver(b[0])[1] ?? 0)))
+    return FASES
+      .map(f => ({ fase: f, items: orden([...(m.get(f.key) ?? new Map()).entries()]) }))
+      .filter(g => g.items.length)
+  }, [assets])
+
   const nodes = useMemo(() => {
     const m = new Map<string, string>()
     assets.forEach(a => { if (a.node_key) m.set(a.node_key, a.node_title || a.node_key) })
@@ -346,29 +561,50 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
 
   // La página es exactamente lo que entra en pantalla: 3 filas de `cols`. Así nunca hay que
   // scrollear dentro de una página — se pasa a la siguiente.
-  const perPage = view === 'table' ? 14 : cols * ROWS
-  const pages   = Math.max(1, Math.ceil(filtered.length / perPage))
-  const visible = filtered.slice(page * perPage, (page + 1) * perPage)
+  // El lienzo muestra TODO lo de la etapa: paginar un lienzo infinito no tiene sentido, y las
+  // páginas del espacio de trabajo son las tres etapas. La tabla sí sigue paginada, que ahí la
+  // lista crece hacia abajo.
+  const perPage = 14
+  const pages   = view === 'table' ? Math.max(1, Math.ceil(filtered.length / perPage)) : 1
+  const visible = view === 'table' ? filtered.slice(page * perPage, (page + 1) * perPage) : filtered
 
-  // ── Rueda del mouse = pasar página ──────────────────────────────────────────
-  // La grilla no tiene scroll (cabe entera, 4×3), así que la rueda no hacía nada. Ahora avanza y
-  // retrocede la paginación, que es lo que uno espera al girarla sobre un tablero de páginas.
-  //
-  // Se acumula el desplazamiento en vez de reaccionar a cada evento: un trackpad manda decenas de
-  // deltas pequeños por gesto y saltarían varias páginas de un tirón. Al cruzar el umbral se pasa
-  // UNA página y el acumulador se reinicia.
-  const rueda = useRef(0)
+  // Al entrar a una etapa que todavía no tiene encuadre propio, se encuadra sola: todo el
+  // contenido, centrado. Una sola vez por etapa — después el encuadre es del usuario.
+  const yaEncuadrada = useRef<Record<string, boolean>>({})
+  useEffect(() => {
+    if (view !== 'grid' || loading || yaEncuadrada.current[fase.key] || !visible.length) return
+    // Se marca DESPUÉS de encuadrar, no antes: en el primer intento el lienzo todavía no está
+    // medido, `encuadrar` no hace nada, y marcarlo ahí dejaba la etapa en 100 % para siempre.
+    // Un frame de espera basta para que el contenedor tenga tamaño.
+    const t = requestAnimationFrame(() => {
+      if (!lienzoRef.current) return
+      encuadrar(visible)
+      yaEncuadrada.current[fase.key] = true
+    })
+    return () => cancelAnimationFrame(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fase.key, view, loading, visible.length])
+
+  // ── Rueda del mouse = ZOOM del lienzo ───────────────────────────────────────
+  // Con el lienzo infinito la rueda deja de pasar páginas —las páginas son las tres etapas, y se
+  // cambian con las marcas laterales— y pasa a acercar y alejar, que es lo que hace en cualquier
+  // lienzo. El zoom es hacia el puntero: acercarse al centro de la pantalla obliga a re-encuadrar
+  // a mano cada vez.
   const onRueda = useCallback((e: React.WheelEvent) => {
-    if (pages <= 1) return
-    // El zoom del navegador (Ctrl+rueda) y el scroll horizontal no son navegación.
-    if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
-    rueda.current += e.deltaY
-    const UMBRAL = 120   // una muesca de rueda de mouse; varios deltas de trackpad
-    if (Math.abs(rueda.current) < UMBRAL) return
-    const dir = rueda.current > 0 ? 1 : -1
-    rueda.current = 0
-    setPage(p => Math.min(pages - 1, Math.max(0, p + dir)))
-  }, [pages])
+    const caja = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const px = e.clientX - caja.left
+    const py = e.clientY - caja.top
+    setVista(v => {
+      const factor = Math.exp(-e.deltaY * 0.0015)
+      const z = Math.min(4, Math.max(0.08, v.z * factor))
+      const k = z / v.z
+      // El punto bajo el cursor no se mueve: se corrige el desplazamiento por el cambio de escala.
+      return { z, x: px - (px - v.x) * k, y: py - (py - v.y) * k }
+    })
+    // `setVista` en las dependencias, no `[]`: escribe en la etapa ACTIVA, y con la lista vacía
+    // este manejador se quedaba con la del primer render — girabas la rueda en Pre-Producción y
+    // el zoom se guardaba en Documentación, así que en pantalla no pasaba nada.
+  }, [setVista])
 
   // La animación nace en el botón: el panel escala desde ese punto en vez de aparecer centrado.
   const ox = origin ? `${origin.x}px` : '100%'
@@ -385,7 +621,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
         background: entered ? 'rgba(6,7,9,0.74)' : 'rgba(6,7,9,0)',
         backdropFilter: entered ? 'blur(7px)' : 'blur(0px)',
         transition: 'background 380ms ease, backdrop-filter 380ms ease',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 22,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: maximizado ? 0 : 22,
       }}
     >
       <style>{KEYFRAMES}</style>
@@ -405,9 +641,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
         onDragLeave={e => { if (e.currentTarget === e.target) setDropping(false) }}
         onDrop={e => { e.preventDefault(); setDropping(false); upload(e.dataTransfer.files) }}
         style={{
-        width: '100%', height: '100%', maxWidth: 1720,
+        width: '100%', height: '100%', maxWidth: maximizado ? 'none' : 1720,
         background: 'linear-gradient(160deg, rgba(30,33,42,0.96) 0%, rgba(16,18,24,0.98) 55%, rgba(12,14,19,0.99) 100%)',
-        border: '1px solid rgba(255,255,255,0.10)', borderRadius: 16,
+        border: maximizado ? 'none' : '1px solid rgba(255,255,255,0.10)', borderRadius: maximizado ? 0 : 16,
         display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative',
         boxShadow: '0 30px 90px rgba(0,0,0,0.65)',
         transformOrigin: `${ox} ${oy}`,
@@ -438,6 +674,16 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             </span>
           )}
           <div style={{ flex: 1 }} />
+
+          {/* Maximizar: en pantallas chicas el margen y el tope de 1720 se comen el área útil, y
+              este panel es donde se mira el arte. Se recuerda entre sesiones. */}
+          <button
+            onClick={() => setMaximizado(v => { localStorage.setItem('forge:mb:max', v ? '0' : '1'); return !v })}
+            title={maximizado ? 'Restore' : 'Maximize'}
+            style={{
+              width: 27, height: 27, borderRadius: 6, cursor: 'pointer', background: 'transparent',
+              border: '1px solid var(--line-2)', color: 'var(--text-2)', fontSize: 12, lineHeight: 1,
+            }}>{maximizado ? '❐' : '▢'}</button>
 
           <button onClick={onClose} style={{
             width: 27, height: 27, borderRadius: 6, cursor: 'pointer', background: 'transparent',
@@ -519,7 +765,15 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             }}>
             <option value="all">All sources</option>
             {refCount > 0 && <option value="library">Library · uploaded</option>}
-            {nodes.map(([k, title]) => <option key={k} value={k}>{k} · {title}</option>)}
+            {/* Agrupadas por etapa, y sin la clave del nodo: acá se elige un documento, no una
+                pieza de la DNA. La etapa que estás mirando va primero. */}
+            {[...fuentesPorFase]
+              .sort((a, b) => (a.fase.key === fase.key ? -1 : 0) - (b.fase.key === fase.key ? -1 : 0))
+              .map(g => (
+                <optgroup key={g.fase.key} label={g.fase.label}>
+                  {g.items.map(([k, title]) => <option key={k} value={k}>{title}</option>)}
+                </optgroup>
+              ))}
           </select>
         </div>
 
@@ -558,17 +812,191 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
               onMenu={(a, x, y) => setMenu({ x, y, asset: a })}
             />
           ) : (
-            <div style={{
-              display: 'grid', gap: 16, height: '100%',
-              gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-              gridTemplateRows:    `repeat(${ROWS}, minmax(0, 1fr))`,
-            }}>
-              {visible.map((a, i) => (
-                <Card key={a.id} asset={a} index={i} accent={theme.accent} colors={theme.colors}
-                      selected={sel === a.id}
-                      onOpen={(from) => { setSel(a.id); setDetail({ asset: a, from }) }}
-                      onMenu={(x, y) => setMenu({ x, y, asset: a })} />
-              ))}
+            // ── Lienzo ────────────────────────────────────────────────────────
+            // Una sola capa transformada: mover y escalar el lienzo es mover y escalar ESTE div,
+            // no cada elemento. Los elementos van en posición absoluta dentro de ella, así que
+            // conservan su sitio al alejarse o acercarse.
+            //
+            // Arrancan en cuadrícula —es lo que pidió el equipo, y sin una posición inicial
+            // ordenada un lienzo vacío no se puede leer— y desde ahí se mueven libremente.
+            <div
+              onPointerDown={e => {
+                // Arrastrar el fondo = pasear el lienzo. Sobre un elemento no llega acá.
+                if (e.target !== e.currentTarget) return
+                const inicio = { x: e.clientX, y: e.clientY, vx: vista.x, vy: vista.y }
+                const mover = (ev: PointerEvent) =>
+                  setVista(v => ({ ...v, x: inicio.vx + (ev.clientX - inicio.x), y: inicio.vy + (ev.clientY - inicio.y) }))
+                const soltar = () => {
+                  window.removeEventListener('pointermove', mover)
+                  window.removeEventListener('pointerup', soltar)
+                }
+                window.addEventListener('pointermove', mover)
+                window.addEventListener('pointerup', soltar)
+                setSel(null)
+              }}
+              ref={lienzoRef}
+              style={{
+                position: 'absolute', inset: 0, overflow: 'hidden', cursor: 'grab',
+                // El área de edición más oscura que el panel, y con puntos: sin una textura que
+                // se mueva con el contenido, alejarse o acercarse no se siente — el zoom parecía
+                // que cambiaba el tamaño de las tarjetas y no que movía la cámara.
+                background: 'rgba(4,5,7,0.55)',
+                backgroundImage: 'radial-gradient(rgba(255,255,255,0.10) 1px, transparent 1px)',
+                backgroundSize: `${24 * vista.z}px ${24 * vista.z}px`,
+                backgroundPosition: `${vista.x}px ${vista.y}px`,
+              }}
+            >
+              <div style={{
+                position: 'absolute', left: 0, top: 0,
+                transform: `translate(${vista.x}px, ${vista.y}px) scale(${vista.z})`,
+                transformOrigin: '0 0',
+                width: 1, height: 1,   // la capa no ocupa: la ocupan sus hijos
+              }}>
+                {/* El nombre de cada zona, sobre su bloque. Es lo que hace que al alejarse se lea
+                    la estructura del proyecto en vez de un muro de miniaturas. */}
+                {disposicion.zonas.map(z => (
+                  <div key={z.nombre} style={{
+                    position: 'absolute', left: z.x, top: z.y, width: z.w,
+                    pointerEvents: 'none', userSelect: 'none',
+                  }}>
+                    <div style={{
+                      fontSize: 15, fontWeight: 700, letterSpacing: '.02em',
+                      color: 'var(--text-1)', marginBottom: 5,
+                    }}>{z.nombre}</div>
+                    <div style={{ height: 1, background: 'rgba(255,255,255,0.10)' }} />
+                  </div>
+                ))}
+
+                {visible.map((a, i) => {
+                  const p = posicionDe(a.id, i)
+                  return (
+                    <div
+                      key={a.id}
+                      // Sin `setPointerCapture`: capturar el puntero se lleva también el `click`,
+                      // y entonces la tarjeta no se abría nunca. Se escucha en la ventana y el
+                      // clic sigue llegando a la tarjeta salvo que haya habido arrastre de verdad.
+                      onPointerDown={e => {
+                        if (e.button !== 0) return
+                        e.stopPropagation()
+                        const inicio = { x: e.clientX, y: e.clientY, px: p.x, py: p.y }
+                        let movido = false
+                        const mover = (ev: PointerEvent) => {
+                          const dx = (ev.clientX - inicio.x) / vista.z
+                          const dy = (ev.clientY - inicio.y) / vista.z
+                          if (!movido && Math.hypot(dx, dy) < 4) return   // un clic no es un arrastre
+                          movido = true
+                          moverElemento(a.id, { x: inicio.px + dx, y: inicio.py + dy })
+                        }
+                        const soltar = () => {
+                          window.removeEventListener('pointermove', mover)
+                          window.removeEventListener('pointerup', soltar)
+                          // Si se arrastró, el clic que viene detrás abriría la tarjeta encima de
+                          // donde acabás de soltarla. Se descarta ese único clic.
+                          if (movido) arrastrado.current = true
+                        }
+                        window.addEventListener('pointermove', mover)
+                        window.addEventListener('pointerup', soltar)
+                      }}
+                      onClickCapture={e => {
+                        if (arrastrado.current) { e.stopPropagation(); arrastrado.current = false }
+                      }}
+                      data-hoja
+                      style={{
+                        position: 'absolute', left: p.x, top: p.y,
+                        width: HOJA_W, height: HOJA_H, cursor: 'grab',
+                      }}
+                    >
+                      <Card asset={a} index={i} accent={theme.accent} colors={theme.colors}
+                            selected={sel === a.id}
+                            onOpen={(from) => { setSel(a.id); setDetail({ asset: a, from }) }}
+                            onMenu={(x, y) => setMenu({ x, y, asset: a })} />
+
+                      {/* Barra del elemento seleccionado. Va anclada a la hoja y escala en
+                          contra del zoom: a 30 % los íconos serían ilegibles. */}
+                      {sel === a.id && (
+                        <div
+                          onPointerDown={e => e.stopPropagation()}
+                          style={{
+                            position: 'absolute', left: '50%', top: -12,
+                            transform: `translate(-50%, -100%) scale(${1 / vista.z})`,
+                            transformOrigin: 'bottom center',
+                            display: 'flex', alignItems: 'center', gap: 2, padding: 3,
+                            borderRadius: 9, whiteSpace: 'nowrap',
+                            background: 'rgba(10,12,16,0.94)', border: '1px solid rgba(255,255,255,0.16)',
+                            boxShadow: '0 8px 22px rgba(0,0,0,0.5)',
+                          }}
+                        >
+                          <BarraBtn titulo="Open full screen" onClick={e => {
+                            const caja = (e.currentTarget as HTMLElement).closest('[data-hoja]')?.getBoundingClientRect()
+                            if (caja) { setSel(a.id); setDetail({ asset: a, from: caja }) }
+                          }}>⛶</BarraBtn>
+                          <BarraBtn titulo={notas[a.id] ? 'Notes — has one' : 'Notes'} activo={!!notas[a.id]} onClick={() => setNotando(a)}>✎</BarraBtn>
+                          <BarraBtn titulo="Save to my computer" onClick={() => bajarActivo(a)}>↓</BarraBtn>
+                          <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.14)', margin: '0 3px' }} />
+                          <BarraBtn titulo="Design edits" onClick={() => setEditando(a)}>✦</BarraBtn>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* ── Minimapa ────────────────────────────────────────────────
+                  Un lienzo infinito no dice dónde estás parado. Esto sí: el contenido en
+                  miniatura, el rectángulo de lo que se ve, y un clic para saltar. */}
+              {visible.length > 1 && (() => {
+                const MW = 168, MH = 108, M = 8
+                let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+                const pts = visible.map((a, i) => {
+                  const p = posicionDe(a.id, i)
+                  x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y)
+                  x1 = Math.max(x1, p.x + HOJA_W); y1 = Math.max(y1, p.y + HOJA_H)
+                  return { id: a.id, ...p }
+                })
+                const caja = lienzoRef.current?.getBoundingClientRect()
+                const k = Math.min((MW - M * 2) / (x1 - x0), (MH - M * 2) / (y1 - y0))
+                const aMini = (x: number, y: number) => ({ x: M + (x - x0) * k, y: M + (y - y0) * k })
+                // Lo que se ve ahora, en coordenadas del lienzo.
+                const visX = caja ? (-vista.x) / vista.z : 0
+                const visY = caja ? (-vista.y) / vista.z : 0
+                const visW = caja ? caja.width  / vista.z : 0
+                const visH = caja ? caja.height / vista.z : 0
+                const v0 = aMini(visX, visY)
+                return (
+                  <div
+                    onPointerDown={e => {
+                      e.stopPropagation()
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      // Centrar el lienzo en el punto pinchado.
+                      const cx = x0 + (e.clientX - r.left - M) / k
+                      const cy = y0 + (e.clientY - r.top  - M) / k
+                      if (!caja) return
+                      setVista(v => ({ ...v, x: caja.width / 2 - cx * v.z, y: caja.height / 2 - cy * v.z }))
+                    }}
+                    style={{
+                      position: 'absolute', right: 14, bottom: 14, width: MW, height: MH,
+                      borderRadius: 8, cursor: 'pointer',
+                      background: 'rgba(6,7,9,0.82)', border: '1px solid rgba(255,255,255,0.14)',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.45)', overflow: 'hidden',
+                    }}
+                  >
+                    {pts.map(p => {
+                      const m = aMini(p.x, p.y)
+                      return <div key={p.id} style={{
+                        position: 'absolute', left: m.x, top: m.y,
+                        width: Math.max(2, HOJA_W * k), height: Math.max(2, HOJA_H * k),
+                        background: 'rgba(255,255,255,0.28)', borderRadius: 1,
+                      }} />
+                    })}
+                    <div style={{
+                      position: 'absolute', left: v0.x, top: v0.y,
+                      width: visW * k, height: visH * k,
+                      border: `1px solid ${theme.accent}`, background: `${theme.accent}14`,
+                      borderRadius: 2, pointerEvents: 'none',
+                    }} />
+                  </div>
+                )
+              })()}
             </div>
           )}
         </div>
@@ -587,7 +1015,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
               {fase.label}
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            {pages > 1 && (
+            {/* La paginación numérica solo existe en la tabla. En el lienzo, las páginas del
+                espacio de trabajo son las tres etapas y se cambian con las marcas laterales. */}
+            {view === 'table' && pages > 1 && (
               <>
                 <PageBtn label="←" disabled={page === 0} onClick={() => setPage(p => p - 1)} />
                 {Array.from({ length: pages }, (_, i) => (
@@ -595,6 +1025,16 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                 ))}
                 <PageBtn label="→" disabled={page >= pages - 1} onClick={() => setPage(p => p + 1)} />
               </>
+            )}
+            {view === 'grid' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <PageBtn label="−" onClick={() => setVista(v => ({ ...v, z: Math.max(0.15, v.z / 1.2) }))} />
+                <span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', minWidth: 38, textAlign: 'center' }}>
+                  {Math.round(vista.z * 100)}%
+                </span>
+                <PageBtn label="+" onClick={() => setVista(v => ({ ...v, z: Math.min(4, v.z * 1.2) }))} />
+                <PageBtn label="Fit" onClick={() => encuadrar(visible)} />
+              </div>
             )}
             </div>
           </div>
@@ -619,12 +1059,35 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                               const pg = paginaASG(a)
                               if (pg) setIterando({ asset: a, pagina: pg })
                               else setAviso(`"${outputOf(a) ?? a.name}" is not one of them.`)
-                            }} />}
+                            }}
+                            // Design Edits no exige que el activo sea una página de un deck: edita
+                            // la imagen que haya, sea de donde sea.
+                            onDesignEdit={a => { setMenu(null); setEditando(a) }} />}
+
+      {notando && (
+        <NotaModal
+          asset={notando}
+          valor={notas[notando.id] ?? ''}
+          accent={theme.accent}
+          onClose={() => setNotando(null)}
+          onGuardar={t => { guardarNota(notando.id, t); setNotando(null) }}
+        />
+      )}
+
+      {editando && (
+        <DesignEditPrompt
+          asset={editando}
+          accent={theme.accent}
+          onClose={() => setEditando(null)}
+          onSubmit={texto => { const a = editando; setEditando(null); setIterando({ asset: a, pagina: null, pedido: texto }) }}
+        />
+      )}
       {iterando && (
         <IteracionModal
           asset={iterando.asset}
           projectId={projectId}
           pagina={iterando.pagina}
+          pedido={iterando.pedido}
           accent={theme.accent}
           onClose={() => setIterando(null)}
           onListo={reload}
@@ -633,6 +1096,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       {aviso    && <NoDisponible  que={aviso}      accent={theme.accent} onClose={() => setAviso(null)} />}
 
       {detail && <Detail asset={detail.asset} from={detail.from} accent={theme.accent} onAprobado={reload}
+                         nota={notas[detail.asset.id]}
+                         onNota={() => setNotando(detail.asset)}
+                         onDesignEdit={() => setEditando(detail.asset)}
                          onMenu={(mx, my) => setMenu({ x: mx, y: my, asset: detail.asset })}
                          onClose={() => setDetail(null)} />}
     </div>
@@ -911,7 +1377,10 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        position: 'relative', minHeight: 0, borderRadius: 12, overflow: 'hidden',
+        // El tamaño lo daba la celda de la grilla. En el lienzo cada hoja va en posición absoluta
+        // y sin esto la tarjeta colapsa a cero: se veían los bordes y nada adentro.
+        position: 'relative', width: '100%', height: '100%', minHeight: 0,
+        borderRadius: 12, overflow: 'hidden',
         cursor: 'pointer', background: 'var(--bg-2)',
         border: `1px solid ${selected ? accent : hover ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)'}`,
         boxShadow: selected ? `0 0 0 1px ${accent}, 0 0 26px ${accent}33` : 'none',
@@ -1021,8 +1490,9 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
         </div>
       )}
 
-      {/* Scrim + procedencia. El nombre completo del activo se ve al traerlo al frente:
-          en la grilla repetía el nodo que ya dice la línea de abajo y tapaba la imagen. */}
+      {/* Scrim + NOMBRE DE LA HOJA. Antes decía la procedencia («2D · 3.20 Art Style Guide») y eso
+          dejaba las 34 páginas de un deck con la misma etiqueta, encabezadas por una clave técnica
+          que a quien mira el moodboard no le dice nada. Ahora cada hoja se llama por lo que es. */}
       <div style={{
         position: 'absolute', left: 0, right: 0, bottom: 0, padding: '24px 12px 9px',
         background: 'linear-gradient(to top, rgba(8,9,12,0.9) 10%, rgba(8,9,12,0.45) 55%, transparent)',
@@ -1033,7 +1503,7 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>
           {kind === 'image' ? '2D' : kind === '3d' ? '3D' : kind.toUpperCase()}
-          {` · ${originOf(asset)}`}
+          {` · ${nombreDeHoja(asset)}`}
         </div>
       </div>
 
@@ -1054,9 +1524,12 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
 // No es un visor a pantalla completa: es una CARD que fluye al frente desde su lugar en la
 // grilla, como en la referencia. La grilla sigue visible detrás, atenuada, así no se pierde
 // el contexto de dónde estaba la imagen. Al cerrar vuelve exactamente a su celda.
-function Detail({ asset, from, accent, onMenu, onClose, onAprobado }: {
+function Detail({ asset, from, accent, onMenu, onClose, onAprobado, nota, onNota, onDesignEdit }: {
   asset: UnifiedAsset; from: DOMRect; accent: string
   onMenu: (x: number, y: number) => void; onClose: () => void; onAprobado: () => void
+  // Las mismas acciones que en el lienzo. Al abrir la hoja no se pierden: es la misma pieza,
+  // vista más grande, y tener que cerrarla para poder anotarla era el camino largo.
+  nota?: string; onNota: () => void; onDesignEdit: () => void
 }) {
   const t   = kindOf(asset)
   // Historial de la pieza. Se mira desde aca: el badge de la tarjeta decia que habia dos
@@ -1267,9 +1740,11 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado }: {
         opacity: open ? 1 : 0,
         transition: `${FLIGHT}, opacity 240ms ease 140ms`,
       }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)' }}>{asset.name}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)' }}>{nombreDeHoja(asset)}</div>
         <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 3 }}>
-          {asset.node_key ? `${asset.node_key} · ${asset.node_title}` : asset.source}
+          {/* El documento del que sale, sin la clave del nodo: el moodboard es para quien mira
+              arte, no para quien edita la DNA. */}
+          {asset.node_title || asset.source}
           {' · '}{new Date(asset.created_at).toLocaleDateString()}
         </div>
       </div>
@@ -1400,6 +1875,26 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado }: {
         >{verSel.approved_at ? `v${verSel.version_number} approved` : aprobando ? 'Approving…' : `Approve v${verSel.version_number}`}</button>
       )}
 
+      {/* La misma barra del lienzo, arriba a la izquierda del marco: abrir la hoja no debería
+          quitarte las acciones que tenías sobre ella. */}
+      <div
+        onPointerDown={e => e.stopPropagation()}
+        onDoubleClick={e => e.stopPropagation()}
+        style={{
+          position: 'fixed', left: box.left, top: box.top - 40,
+          display: 'flex', alignItems: 'center', gap: 2, padding: 3, borderRadius: 9,
+          background: 'rgba(10,12,16,0.94)', border: '1px solid rgba(255,255,255,0.16)',
+          boxShadow: '0 8px 22px rgba(0,0,0,0.5)',
+          opacity: open ? 1 : 0,
+          transition: `${FLIGHT}, opacity 220ms ease 140ms`,
+        }}
+      >
+        <BarraBtn titulo={nota ? 'Notes — has one' : 'Notes'} activo={!!nota} onClick={onNota}>✎</BarraBtn>
+        <BarraBtn titulo="Save to my computer" onClick={() => bajarActivo(asset)}>↓</BarraBtn>
+        <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.14)', margin: '0 3px' }} />
+        <BarraBtn titulo="Design edits" onClick={onDesignEdit}>✦</BarraBtn>
+      </div>
+
       {/* Cerrar, fuera del marco */}
       <button
         onClick={close}
@@ -1434,14 +1929,14 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado }: {
 //   visual    — el menú radial de la referencia, con las cuatro acciones de la v.3.
 // Las acciones del radial todavía no hacen nada: se cablean en la Iteración 2 (contexto y
 // output) y en la 3 (edición). Se muestran apagadas en vez de simular que responden.
-function ContextMenu({ x, y, asset, accent, colors, onDone, onIterar }: {
+function ContextMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdit }: {
   x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
-  onDone: () => void; onIterar: (a: UnifiedAsset) => void
+  onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
 }) {
   // La descarga directa es solo para documentos; lo visual abre el radial.
   return kindOf(asset) === 'doc'
     ? <DownloadMenu x={x} y={y} asset={asset} onDone={onDone} />
-    : <RadialMenu   x={x} y={y} asset={asset} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} />
+    : <RadialMenu   x={x} y={y} asset={asset} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} />
 }
 
 function DownloadMenu({ x, y, asset, onDone }: {
@@ -1520,7 +2015,7 @@ const RADIAL = [
 // esconderse, para que se vea qué va a venir y qué no responde todavía.
 const SUBMENU: Record<string, { label: string; items: string[] }> = {
   text:  { label: 'Edit Text',  items: ['New Iteration', 'Crop & extract', 'Format settings', 'Coherence & length review', 'Upload manual edits'] },
-  image: { label: 'Edit 2D',    items: ['New Iteration', 'Design edits (masking)', 'New angle', 'Segmentation (masking)', 'Upload manual edits'] },
+  image: { label: 'Edit 2D',    items: ['New Iteration', 'Design edits', 'New angle', 'Segmentation (masking)', 'Upload manual edits'] },
   '3d':  { label: 'Edit 3D',    items: ['New Iteration', '3D viewer (layers & maps)', 'Retexture', 'Download FBX or GLB', 'Upload manual edits'] },
   video: { label: 'Edit Video', items: ['New Iteration', 'Trim', 'Replace assets', 'Extract frames', 'Upload manual edits'] },
   audio: { label: 'Edit Audio', items: ['New Iteration', 'Trim', 'Transcribe', 'Replace track', 'Upload manual edits'] },
@@ -1580,9 +2075,142 @@ const FROM: Record<string, [number, number]> = {
 // Chico y centrado: no es una pantalla de trabajo, es el aviso de que algo está corriendo.
 // MUESTRA: el progreso todavía no viene del despacho real, se simula con el ritmo medido —
 // 34 páginas en 220 s da ~6,5 s por página. Cuando se cablee, el porcentaje sale del job.
-function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: {
-  asset: UnifiedAsset; projectId: string; pagina: { n: number; nombre: string }; accent: string
+// Nota de un elemento: una indicación pegada a la hoja sin tocar la imagen. Vacía = se borra;
+// no tiene sentido guardar una nota en blanco y que el ícono siga marcado.
+function NotaModal({ asset, valor, accent, onClose, onGuardar }: {
+  asset: UnifiedAsset; valor: string; accent: string
+  onClose: () => void; onGuardar: (t: string) => void
+}) {
+  const [texto, setTexto] = useState(valor)
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 12200, display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(6,7,9,0.6)', backdropFilter: 'blur(4px)',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 460, padding: '18px 20px', borderRadius: 13,
+        background: 'var(--bg-1)', border: '1px solid var(--line-2)',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', gap: 11,
+      }}>
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-0)' }}>Note</div>
+          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 2 }}>
+            {nombreDeHoja(asset)}
+          </div>
+        </div>
+        <textarea
+          autoFocus value={texto} onChange={e => setTexto(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) onGuardar(texto) }}
+          rows={5}
+          placeholder="An indication for whoever picks this up — it does not change the image."
+          style={{
+            width: '100%', resize: 'vertical', padding: '10px 12px', borderRadius: 9,
+            background: 'var(--bg-2)', border: '1px solid var(--line-2)', color: 'var(--text-0)',
+            fontSize: 13, lineHeight: 1.5, fontFamily: 'var(--font-sans)', outline: 'none',
+          }}
+        />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{
+            padding: '7px 15px', borderRadius: 8, cursor: 'pointer', background: 'transparent',
+            border: '1px solid var(--line-2)', color: 'var(--text-2)', fontSize: 12, fontFamily: 'var(--font-mono)',
+          }}>Cancel</button>
+          <button onClick={() => onGuardar(texto)} style={{
+            padding: '7px 15px', borderRadius: 8, cursor: 'pointer',
+            background: `${accent}22`, border: `1px solid ${accent}88`, color: accent,
+            fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)',
+          }}>Save</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Design Edits: la caja donde se pide el cambio ────────────────────────────
+// Es un paso aparte y no un campo dentro del modal de progreso: acá todavía no se gastó nada, y
+// el texto que se escriba es lo único que decide el resultado. Se avisa qué NO va a cambiar,
+// porque el workflow conserva la plantilla a propósito y sin decirlo se pide lo imposible.
+function DesignEditPrompt({ asset, accent, onClose, onSubmit }: {
+  asset: UnifiedAsset; accent: string; onClose: () => void; onSubmit: (texto: string) => void
+}) {
+  const [texto, setTexto] = useState('')
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 12200, display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(6,7,9,0.6)', backdropFilter: 'blur(4px)',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 520, padding: '20px 22px', borderRadius: 14,
+        background: 'var(--bg-1)', border: '1px solid var(--line-2)',
+        boxShadow: '0 26px 70px rgba(0,0,0,0.6)',
+        display: 'flex', flexDirection: 'column', gap: 12,
+      }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)' }}>Design edits</div>
+          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', marginTop: 3 }}>
+            {nombreDeHoja(asset)}
+          </div>
+        </div>
+
+        <textarea
+          autoFocus
+          value={texto}
+          onChange={e => setTexto(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && texto.trim()) onSubmit(texto.trim()) }}
+          placeholder="Describe the design change — a character, an environment, a prop…"
+          rows={4}
+          style={{
+            width: '100%', resize: 'vertical', padding: '10px 12px', borderRadius: 9,
+            background: 'var(--bg-2)', border: '1px solid var(--line-2)', color: 'var(--text-0)',
+            fontSize: 13, lineHeight: 1.5, fontFamily: 'var(--font-sans)', outline: 'none',
+          }}
+        />
+
+        <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+          Only the design changes. The page keeps its layout, boxes, text and colours — those are
+          what the rest of the pipeline reads.
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{
+            padding: '7px 16px', borderRadius: 8, cursor: 'pointer',
+            background: 'transparent', border: '1px solid var(--line-2)',
+            color: 'var(--text-2)', fontSize: 12, fontFamily: 'var(--font-mono)',
+          }}>Cancel</button>
+          <button
+            onClick={() => texto.trim() && onSubmit(texto.trim())}
+            disabled={!texto.trim()}
+            style={{
+              padding: '7px 16px', borderRadius: 8,
+              cursor: texto.trim() ? 'pointer' : 'default',
+              background: texto.trim() ? `${accent}22` : 'transparent',
+              border: `1px solid ${texto.trim() ? accent + '88' : 'var(--line-2)'}`,
+              color: texto.trim() ? accent : 'var(--text-4)',
+              fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)',
+            }}>Generate</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pedido }: {
+  asset: UnifiedAsset; projectId: string; pagina: { n: number; nombre: string } | null; accent: string
   onClose: () => void; onListo: () => void
+  /** Design Edits: el cambio pedido en palabras. Sin esto, se rehace la página desde su documento. */
+  pedido?: string
 }) {
   const [pct, setPct] = useState(0)
   const [listo, setListo] = useState(false)
@@ -1628,7 +2256,11 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: 
     lanzada.current = true
     // Sin el miembro, la versión queda sin autor: las 29 que ya existen están así porque nadie
     // lo mandaba. Es el mismo id que usa el resto del front para atribuir el gasto.
-    iterateAssetPage(projectId, asset.id, typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null)
+    const miembro = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+    const trabajo = pedido
+      ? designEditAsset(projectId, asset.id, pedido, miembro)
+      : iterateAssetPage(projectId, asset.id, miembro)
+    trabajo
       .then(r => {
         setVers(v => [...v.filter(x => x.n !== r.version.version_number),
                       { id: r.version.id, n: r.version.version_number, url: r.version.storage_url }]
@@ -1636,7 +2268,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: 
         setPct(100); setListo(true); onListo()
       })
       .catch(e => { setError(e?.message || 'The iteration could not be completed'); setPct(100) })
-  }, [projectId, asset.id, onListo, reintento])
+  }, [projectId, asset.id, onListo, reintento, pedido])
 
   // Tamano de la caja derivado de la proporcion de la imagen: el visor tiene que entrar entero
   // y ademas conviven la columna de miniaturas (84 + 10 de gap) y el cromo del modal (cabecera,
@@ -1745,7 +2377,13 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo }: 
         </div>
 
         <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginBottom: 14, fontFamily: 'var(--font-mono)' }}>
-          Page {String(pagina.n).padStart(2, '0')} · {pagina.nombre.replace(/^\d+[_\s.-]?/, '')}
+          {/* Rehacer una hoja dice qué página es; un Design Edit dice qué se pidió, que es lo
+              único que distingue esta versión de la anterior. */}
+          {pagina
+            ? `Page ${String(pagina.n).padStart(2, '0')} · ${pagina.nombre.replace(/^\d+[_\s.-]?/, '')}`
+            : pedido
+              ? `Design edit · ${pedido.length > 70 ? pedido.slice(0, 70) + '…' : pedido}`
+              : nombreDeHoja(asset)}
         </div>
 
         {/* El progreso solo existe mientras corre: al terminar estorba y el resultado es lo que
@@ -2000,9 +2638,9 @@ function NoDisponible({ que, accent, onClose }: { que: string; accent: string; o
 // Submenú de «Edit»: cinco sectores, contextual por tipo. Solo la primera opción responde.
 // Vuelve al radial principal con Escape o con el botón del centro, para no dejar sin salida a
 // quien entró por error.
-function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewIteration }: {
+function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewIteration, onDesignEdit }: {
   x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
-  onBack: () => void; onDone: () => void; onNewIteration: () => void
+  onBack: () => void; onDone: () => void; onNewIteration: () => void; onDesignEdit: () => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<number | null>(null)
@@ -2043,7 +2681,8 @@ function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewItera
       }} />
 
       {cfg.items.map((label, i) => {
-        const activa = i === 0                       // solo Nueva Iteración
+        // Nueva Iteración (0) y Design Edits (1). Las otras tres siguen sin camino detrás.
+        const activa = i === 0 || i === 1
         const pos = sectorAt(i, N)
         return (
           <div key={label}>
@@ -2052,8 +2691,10 @@ function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewItera
               onMouseLeave={() => setHot(null)}
               // Siempre se corta la propagación: una opción bloqueada no hace nada, y menos
               // todavía cerrar el menú por el clic de fondo.
-              onClick={e => { e.stopPropagation(); if (activa) onNewIteration() }}
-              title={activa ? 'Re-run this page through its workflow' : `${label} — not available yet`}
+              onClick={e => { e.stopPropagation(); if (i === 0) onNewIteration(); else if (i === 1) onDesignEdit() }}
+              title={i === 0 ? 'Re-run this page through its workflow'
+                   : i === 1 ? 'Describe a design change and re-generate the image'
+                   : `${label} — not available yet`}
               style={{
                 position: 'absolute', inset: 3, borderRadius: '50%',
                 clipPath: sectorPath(i, N),
@@ -2113,9 +2754,9 @@ function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewItera
   )
 }
 
-function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar }: {
+function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdit }: {
   x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
-  onDone: () => void; onIterar: (a: UnifiedAsset) => void
+  onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<string | null>(null)
@@ -2136,6 +2777,7 @@ function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar }: {
       onBack={() => setSub(false)}
       onDone={onDone}
       onNewIteration={() => onIterar(asset)}
+      onDesignEdit={() => onDesignEdit(asset)}
     />
   )
 

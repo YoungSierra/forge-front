@@ -1540,6 +1540,18 @@ export interface IteracionResultado {
   segundos: number
 }
 
+/**
+ * «Design Edits» del moodboard: se describe el cambio en palabras y la imagen se regenera
+ * aplicando SOLO eso. A diferencia de `iterateAssetPage`, no rehace la página desde el documento
+ * — parte de la imagen que ya existe—, así que sirve para cualquier activo visual.
+ */
+export async function designEditAsset(projectId: string, assetId: string, prompt: string, memberId?: string | null) {
+  return request<{ success: boolean; version: { id: string; version_number: number; storage_url: string } }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/design-edit`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, member_id: memberId ?? null }) },
+  )
+}
+
 export async function iterateAssetPage(projectId: string, assetId: string, memberId?: string | null) {
   return request<{ success: boolean } & IteracionResultado>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/iterate`,
