@@ -3835,7 +3835,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     // Deduplicar por source+handle+target antes de enviar
     const seen = new Set<string>()
     const unique = real.filter(e => {
-      const key = `${e.source}|${e.sourceHandle ?? ''}|${e.target}|${e.targetHandle ?? ''}`
+      // La clave usa el PUERTO. Con el handle de dibujo, un cable tipado y uno genérico entre el
+      // mismo par se veían iguales y se fusionaban: así se perdieron 19 de 42 aristas.
+      const p = (e.data as { puertos?: { source: string | null; target: string | null } } | undefined)?.puertos
+      const key = `${e.source}|${p?.source ?? e.sourceHandle ?? ''}|${e.target}|${p?.target ?? e.targetHandle ?? ''}`
       if (seen.has(key)) return false
       seen.add(key)
       return true
@@ -3844,12 +3847,18 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     return canvasFetch(`/api/projects/${project.id}/canvas/edges`, {
       method: 'PUT',
       body: JSON.stringify({
-        edges: unique.map(e => ({
-          source:       e.source,
-          target:       e.target,
-          sourceHandle: e.sourceHandle ?? null,
-          targetHandle: e.targetHandle ?? null,
-        })),
+        // Se guarda el PUERTO, no el handle de dibujo. El arreglo trae 'out'/'in' porque es lo
+        // que necesita React Flow para pintar; el puerto real viaja en `data.puertos` desde que
+        // se armó el edge, y es lo único que le dice al motor qué output cruza por ese cable.
+        edges: unique.map(e => {
+          const p = (e.data as { puertos?: { source: string | null; target: string | null } } | undefined)?.puertos
+          return {
+            source:       e.source,
+            target:       e.target,
+            sourceHandle: p?.source ?? e.sourceHandle ?? null,
+            targetHandle: p?.target ?? e.targetHandle ?? null,
+          }
+        }),
       }),
     }).catch(err => console.error('[forge-canvas] sync edges failed', err))
   }, [project.id])
@@ -4278,12 +4287,21 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           id:           e.id,
           source:       e.source,
           target:       e.target,
+          // Para DIBUJAR, el puerto se colapsa a 'out'/'in': los nodos tienen un solo handle por
+          // lado. Pero el puerto real —`out-concept_data`— es lo que el motor usa para saber QUÉ
+          // output viaja por ese cable, y `persistEdges` guarda lo que hay en el arreglo. Sin
+          // llevarlo aparte, el primer PUT lo borraba: medido el 20-ago en Smack JM V2, 42 aristas
+          // con 21 puertos quedaron en 23 sin ninguno, y el 2.4 pasó a recibir el documento entero
+          // en vez del output que le tocaba.
           sourceHandle: e.sourceHandle?.startsWith('out-') ? 'out' : (e.sourceHandle ?? undefined),
           targetHandle: e.targetHandle?.startsWith('in-')  ? 'in'  : (e.targetHandle  ?? undefined),
           type:         isHidden ? 'forgeEdge' : edgeType,
           deletable:    !isHidden,
           hidden:       isHidden,
-          data:         makeEdgeData('#6b7280', waypoints ? { waypoints } : {}),
+          data:         makeEdgeData('#6b7280', {
+            puertos: { source: e.sourceHandle ?? null, target: e.targetHandle ?? null },
+            ...(waypoints ? { waypoints } : {}),
+          }),
         }
       })
 
