@@ -337,12 +337,23 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   useEffect(() => { setFaseIdx(alcanzada) }, [alcanzada])
   const fase = FASES[faseIdx]
   // La posición de una hoja: la que el usuario le dio, o su lugar en la cuadrícula inicial.
+  // Todo marco que este cliente vio o creó, aunque después lo hayan desagrupado. Es lo que deja
+  // al servidor distinguir un BORRADO de un marco que creó otra persona mientras tanto: sin esta
+  // lista, guardar el acomodo entero pisaba lo que el otro acababa de hacer.
+  const marcosVistos = useRef<Set<string>>(new Set())
+
   // El acomodo es del PROYECTO (decisión del equipo, 25-ago): si alguien mueve una hoja, el resto
   // la encuentra ahí. Se guarda al SOLTAR, no en cada píxel del arrastre.
   useEffect(() => {
     let vivo = true
     getMoodboardLayout(projectId)
-      .then(l => { if (!vivo) return; setPosiciones(l.pos); setMarcos(l.marcos ?? []); marcosCargados.current = true })
+      .then(l => {
+        if (!vivo) return
+        setPosiciones(l.pos)
+        setMarcos(l.marcos ?? [])
+        for (const m of (l.marcos ?? [])) marcosVistos.current.add(m.id)
+        marcosCargados.current = true
+      })
       .catch(e => console.error('[moodboard] layout', e))
     return () => { vivo = false }
   }, [projectId])
@@ -367,8 +378,12 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const [renombrando, setRenombrando] = useState<string | null>(null)
 
   const guardarLayout = useCallback(() => {
-    saveMoodboardLayout(projectId, { pos: posicionesRef.current, marcos: marcosRef.current })
-      .catch(e => console.error('[moodboard] guardar layout', e))
+    for (const m of marcosRef.current) marcosVistos.current.add(m.id)
+    saveMoodboardLayout(projectId, {
+      pos: posicionesRef.current,
+      marcos: marcosRef.current,
+      conocidos: [...marcosVistos.current],
+    }).catch(e => console.error('[moodboard] guardar layout', e))
   }, [projectId])
 
   // Las notas del proyecto, TODAS las de cada hoja: una por persona. Aplanarlas a una sola por
@@ -532,7 +547,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     // el acomodo anterior. Es la misma trampa que dejaba los marcos vacíos en la base.
     const mapa = { ...guardadas, ...cambios }
     setPosiciones(mapa)
-    saveMoodboardLayout(projectId, { pos: mapa, marcos: marcosRef.current })
+    for (const m of marcosRef.current) marcosVistos.current.add(m.id)
+    saveMoodboardLayout(projectId, { pos: mapa, marcos: marcosRef.current, conocidos: [...marcosVistos.current] })
       .catch(e => console.error('[moodboard] publicar a la derecha', e))
   }, [fase.key, disposicion, deLaFase, projectId])
 

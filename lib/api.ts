@@ -1554,6 +1554,10 @@ export interface MoodboardMarco { id: string; nombre: string; fase: string; ids:
 export interface MoodboardLayout {
   pos: Record<string, { x: number; y: number }>
   marcos?: MoodboardMarco[]
+  /** Ids de marcos que este cliente tenía a la vista al guardar. El servidor los usa para
+   *  distinguir un BORRADO —id conocido que ya no viene— de un marco que creó otra persona
+   *  mientras tanto, que se conserva. Sin esto, dos pestañas se pisan el acomodo. */
+  conocidos?: string[]
 }
 
 export async function getMoodboardLayout(projectId: string): Promise<MoodboardLayout> {
