@@ -243,10 +243,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // sobrevivirlo. `aviso` es el caso de lo que todavia no se puede iterar.
   // `pagina` solo existe cuando se rehace una hoja de un deck; en Design Edits va `pedido`.
   const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string } | null>(null)
-  // §8: la hoja sobre la que se pidió avanzar, esperando el recuadro de confirmación. `pasos`
-  // separa los dos pedidos del documento con un solo motor: Run avanza UNO, Design Edits corre la
-  // cadena entera.
-  const [corriendo, setCorriendo] = useState<{ asset: UnifiedAsset; pasos: number } | null>(null)
+  // §8: la hoja sobre la que se pidió Run, esperando el recuadro de confirmación. Run avanza UN
+  // paso y nada más — correr los dos de la cadena es apretarlo dos veces, no hay encadenado.
+  const [corriendo, setCorriendo] = useState<UnifiedAsset | null>(null)
   // De qué hoja salió lo que se está generando. Se anota al despachar porque cuando el resultado
   // llega el menú ya se cerró, y sin origen no hay «a la derecha de» que valga (§9).
   const origenDeLaPublicacion = useRef<string | null>(null)
@@ -552,17 +551,13 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       .catch(e => console.error('[moodboard] publicar a la derecha', e))
   }, [fase.key, disposicion, deLaFase, projectId])
 
-  // §10: Design Edits deja de ser un solo retoque y pasa a correr la CADENA entera —el ajuste, el
-  // concept art y el 3D— cuando la página tiene una definida. Cuando no la tiene, sigue haciendo
-  // lo de siempre: editar la imagen en el sitio. Se le pregunta al backend en vez de decidirlo
-  // acá, que es quien sabe qué cadenas existen.
-  const pedirDesignEdit = useCallback(async (a: UnifiedAsset) => {
-    try {
-      const r = await getNextChainStep(projectId, a.id)
-      if (r.paso) { setCorriendo({ asset: a, pasos: 3 }); return }
-    } catch { /* sin respuesta, se cae al camino de siempre */ }
-    setEditando(a)
-  }, [projectId])
+  // Design Edits EDITA LA PÁGINA EN SU SITIO: un recuadro de prompt, y el resultado reemplaza a la
+  // página conservando su layout y su posición; la versión anterior queda en la Asset Library.
+  //
+  // Llegó a estar cableado a la cadena de producción, leyendo §10 del documento de radiales. Era
+  // al revés, y Miguel lo aclaró el 26-08: producir derivados es Run, paso por paso, y editar la
+  // propia página no publica nada a la derecha. Son dos gestos con destinos distintos.
+  const pedirDesignEdit = useCallback((a: UnifiedAsset) => setEditando(a), [])
 
   // Recarga y aplica la regla §9: lo que apareció que antes no estaba se publica a la derecha de
   // la hoja que lo produjo. Vale para cualquier flujo que genere resultados —Run, regeneración,
@@ -1725,12 +1720,11 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             // §8: Run nunca dispara de una. Primero el recuadro que dice QUÉ se va
                             // a generar y POR QUÉ hace falta para el vertical slice — es lo que
                             // separa ejecutar de entender qué estás ejecutando.
-                            onRun={a => { setMenu(null); setCorriendo({ asset: a, pasos: 1 }) }} />}
+                            onRun={a => { setMenu(null); setCorriendo(a) }} />}
 
       {corriendo && (
         <AvisoRun
-          asset={corriendo.asset}
-          pasos={corriendo.pasos}
+          asset={corriendo}
           projectId={projectId}
           accent={theme.accent}
           onCancel={() => setCorriendo(null)}
@@ -1738,7 +1732,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             setCorriendo(null)
             // Los ids vienen del propio despacho, así que no hay que adivinar qué es nuevo:
             // se publican a la derecha del origen tal como pide §9.
-            if (ids.length) publicarALaDerecha(corriendo.asset.id, ids)
+            if (ids.length) publicarALaDerecha(corriendo.id, ids)
             reload()
           }}
         />
@@ -3402,9 +3396,8 @@ function NoDisponible({ que, accent, onClose }: { que: string; accent: string; o
 // diferencia de que acá el motivo es tan importante como el costo.
 //
 // Cancel y Run van separados y el que gasta no queda debajo del cursor.
-function AvisoRun({ asset, pasos, projectId, accent, onCancel, onListo }: {
+function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
   asset: UnifiedAsset
-  pasos: number
   projectId: string
   accent: string
   onCancel: () => void
@@ -3429,7 +3422,7 @@ function AvisoRun({ asset, pasos, projectId, accent, onCancel, onListo }: {
     if (!paso || busy) return
     setBusy(true); setError(null)
     try {
-      const r = await advanceAsset(projectId, asset.id, { pasos, prompt: paso.pide_prompt ? texto : null })
+      const r = await advanceAsset(projectId, asset.id, { pasos: 1, prompt: paso.pide_prompt ? texto : null })
       onListo(r.creados.map(c => c.id))
     } catch (e) {
       // El despacho no se reintenta solo: cada intento cuesta y no devuelve lo mismo.
@@ -3476,9 +3469,7 @@ function AvisoRun({ asset, pasos, projectId, accent, onCancel, onListo }: {
               fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '.08em',
               color: accent, marginBottom: 9,
             }}>
-              {paso.etiqueta_cadena.toUpperCase()} · {pasos > 1
-                ? `STEPS ${paso.indice}–${paso.de} OF ${paso.de}`
-                : `STEP ${paso.indice} OF ${paso.de}`}
+              {paso.etiqueta_cadena.toUpperCase()} · STEP {paso.indice} OF {paso.de}
             </div>
 
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 12 }}>
@@ -3548,7 +3539,7 @@ function AvisoRun({ asset, pasos, projectId, accent, onCancel, onListo }: {
                   fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-sans)',
                   opacity: busy || (paso.pide_prompt && !texto.trim()) ? 0.55 : 1,
                 }}
-              >{busy ? 'Running…' : pasos > 1 ? `Run ${paso.de - paso.indice + 1} steps` : 'Run'}</button>
+              >{busy ? 'Running…' : 'Run'}</button>
             </div>
           </>
         )}
