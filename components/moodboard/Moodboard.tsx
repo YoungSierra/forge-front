@@ -19,7 +19,7 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, type AssetNote } from '@/lib/api'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco } from '@/lib/api'
 
 // ── Pestañas ─────────────────────────────────────────────────────────────────
 // El juego es el de la referencia. Las que no tienen activos se muestran apagadas en vez de
@@ -76,13 +76,14 @@ const fechaLarga = (iso?: string | null) => {
   return `${dia}${esteAno ? '' : ' ' + d.getFullYear()}, ${hora}`
 }
 
-// Las páginas raíz del espacio de trabajo. Son TRES, no cuatro: Post-Producción no existe todavía
-// como etapa con nodos, y una página vacía permanente solo estorba (equipo, 24-ago). Estas páginas
-// son la única paginación: la numérica de abajo desapareció con el lienzo.
+// Las cuatro páginas raíz del espacio de trabajo, y la única paginación: la numérica desapareció
+// con el lienzo. Producción y Post-Producción existen aunque hoy no haya nodos que produzcan ahí
+// — se muestran vacías. La estructura del proyecto no cambia de forma según lo que ya se hizo.
 const FASES: { key: string; label: string; phases: string[] }[] = [
-  { key: 'doc',  label: 'Documentation',  phases: ['ideation', 'concept'] },
-  { key: 'pre',  label: 'Pre-Production', phases: ['pre-production'] },
-  { key: 'prod', label: 'Production',     phases: ['production', 'live-ops'] },
+  { key: 'doc',  label: 'Documentation',    phases: ['ideation', 'concept'] },
+  { key: 'pre',  label: 'Pre-Production',   phases: ['pre-production'] },
+  { key: 'prod', label: 'Production',       phases: ['production'] },
+  { key: 'post', label: 'Post-Production',  phases: ['live-ops'] },
 ]
 
 // null = el activo no pertenece a una fase. Lo que sube el usuario y lo legacy caen acá, y esa
@@ -135,13 +136,14 @@ const nombreDeHoja = (a: UnifiedAsset) => {
   const crudo = String(a.name || '')
   const partes = crudo.split(/\s+[—–-]\s+/)
   const cola = partes.length > 1 ? partes[partes.length - 1] : crudo
-  const m = cola.match(/^(\d{1,2})[_\s-]+(.+)$/)
-  const cuerpo = (m ? m[2] : cola)
+  // Solo el título: ni clave de nodo ni número de página. El moodboard es para quien mira arte,
+  // y «01 ·» delante de cada nombre es numeración interna del deck.
+  return cola
+    .replace(/^\d{1,2}[_\s.-]+/, '')
     .replace(/[_-]+/g, ' ')
     .replace(/([a-z\d])([A-Z])/g, '$1 $2')   // KeyArt -> Key Art
     .replace(/\s+/g, ' ')
     .trim()
-  return m ? `${m[1]} · ${cuerpo}` : cuerpo
 }
 
 const COLS = 4   // como la referencia
@@ -201,6 +203,9 @@ interface Props {
 
 export default function Moodboard({ projectId, projectName, nodeKey, origin, onClose }: Props) {
   const [assets,  setAssets]  = useState<UnifiedAsset[]>([])
+  // Para saber QUÉ es nuevo tras un despacho hay que comparar contra lo que había: el estado
+  // dentro de un callback asíncrono es el del render en que se creó, no el de ahora.
+  const assetsRef = useRef<UnifiedAsset[]>([])
   // La identidad visual sale del proyecto si el 3.9 ya produjo su paleta; si no, neutro.
   // Un juego de autos no debería abrirse con el turquesa de uno submarino.
   const [theme,   setTheme]   = useState<MoodboardTheme>(NEUTRAL_THEME)
@@ -238,6 +243,13 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // sobrevivirlo. `aviso` es el caso de lo que todavia no se puede iterar.
   // `pagina` solo existe cuando se rehace una hoja de un deck; en Design Edits va `pedido`.
   const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string } | null>(null)
+  // §8: la hoja sobre la que se pidió avanzar, esperando el recuadro de confirmación. `pasos`
+  // separa los dos pedidos del documento con un solo motor: Run avanza UNO, Design Edits corre la
+  // cadena entera.
+  const [corriendo, setCorriendo] = useState<{ asset: UnifiedAsset; pasos: number } | null>(null)
+  // De qué hoja salió lo que se está generando. Se anota al despachar porque cuando el resultado
+  // llega el menú ya se cerró, y sin origen no hay «a la derecha de» que valga (§9).
+  const origenDeLaPublicacion = useRef<string | null>(null)
   const [editando, setEditando] = useState<UnifiedAsset | null>(null)
   const [aviso,    setAviso]    = useState<string | null>(null)
 
@@ -275,8 +287,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
 
   const reload = useCallback(() =>
     getProjectMedia(projectId)
-      .then(r => { setAssets(r.assets); setTheme(r.theme); setError(null) })
-      .catch(e => setError(e.message)), [projectId])
+      .then(r => { setAssets(r.assets); setTheme(r.theme); setError(null); return r.assets })
+      .catch(e => { setError(e.message); return null }), [projectId])
 
   useEffect(() => {
     let alive = true
@@ -330,7 +342,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   useEffect(() => {
     let vivo = true
     getMoodboardLayout(projectId)
-      .then(l => { if (vivo) setPosiciones(l) })
+      .then(l => { if (!vivo) return; setPosiciones(l.pos); setMarcos(l.marcos ?? []); marcosCargados.current = true })
       .catch(e => console.error('[moodboard] layout', e))
     return () => { vivo = false }
   }, [projectId])
@@ -338,8 +350,24 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const posicionesRef = useRef<Record<string, { x: number; y: number }>>({})
   useEffect(() => { posicionesRef.current = posiciones }, [posiciones])
 
+  // Marcos: conjuntos con nombre. Viven en el mismo acomodo del proyecto, así que también son
+  // compartidos — agrupar es una decisión de organización, no una preferencia de quien mira.
+  const [marcos, setMarcos] = useState<MoodboardMarco[]>([])
+  const marcosRef = useRef<MoodboardMarco[]>([])
+  // Los marcos se guardan solos cuando cambian. Antes cada acción llamaba a guardar con un
+  // `setTimeout(0)` que leía la referencia ANTES de que React la actualizara, así que persistía la
+  // lista anterior: se creaban grupos en pantalla y en la base seguía llegando vacía.
+  const marcosCargados = useRef(false)
+  useEffect(() => {
+    marcosRef.current = marcos
+    if (!marcosCargados.current) return   // la primera asignación es la que llega del servidor
+    guardarLayout()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marcos])
+  const [renombrando, setRenombrando] = useState<string | null>(null)
+
   const guardarLayout = useCallback(() => {
-    saveMoodboardLayout(projectId, posicionesRef.current)
+    saveMoodboardLayout(projectId, { pos: posicionesRef.current, marcos: marcosRef.current })
       .catch(e => console.error('[moodboard] guardar layout', e))
   }, [projectId])
 
@@ -388,7 +416,25 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // bloque por documento (Art Style Guide, GDD Art Style, Art Bible, Refs), sus hojas en
   // cuadrícula adentro, y los bloques separados entre sí. Al encuadrar se ve la ESTRUCTURA —
   // cuántos documentos hay y qué tamaño tiene cada uno—, que es lo que una galería no dice.
-  const zonaDe = (a: UnifiedAsset) => a.node_title || (a.source === 'library' ? 'Refs' : 'Other')
+  const zonaDe = (a: UnifiedAsset) => {
+    const t = a.node_title || (a.source === 'library' ? 'Refs' : 'Other')
+    // Un nodo puede producir varios documentos: el 3.20 emite el Art Style Guide, el GDD Art
+    // Style y el Art Bible, y agrupar por nodo los metía a los tres en el mismo bloque. La zona
+    // es el DOCUMENTO, que es como el equipo lo lee y lo nombra.
+    const n = String(a.name || '')
+    if (/art\s*bible/i.test(n))          return 'Art Bible'
+    if (/gdd/i.test(n))                  return 'GDD Art Style'
+    if (/art\s*style\s*guide/i.test(n))  return 'Art Style Guide'
+    return t
+  }
+
+  // Orden de lectura dentro de la etapa: primero el que se produce antes. Sin esto el orden lo
+  // decidía el azar del recorrido y cambiaba entre cargas.
+  const ORDEN_ZONAS = ['GDD Art Style', 'Art Style Guide', 'Art Bible']
+  const pesoZona = (nombre: string) => {
+    const i = ORDEN_ZONAS.indexOf(nombre)
+    return i === -1 ? ORDEN_ZONAS.length : i
+  }
 
   // Las zonas se calculan sobre TODA la etapa, no sobre lo filtrado: si se armaran con el filtro
   // puesto, cada vez que cambiaras de pestaña las hojas saltarían de sitio.
@@ -405,11 +451,14 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       grupos.get(z)!.push(a)
     }
     const SEP = 90            // aire entre zonas
-    const TITULO = 46         // alto reservado para el nombre de la zona
+    const TITULO = 62         // alto reservado para la pestaña con el nombre del documento
     const pos = new Map<string, { x: number; y: number }>()
     const zonas: { nombre: string; x: number; y: number; w: number; h: number }[] = []
     let cursorX = 0
-    for (const [nombre, items] of grupos) {
+    // De izquierda a derecha en el orden en que se producen: GDD Art Style, Art Style Guide y
+    // por último Art Bible, que se arma a partir del anterior.
+    const ordenadas = [...grupos.entries()].sort((a, b) => pesoZona(a[0]) - pesoZona(b[0]))
+    for (const [nombre, items] of ordenadas) {
       // Bloque lo más cuadrado posible: una fila de 30 hojas no se lee, una columna tampoco.
       const cols = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(items.length))))
       items.forEach((a, i) => {
@@ -421,7 +470,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       const filas = Math.ceil(items.length / cols)
       const w = cols * HOJA_W + (cols - 1) * HOJA_GAP
       const h = filas * HOJA_H + (filas - 1) * HOJA_GAP
-      zonas.push({ nombre, x: cursorX, y: 0, w, h: h + TITULO })
+      // El marco respira: aire alrededor de la cuadrícula para que no toque las hojas.
+      zonas.push({ nombre, x: cursorX - 18, y: 0, w: w + 36, h: h + TITULO + 18 })
       cursorX += w + SEP
     }
     return { pos, zonas }
@@ -436,12 +486,110 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     }
   }, [posiciones, fase.key, disposicion])
 
+  useEffect(() => { assetsRef.current = assets }, [assets])
+
   const moverElemento = useCallback((id: string, p: { x: number; y: number }) => {
     setPosiciones(m => ({ ...m, [`${fase.key}:${id}`]: p }))
   }, [fase.key])
 
+  // ── Publicación a la derecha (§9 del documento de menús radiales) ────────────
+  // Regla de todo el sistema: lo que se genera aparece a la DERECHA de la hoja de la que salió,
+  // en la misma línea, y si el lugar está ocupado las vecinas se corren solas. Nunca se solapa —
+  // el hueco se garantiza siempre. Es lo que hace que se lea de dónde partió la pieza y en qué
+  // paso va, sin que nadie tenga que reacomodar nada a mano.
+  //
+  // Se aparta SOLO lo que estorba de verdad: una hoja que está a la derecha Y comparte banda
+  // vertical con el origen. Correr la etapa entera dejaría el lienzo irreconocible cada vez.
+  const publicarALaDerecha = useCallback((origenId: string, nuevosIds: string[]) => {
+    if (!nuevosIds.length) return
+
+    // Se resuelve como se DIBUJA —posición guardada, si no la del acomodo por zonas— pero sin
+    // pasar por el índice de `visible`: con un filtro puesto ese índice miente y la hoja se mide
+    // en otra celda.
+    const guardadas = posicionesRef.current
+    const resolver = (id: string) => guardadas[`${fase.key}:${id}`] ?? disposicion.pos.get(id) ?? null
+
+    const origen = resolver(origenId)
+    if (!origen) return
+
+    const PASO   = HOJA_W + HOJA_GAP
+    const x0     = origen.x + PASO                 // primer hueco a la derecha del origen
+    const ancho  = nuevosIds.length * PASO         // cuánto espacio hay que abrir
+    const nuevos = new Set(nuevosIds)
+
+    const cambios: Record<string, { x: number; y: number }> = {}
+    for (const a of deLaFase) {
+      if (a.id === origenId || nuevos.has(a.id)) continue
+      const p = resolver(a.id)
+      if (!p) continue
+      const compartenBanda = p.y < origen.y + HOJA_H && p.y + HOJA_H > origen.y
+      if (compartenBanda && p.x >= x0) cambios[`${fase.key}:${a.id}`] = { x: p.x + ancho, y: p.y }
+    }
+    nuevosIds.forEach((id, i) => { cambios[`${fase.key}:${id}`] = { x: x0 + i * PASO, y: origen.y } })
+
+    // Se persiste el mapa YA calculado, no `posicionesRef`: la referencia se actualiza en un
+    // efecto posterior al render, así que guardar leyéndola —aunque sea con setTimeout(0)— manda
+    // el acomodo anterior. Es la misma trampa que dejaba los marcos vacíos en la base.
+    const mapa = { ...guardadas, ...cambios }
+    setPosiciones(mapa)
+    saveMoodboardLayout(projectId, { pos: mapa, marcos: marcosRef.current })
+      .catch(e => console.error('[moodboard] publicar a la derecha', e))
+  }, [fase.key, disposicion, deLaFase, projectId])
+
+  // §10: Design Edits deja de ser un solo retoque y pasa a correr la CADENA entera —el ajuste, el
+  // concept art y el 3D— cuando la página tiene una definida. Cuando no la tiene, sigue haciendo
+  // lo de siempre: editar la imagen en el sitio. Se le pregunta al backend en vez de decidirlo
+  // acá, que es quien sabe qué cadenas existen.
+  const pedirDesignEdit = useCallback(async (a: UnifiedAsset) => {
+    try {
+      const r = await getNextChainStep(projectId, a.id)
+      if (r.paso) { setCorriendo({ asset: a, pasos: 3 }); return }
+    } catch { /* sin respuesta, se cae al camino de siempre */ }
+    setEditando(a)
+  }, [projectId])
+
+  // Recarga y aplica la regla §9: lo que apareció que antes no estaba se publica a la derecha de
+  // la hoja que lo produjo. Vale para cualquier flujo que genere resultados —Run, regeneración,
+  // variantes, cadenas— y no solo para uno concreto, que es como está escrita la regla.
+  //
+  // Si una iteración devuelve una versión NUEVA de la misma hoja no aparece ningún id nuevo y no
+  // se mueve nada: versionar en el sitio no es publicar.
+  const recargarYPublicar = useCallback(async () => {
+    const origen = origenDeLaPublicacion.current
+    origenDeLaPublicacion.current = null
+    const antes   = new Set(assetsRef.current.map(a => a.id))
+    const frescos = await reload()
+    if (!origen || !frescos) return
+    const nuevos = frescos.filter(a => !antes.has(a.id)).map(a => a.id)
+    if (nuevos.length) publicarALaDerecha(origen, nuevos)
+  }, [reload, publicarALaDerecha])
+
   // Un arrastre no debe terminar abriendo la tarjeta que acabás de soltar.
   const arrastrado = useRef(false)
+
+  // Marco de selección y qué quedó dentro. En coordenadas del lienzo.
+  const [marco, setMarco] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
+
+
+
+  // Barra espaciadora = herramienta mano, como en cualquier lienzo. Mientras está apretada, el
+  // arrastre pasea la vista aunque empiece encima de una hoja.
+  const [mano, setMano] = useState(false)
+  useEffect(() => {
+    const abajo = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return
+      const t = e.target as HTMLElement | null
+      // No robarle la barra a un campo de texto: ahí el espacio es un espacio.
+      if (t && /^(INPUT|TEXTAREA)$/.test(t.tagName)) return
+      e.preventDefault()
+      setMano(true)
+    }
+    const arriba = (e: KeyboardEvent) => { if (e.code === 'Space') setMano(false) }
+    window.addEventListener('keydown', abajo)
+    window.addEventListener('keyup', arriba)
+    return () => { window.removeEventListener('keydown', abajo); window.removeEventListener('keyup', arriba) }
+  }, [])
   // La caja del lienzo en pantalla, para poder encuadrar contra su tamaño real.
   const lienzoRef = useRef<HTMLDivElement | null>(null)
 
@@ -606,6 +754,136 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const pages   = view === 'table' ? Math.max(1, Math.ceil(filtered.length / perPage)) : 1
   const visible = view === 'table' ? filtered.slice(page * perPage, (page + 1) * perPage) : filtered
 
+  // ── Ordenar la selección ────────────────────────────────────────────────────
+  // Las alinea en cuadrícula desde la esquina superior izquierda de lo seleccionado, en el orden
+  // en que están en el lienzo (arriba-abajo, izquierda-derecha) y NO en el orden de la lista: lo
+  // que uno acomodó a mano tiene una intención, y reordenar por fecha la borraría.
+  const ordenarSeleccion = useCallback(() => {
+    const ids = [...seleccion]
+    if (ids.length < 2) return
+    const conPos = ids
+      .map(id => ({ id, p: posicionDe(id, visible.findIndex(a => a.id === id)) }))
+      .sort((a, b) => (a.p.y - b.p.y) || (a.p.x - b.p.x))
+    const x0 = Math.min(...conPos.map(c => c.p.x))
+    const y0 = Math.min(...conPos.map(c => c.p.y))
+    const cols = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(conPos.length))))
+    setPosiciones(m => {
+      const n = { ...m }
+      conPos.forEach((c, i) => {
+        n[`${fase.key}:${c.id}`] = {
+          x: x0 + (i % cols) * (HOJA_W + HOJA_GAP),
+          y: y0 + Math.floor(i / cols) * (HOJA_H + HOJA_GAP),
+        }
+      })
+      return n
+    })
+    setTimeout(guardarLayout, 0)
+  }, [seleccion, posicionDe, visible, fase.key, guardarLayout])
+
+  // ── Marcos ──────────────────────────────────────────────────────────────────
+  // Agrupar la selección en un conjunto con nombre. Una hoja pertenece a UN marco: estar en dos
+  // conjuntos a la vez no se puede dibujar sin mentir, así que al agrupar se saca de los demás.
+  const agrupar = useCallback(() => {
+    const ids = [...seleccion]
+    if (ids.length < 2) return
+    const id = `m${Date.now().toString(36)}`
+    setMarcos(ms => [
+      ...ms.map(m => ({ ...m, ids: m.ids.filter(x => !ids.includes(x)) })).filter(m => m.ids.length > 1),
+      { id, nombre: 'Group', fase: fase.key, ids },
+    ])
+    setSeleccion(new Set())
+    setRenombrando(id)   // nace pidiendo nombre: un marco sin nombre no organiza nada
+  }, [seleccion, fase.key, guardarLayout])
+
+  // Los rectángulos de los marcos TAL COMO ESTÁN AHORA. Se toma una foto al empezar a arrastrar:
+  // medirlos al soltar, excluyendo la hoja movida, encogía el marco con cada movimiento — y en un
+  // grupo de dos lo hacía desaparecer, así que reacomodar adentro expulsaba la hoja.
+  const cajasDeMarcos = useCallback(() => {
+    const P = 16, PESTANA = 34
+    return marcosRef.current
+      .filter(m => m.fase === fase.key)
+      .map(m => {
+        // Se resuelve como se DIBUJA: la posición guardada si existe, y si no la que le toca en
+        // el acomodo por zonas. Mirar solo lo guardado dejaba fuera a toda hoja que nunca se
+        // movió a mano — casi todas — y el marco no se podía medir.
+        const pos = m.ids
+          .map(id => posicionDe(id, visible.findIndex(a => a.id === id)))
+          .filter(Boolean) as { x: number; y: number }[]
+        if (pos.length < 2) return null
+        return {
+          m,
+          x0: Math.min(...pos.map(p => p.x)) - P,
+          y0: Math.min(...pos.map(p => p.y)) - P - PESTANA,
+          x1: Math.max(...pos.map(p => p.x + HOJA_W)) + P,
+          y1: Math.max(...pos.map(p => p.y + HOJA_H)) + P,
+        }
+      })
+      .filter(Boolean) as { m: MoodboardMarco; x0: number; y0: number; x1: number; y1: number }[]
+  }, [fase.key, posicionDe, visible])
+
+  // Al soltar una hoja: entra al marco donde cayó, y sale del que tenía si ya no está adentro.
+  const acomodarEnMarco = useCallback((
+    hojaId: string,
+    centro: { x: number; y: number },
+    cajas: ReturnType<typeof cajasDeMarcos>,
+  ) => {
+    const dentro = (c: { x0: number; y0: number; x1: number; y1: number }, margen = 0) =>
+      centro.x >= c.x0 - margen && centro.x <= c.x1 + margen &&
+      centro.y >= c.y0 - margen && centro.y <= c.y1 + margen
+
+    // Primero, el marco donde cayó de verdad.
+    let destino = cajas.find(c => dentro(c))?.m ?? null
+
+    // Y si no cayó en ninguno, la hoja SIGUE en el suyo mientras esté cerca. La caja es el
+    // rectángulo justo de sus miembros con 16 px de aire: acomodar una hoja en un renglón nuevo
+    // —que para quien mira es «dentro del grupo», porque el grupo va a crecer con ella— la dejaba
+    // afuera, y al quedar el marco con una sola hoja se disolvía entero. De ahí la sensación de
+    // que reacomodar adentro expulsa.
+    //
+    // Sacar una hoja del grupo sigue siendo posible: hay que alejarla de verdad, más de una hoja
+    // de distancia. Y si cayó dentro de OTRO marco, manda ese: mudarse es explícito.
+    if (!destino) {
+      const propio = cajas.find(c => c.m.ids.includes(hojaId))
+      if (propio && dentro(propio, HOJA_W / 2)) destino = propio.m
+    }
+    setMarcos(ms => {
+      const actual = ms.find(m => m.ids.includes(hojaId))
+      if ((actual?.id ?? null) === (destino?.id ?? null)) return ms
+      return ms
+        .map(m => {
+          if (m.id === destino?.id) return { ...m, ids: [...m.ids, hojaId] }
+          if (m.ids.includes(hojaId)) return { ...m, ids: m.ids.filter(x => x !== hojaId) }
+          return m
+        })
+        // Un marco con una sola hoja ya no agrupa nada.
+        .filter(m => m.ids.length > 1)
+    })
+  }, [])
+
+  const desagrupar = useCallback((id: string) => {
+    setMarcos(ms => ms.filter(m => m.id !== id))
+  }, [guardarLayout])
+
+  const renombrarMarco = useCallback((id: string, nombre: string) => {
+    setMarcos(ms => ms.map(m => m.id === id ? { ...m, nombre: nombre.trim() || 'Group' } : m))
+    setRenombrando(null)
+  }, [guardarLayout])
+
+  // Mover un marco mueve a todos sus miembros: eso es lo que lo hace un bloque y no una etiqueta.
+  const moverMarco = useCallback((id: string, dx: number, dy: number, base: Record<string, { x: number; y: number }>) => {
+    const m = marcosRef.current.find(x => x.id === id)
+    if (!m) return
+    setPosiciones(prev => {
+      const n = { ...prev }
+      for (const hoja of m.ids) {
+        const k = `${fase.key}:${hoja}`
+        const p = base[k]
+        if (p) n[k] = { x: p.x + dx, y: p.y + dy }
+      }
+      return n
+    })
+  }, [fase.key])
+
   // Al entrar a una etapa que todavía no tiene encuadre propio, se encuadra sola: todo el
   // contenido, centrado. Una sola vez por etapa — después el encuadre es del usuario.
   const yaEncuadrada = useRef<Record<string, boolean>>({})
@@ -628,10 +906,35 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // cambian con las marcas laterales— y pasa a acercar y alejar, que es lo que hace en cualquier
   // lienzo. El zoom es hacia el puntero: acercarse al centro de la pantalla obliga a re-encuadrar
   // a mano cada vez.
-  const onRueda = useCallback((e: React.WheelEvent) => {
-    const caja = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  // Se escucha en NATIVO y con `passive: false`. React registra `wheel` como pasivo, así que
+  // `preventDefault()` desde `onWheel` no hace nada y el Ctrl+rueda se lo quedaba el navegador
+  // para su propio zoom: el lienzo no se movía y la página entera crecía.
+  useEffect(() => {
+    const el = lienzoRef.current
+    if (!el) return
+    const h = (e: WheelEvent) => { e.preventDefault(); onRueda(e) }
+    el.addEventListener('wheel', h, { passive: false })
+    return () => el.removeEventListener('wheel', h)
+  })
+
+  const onRueda = useCallback((e: WheelEvent) => {
+    const caja = lienzoRef.current?.getBoundingClientRect()
+    if (!caja) return
     const px = e.clientX - caja.left
     const py = e.clientY - caja.top
+
+    // Convención de lienzo (Figma y compañía): la rueda DESPLAZA, Ctrl+rueda ACERCA. La rueda
+    // sola haciendo zoom era lo que se sentía raro — y como el manejador vive en el contenedor,
+    // ahora desplaza también con el cursor encima de una hoja, sin buscar un hueco vacío.
+    if (!e.ctrlKey && !e.metaKey) {
+      setVista(v => ({
+        ...v,
+        x: v.x - (e.shiftKey ? e.deltaY : e.deltaX),   // Shift = horizontal, como en todas
+        y: v.y - (e.shiftKey ? 0 : e.deltaY),
+      }))
+      return
+    }
+
     setVista(v => {
       const factor = Math.exp(-e.deltaY * 0.0015)
       const z = Math.min(4, Math.max(0.08, v.z * factor))
@@ -675,9 +978,16 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       )}
 
       <div
-        onDragOver={e => { e.preventDefault(); setDropping(true) }}
+        // Solo se enciende el marco cuando lo que se arrastra son ARCHIVOS de afuera. Arrastrar
+        // una hoja dentro del lienzo no es una subida, y el marco quedaba encendido y pegado.
+        onDragOver={e => { if (!e.dataTransfer.types?.includes('Files')) return; e.preventDefault(); setDropping(true) }}
         onDragLeave={e => { if (e.currentTarget === e.target) setDropping(false) }}
-        onDrop={e => { e.preventDefault(); setDropping(false); upload(e.dataTransfer.files) }}
+        onDrop={e => {
+          setDropping(false)
+          if (!e.dataTransfer.files?.length) return
+          e.preventDefault()
+          upload(e.dataTransfer.files)
+        }}
         style={{
         width: '100%', height: '100%', maxWidth: maximizado ? 'none' : 1720,
         background: 'linear-gradient(160deg, rgba(30,33,42,0.96) 0%, rgba(16,18,24,0.98) 55%, rgba(12,14,19,0.99) 100%)',
@@ -805,8 +1115,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             {refCount > 0 && <option value="library">Library · uploaded</option>}
             {/* Agrupadas por etapa, y sin la clave del nodo: acá se elige un documento, no una
                 pieza de la DNA. La etapa que estás mirando va primero. */}
-            {[...fuentesPorFase]
-              .sort((a, b) => (a.fase.key === fase.key ? -1 : 0) - (b.fase.key === fase.key ? -1 : 0))
+            {/* En orden de producción, siempre: Documentación primero. Poner la etapa activa
+                arriba movía la lista según dónde estuvieras parado, y una lista que cambia de
+                orden no se aprende. */}
+            {fuentesPorFase
               .map(g => (
                 <optgroup key={g.fase.key} label={g.fase.label}>
                   {g.items.map(([k, title]) => <option key={k} value={k}>{title}</option>)}
@@ -817,23 +1129,16 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
 
         {/* ── Grid ─────────────────────────────────────────────────────── */}
         <div
-          onWheel={onRueda}
           style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '18px 58px', position: 'relative' }}
         >
-          {/* Marcas de agua: a la izquierda de dónde venís, a la derecha hacia dónde seguís.
-              Solo la fase inmediata a cada lado — más allá no se muestra nada, porque el proyecto
-              todavía no llegó ahí. La siguiente aparece apagada hasta que produzca algo. */}
-          <Marca lado="izq"
-                 fase={FASES[faseIdx - 1]}
-                 alcanzable={faseIdx - 1 >= 0}
-                 onClick={() => setFaseIdx(i => Math.max(0, i - 1))} />
-          <Marca lado="der"
-                 fase={FASES[faseIdx + 1]}
-                 alcanzable={faseIdx + 1 <= alcanzada}
-                 onClick={() => setFaseIdx(i => Math.min(alcanzada, i + 1))} />
+          {/* Las cuatro páginas viven abajo, fijas. Antes había marcas laterales de «atrás» y
+              «adelante», que muestran solo la fase contigua: desde Documentación no había forma
+              de saltar a Producción, así que no eran la estructura del espacio, eran un paso. */}
 
           {loading ? (
-            <LoadingWash theme={theme} cols={cols} />
+            // El esqueleto de doce tarjetas era el de una galería y prometía una grilla que ya
+            // no existe. Carga como lo que es: el lienzo, con su trama, y un aviso discreto.
+            <CargandoLienzo theme={theme} />
           ) : error ? (
             <Empty text={`Could not load assets: ${error}`} />
           ) : visible.length === 0 ? (
@@ -858,23 +1163,91 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             // Arrancan en cuadrícula —es lo que pidió el equipo, y sin una posición inicial
             // ordenada un lienzo vacío no se puede leer— y desde ahí se mueven libremente.
             <div
+              // El botón central abre el autoscroll del navegador —esa brújula que se queda
+              // pegada— y encima pega el contenido del portapapeles en Linux. El gesto es nuestro.
+              onAuxClick={e => { if (e.button === 1) e.preventDefault() }}
               onPointerDown={e => {
-                // Arrastrar el fondo = pasear el lienzo. Sobre un elemento no llega acá.
-                if (e.target !== e.currentTarget) return
-                const inicio = { x: e.clientX, y: e.clientY, vx: vista.x, vy: vista.y }
-                const mover = (ev: PointerEvent) =>
-                  setVista(v => ({ ...v, x: inicio.vx + (ev.clientX - inicio.x), y: inicio.vy + (ev.clientY - inicio.y) }))
-                const soltar = () => {
+                // Confirmado con Miguel el 25-ago: la rueda tiene DOS gestos distintos y el
+                // documento nombraba a los dos con «Ctrl + scroll». Girarla acerca; APRETARLA y
+                // arrastrar pasea el lienzo. Es el botón central, y funciona empiece donde empiece
+                // —también sobre una hoja—, porque el gesto es del lienzo, no de lo que hay debajo.
+                if (e.button === 1) {
+                  e.preventDefault()
+                  const inicio = { x: e.clientX, y: e.clientY, vx: vista.x, vy: vista.y }
+                  const mover = (ev: PointerEvent) =>
+                    setVista(v => ({ ...v, x: inicio.vx + (ev.clientX - inicio.x), y: inicio.vy + (ev.clientY - inicio.y) }))
+                  const soltar = () => {
+                    window.removeEventListener('pointermove', mover)
+                    window.removeEventListener('pointerup', soltar)
+                  }
+                  window.addEventListener('pointermove', mover)
+                  window.addEventListener('pointerup', soltar)
+                  return
+                }
+
+                // Con la mano (barra espaciadora) el arrastre pasea la vista empiece donde
+                // empiece; sin ella, arrastrar el fondo abre un MARCO DE SELECCIÓN.
+                if (!mano && e.target !== e.currentTarget) return
+                e.preventDefault()   // si no, el navegador arranca su propia selección de texto
+                const caja = lienzoRef.current?.getBoundingClientRect()
+
+                if (mano) {
+                  const inicio = { x: e.clientX, y: e.clientY, vx: vista.x, vy: vista.y }
+                  const mover = (ev: PointerEvent) =>
+                    setVista(v => ({ ...v, x: inicio.vx + (ev.clientX - inicio.x), y: inicio.vy + (ev.clientY - inicio.y) }))
+                  const soltar = () => {
+                    window.removeEventListener('pointermove', mover)
+                    window.removeEventListener('pointerup', soltar)
+                  }
+                  window.addEventListener('pointermove', mover)
+                  window.addEventListener('pointerup', soltar)
+                  return
+                }
+
+                if (!caja) return
+                // En coordenadas del LIENZO, no de pantalla: así el marco sigue encerrando lo
+                // mismo aunque cambie el zoom mientras se arrastra.
+                const aLienzo = (cx: number, cy: number) => ({
+                  x: (cx - caja.left - vista.x) / vista.z,
+                  y: (cy - caja.top  - vista.y) / vista.z,
+                })
+                const desde = aLienzo(e.clientX, e.clientY)
+                setMarco({ x0: desde.x, y0: desde.y, x1: desde.x, y1: desde.y })
+                setSeleccion(new Set())
+                setSel(null)
+
+                const mover = (ev: PointerEvent) => {
+                  const hasta = aLienzo(ev.clientX, ev.clientY)
+                  setMarco({ x0: desde.x, y0: desde.y, x1: hasta.x, y1: hasta.y })
+                }
+                const soltar = (ev: PointerEvent) => {
                   window.removeEventListener('pointermove', mover)
                   window.removeEventListener('pointerup', soltar)
+                  const hasta = aLienzo(ev.clientX, ev.clientY)
+                  const x0 = Math.min(desde.x, hasta.x), x1 = Math.max(desde.x, hasta.x)
+                  const y0 = Math.min(desde.y, hasta.y), y1 = Math.max(desde.y, hasta.y)
+                  setMarco(null)
+                  // Un clic suelto no selecciona nada: limpia, que es lo que uno espera.
+                  if (x1 - x0 < 4 && y1 - y0 < 4) return
+                  const dentro = new Set<string>()
+                  visible.forEach((a, i) => {
+                    const p = posicionDe(a.id, i)
+                    // Basta con tocar el marco, como en cualquier editor: exigir la hoja entera
+                    // obliga a encerrar de más.
+                    if (p.x < x1 && p.x + HOJA_W > x0 && p.y < y1 && p.y + HOJA_H > y0) dentro.add(a.id)
+                  })
+                  setSeleccion(dentro)
                 }
                 window.addEventListener('pointermove', mover)
                 window.addEventListener('pointerup', soltar)
-                setSel(null)
               }}
               ref={lienzoRef}
               style={{
-                position: 'absolute', inset: 0, overflow: 'hidden', cursor: 'grab',
+                position: 'absolute', inset: 0, overflow: 'hidden', cursor: mano ? 'grab' : 'default',
+                // Un lienzo no se selecciona como un texto. Sin esto, arrastrar —para pasear con
+                // la mano o para encerrar hojas— iba marcando en azul todo lo que pasaba por
+                // debajo, como cuando arrastrás sobre un párrafo.
+                userSelect: 'none', WebkitUserSelect: 'none',
                 // El área de edición más oscura que el panel, y con puntos: sin una textura que
                 // se mueva con el contenido, alejarse o acercarse no se siente — el zoom parecía
                 // que cambiaba el tamaño de las tarjetas y no que movía la cámara.
@@ -890,20 +1263,212 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                 transformOrigin: '0 0',
                 width: 1, height: 1,   // la capa no ocupa: la ocupan sus hijos
               }}>
+                {/* ── Cables (§9) ───────────────────────────────────────────────
+                    «conectado de forma nodal y organizado de izquierda a derecha». La cadena vive
+                    en la base (`derived_from`) desde que se creó; sin dibujarla, el 3D y las tres
+                    vistas se veían como cuatro hojas sueltas sin relación con la página que las
+                    produjo.
+
+                    Solo se dibuja lo que la cadena produjo: trazar el grafo entero con 47 activos
+                    tapa el lienzo con líneas que nadie pidió. Y va DEBAJO de las hojas, para que
+                    un cable no cruce por encima de una imagen. */}
+                <svg style={{
+                  position: 'absolute', left: 0, top: 0, width: '100%', height: '100%',
+                  overflow: 'visible', pointerEvents: 'none', zIndex: 0,
+                }}>
+                  {visible.map((a, i) => {
+                    if (!a.derived_from) return null
+                    const j = visible.findIndex(x => x.id === a.derived_from)
+                    if (j === -1) return null   // el origen está filtrado fuera: sin los dos extremos no hay línea
+                    const o = posicionDe(a.derived_from, j)
+                    const d = posicionDe(a.id, i)
+                    // De borde a borde y no de centro a centro: una línea que nace debajo de la
+                    // hoja se lee como que sale de ella, no como que la atraviesa.
+                    const x1 = o.x + HOJA_W, y1 = o.y + HOJA_H / 2
+                    const x2 = d.x,          y2 = d.y + HOJA_H / 2
+                    // Curva con salida y entrada horizontales: así se lee la dirección aunque las
+                    // dos hojas estén a distinta altura.
+                    const dx = Math.max(40, Math.abs(x2 - x1) * 0.45)
+                    return (
+                      <g key={`c-${a.id}`}>
+                        <path
+                          d={`M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`}
+                          fill="none" stroke={`${theme.accent}88`} strokeWidth={2}
+                        />
+                        <circle cx={x2} cy={y2} r={3.5} fill={theme.accent} />
+                      </g>
+                    )
+                  })}
+                </svg>
+
                 {/* El nombre de cada zona, sobre su bloque. Es lo que hace que al alejarse se lea
                     la estructura del proyecto en vez de un muro de miniaturas. */}
+                {/* Cada documento con su pestaña. El título suelto no se distinguía del resto del
+                    lienzo; enmarcado y grande, el bloque se lee como una carpeta y no como un
+                    montón de hojas sueltas. */}
                 {disposicion.zonas.map(z => (
                   <div key={z.nombre} style={{
-                    position: 'absolute', left: z.x, top: z.y, width: z.w,
+                    position: 'absolute', left: z.x, top: z.y, width: z.w, height: z.h,
                     pointerEvents: 'none', userSelect: 'none',
+                    border: '1px solid rgba(255,255,255,0.09)',
+                    borderRadius: 14,
+                    background: 'rgba(255,255,255,0.018)',
                   }}>
                     <div style={{
-                      fontSize: 15, fontWeight: 700, letterSpacing: '.02em',
-                      color: 'var(--text-1)', marginBottom: 5,
+                      position: 'absolute', left: -1, top: -1,
+                      padding: '7px 18px 8px',
+                      borderRadius: '14px 14px 0 0',
+                      background: 'rgba(255,255,255,0.06)',
+                      borderBottom: `2px solid ${theme.accent}`,
+                      fontSize: 22, fontWeight: 700, letterSpacing: '-.01em',
+                      color: 'var(--text-0)', whiteSpace: 'nowrap',
                     }}>{z.nombre}</div>
-                    <div style={{ height: 1, background: 'rgba(255,255,255,0.10)' }} />
                   </div>
                 ))}
+
+                {/* ── Marcos ────────────────────────────────────────────────────
+                    Un conjunto con nombre. Se dibuja alrededor de sus hojas, se arrastra como un
+                    bloque y se desagrupa desde su propia etiqueta. */}
+                {marcos.filter(m => m.fase === fase.key).map(m => {
+                  const pos = m.ids
+                    .map(id => ({ id, i: visible.findIndex(a => a.id === id) }))
+                    .filter(x => x.i !== -1)
+                    .map(x => posicionDe(x.id, x.i))
+                  if (pos.length < 2) return null
+                  const P = 16
+                  const PESTANA = 34   // el alto de la etiqueta: el marco le hace sitio arriba
+                  const x0 = Math.min(...pos.map(p => p.x)) - P
+                  const y0 = Math.min(...pos.map(p => p.y)) - P - PESTANA
+                  const x1 = Math.max(...pos.map(p => p.x + HOJA_W)) + P
+                  const y1 = Math.max(...pos.map(p => p.y + HOJA_H)) + P
+                  return (
+                    <div key={m.id} style={{
+                      position: 'absolute', left: x0, top: y0, width: x1 - x0, height: y1 - y0,
+                      border: `1px dashed ${theme.accent}66`, borderRadius: 14,
+                      background: `${theme.accent}08`, pointerEvents: 'none',
+                      // Por encima de las hojas: se dibujan después y le tapaban la etiqueta.
+                      zIndex: 2,
+                    }}>
+                      <div
+                        onPointerDown={e => {
+                          // Arrastrar la etiqueta mueve el conjunto entero.
+                          e.stopPropagation()
+                          const base = { ...posicionesRef.current }
+                          const ini = { x: e.clientX, y: e.clientY }
+                          const mover = (ev: PointerEvent) =>
+                            moverMarco(m.id, (ev.clientX - ini.x) / vista.z, (ev.clientY - ini.y) / vista.z, base)
+                          const soltar = () => {
+                            window.removeEventListener('pointermove', mover)
+                            window.removeEventListener('pointerup', soltar)
+                            guardarLayout()
+                          }
+                          window.addEventListener('pointermove', mover)
+                          window.addEventListener('pointerup', soltar)
+                        }}
+                        onDoubleClick={e => { e.stopPropagation(); setRenombrando(m.id) }}
+                        style={{
+                          position: 'absolute', left: -1, top: -1, pointerEvents: 'auto',
+                          display: 'flex', alignItems: 'center', gap: 7, cursor: 'grab',
+                          padding: '5px 10px 6px', borderRadius: '13px 13px 0 0',
+                          background: `color-mix(in srgb, ${theme.accent} 20%, rgba(10,12,16,0.92))`,
+                          border: `1px solid ${theme.accent}55`, borderBottom: 'none',
+                        }}
+                      >
+                        {renombrando === m.id ? (
+                          <input
+                            autoFocus defaultValue={m.nombre}
+                            onPointerDown={e => e.stopPropagation()}
+                            onBlur={e => renombrarMarco(m.id, e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') renombrarMarco(m.id, (e.target as HTMLInputElement).value)
+                              if (e.key === 'Escape') setRenombrando(null)
+                            }}
+                            style={{
+                              width: 150, background: 'transparent', border: 'none', outline: 'none',
+                              color: 'var(--text-0)', fontSize: 12, fontFamily: 'var(--font-mono)',
+                            }}
+                          />
+                        ) : (
+                          <>
+                            <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-0)', whiteSpace: 'nowrap' }}>
+                              {m.nombre}
+                              <span style={{ color: 'var(--text-3)' }}> · {m.ids.length}</span>
+                            </span>
+                            {/* Un lápiz a la vista. El doble clic sigue funcionando, pero nadie
+                                adivina un doble clic sobre una etiqueta. */}
+                            <button
+                              onPointerDown={e => e.stopPropagation()}
+                              onClick={e => { e.stopPropagation(); setRenombrando(m.id) }}
+                              title="Rename"
+                              style={{
+                                border: 'none', background: 'transparent', cursor: 'pointer',
+                                color: 'var(--text-3)', fontSize: 11, lineHeight: 1, padding: 0,
+                              }}
+                            >✎</button>
+                          </>
+                        )}
+                        <button
+                          onPointerDown={e => e.stopPropagation()}
+                          onClick={e => { e.stopPropagation(); desagrupar(m.id) }}
+                          title="Ungroup"
+                          style={{
+                            border: 'none', background: 'transparent', cursor: 'pointer',
+                            color: 'var(--text-2)', fontSize: 12, lineHeight: 1, padding: 0,
+                          }}
+                        >×</button>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* Acciones sobre la selección, ancladas encima de ella. Aparecen con dos o más:
+                    con una sola, la barra del elemento ya hace lo suyo. */}
+                {seleccion.size > 1 && (() => {
+                  const pos = [...seleccion].map(id => posicionDe(id, visible.findIndex(a => a.id === id)))
+                  const x0 = Math.min(...pos.map(p => p.x))
+                  const y0 = Math.min(...pos.map(p => p.y))
+                  const x1 = Math.max(...pos.map(p => p.x + HOJA_W))
+                  return (
+                    <div
+                      onPointerDown={e => e.stopPropagation()}
+                      style={{
+                        position: 'absolute', left: (x0 + x1) / 2, top: y0 - 14,
+                        transform: `translate(-50%, -100%) scale(${1 / vista.z})`,
+                        transformOrigin: 'bottom center',
+                        display: 'flex', alignItems: 'center', gap: 2, padding: 3,
+                        borderRadius: 9, whiteSpace: 'nowrap',
+                        background: 'rgba(10,12,16,0.94)', border: '1px solid rgba(255,255,255,0.16)',
+                        boxShadow: '0 8px 22px rgba(0,0,0,0.5)',
+                      }}
+                    >
+                      <span style={{
+                        fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--text-3)',
+                        padding: '0 8px 0 6px',
+                      }}>{seleccion.size}</span>
+                      <BarraBtn titulo="Tidy — align them in a grid" onClick={ordenarSeleccion}>⌗</BarraBtn>
+                      <BarraBtn titulo="Group them in a named frame" onClick={agrupar}>▣</BarraBtn>
+                      <BarraBtn titulo="Save them to my computer" onClick={() => {
+                        for (const id of seleccion) {
+                          const a = visible.find(x => x.id === id)
+                          if (a) bajarActivo(a)
+                        }
+                      }}>↓</BarraBtn>
+                      <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.14)', margin: '0 3px' }} />
+                      <BarraBtn titulo="Clear selection" onClick={() => setSeleccion(new Set())}>✕</BarraBtn>
+                    </div>
+                  )
+                })()}
+
+                {/* El marco mientras se arrastra */}
+                {marco && (
+                  <div style={{
+                    position: 'absolute',
+                    left: Math.min(marco.x0, marco.x1), top: Math.min(marco.y0, marco.y1),
+                    width: Math.abs(marco.x1 - marco.x0), height: Math.abs(marco.y1 - marco.y0),
+                    border: `1px solid ${theme.accent}`, background: `${theme.accent}14`,
+                    borderRadius: 2, pointerEvents: 'none',
+                  }} />
+                )}
 
                 {visible.map((a, i) => {
                   const p = posicionDe(a.id, i)
@@ -914,9 +1479,13 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                       // y entonces la tarjeta no se abría nunca. Se escucha en la ventana y el
                       // clic sigue llegando a la tarjeta salvo que haya habido arrastre de verdad.
                       onPointerDown={e => {
-                        if (e.button !== 0) return
+                        // Con la mano puesta el arrastre es del lienzo, no de la hoja.
+                        if (e.button !== 0 || mano) return
                         e.stopPropagation()
                         const inicio = { x: e.clientX, y: e.clientY, px: p.x, py: p.y }
+                        // Foto de los marcos ANTES de mover: es contra estos rectángulos que se
+                        // decide dónde cae la hoja, no contra los que quedan mientras se arrastra.
+                        const cajas = cajasDeMarcos()
                         let movido = false
                         const mover = (ev: PointerEvent) => {
                           const dx = (ev.clientX - inicio.x) / vista.z
@@ -930,7 +1499,13 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           window.removeEventListener('pointerup', soltar)
                           // Si se arrastró, el clic que viene detrás abriría la tarjeta encima de
                           // donde acabás de soltarla. Se descarta ese único clic.
-                          if (movido) { arrastrado.current = true; guardarLayout() }
+                          if (movido) {
+                            arrastrado.current = true
+                            // Dónde quedó su centro decide a qué marco pertenece ahora.
+                            const fin = posicionesRef.current[`${fase.key}:${a.id}`] ?? p
+                            acomodarEnMarco(a.id, { x: fin.x + HOJA_W / 2, y: fin.y + HOJA_H / 2 }, cajas)
+                            setTimeout(guardarLayout, 0)
+                          }
                         }
                         window.addEventListener('pointermove', mover)
                         window.addEventListener('pointerup', soltar)
@@ -939,13 +1514,21 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                         if (arrastrado.current) { e.stopPropagation(); arrastrado.current = false }
                       }}
                       data-hoja
+                      // Una imagen es arrastrable por defecto. Nuestro arrastre es por puntero, así
+                      // que el navegador iniciaba ADEMÁS su propio drag de archivo: eso encendía el
+                      // marco de "soltar aquí" sobre toda la pantalla, se quedaba pegado, y al
+                      // soltar SUBÍA la hoja a la librería. De ahí salieron las 24 .webp repetidas
+                      // que nadie reconocía haber subido.
+                      draggable={false}
+                      onDragStart={e => e.preventDefault()}
                       style={{
                         position: 'absolute', left: p.x, top: p.y,
                         width: HOJA_W, height: HOJA_H, cursor: 'grab',
-                      }}
+                        WebkitUserDrag: 'none',
+                      } as React.CSSProperties}
                     >
                       <Card asset={a} index={i} accent={theme.accent} colors={theme.colors}
-                            selected={sel === a.id}
+                            selected={sel === a.id || seleccion.has(a.id)}
                             onOpen={(from) => { setSel(a.id); setDetail({ asset: a, from }) }}
                             onMenu={(x, y) => setMenu({ x, y, asset: a })} />
 
@@ -1044,14 +1627,36 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           display: 'flex', alignItems: 'center', gap: 10, position: 'relative',
           padding: '12px 18px', borderTop: '1px solid var(--line)',
         }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 200 }}>
-            {/* La etapa que estás mirando —no la del proyecto—, encima de la paginación. */}
-            <span style={{
-              fontSize: 9.5, fontFamily: 'var(--font-mono)', letterSpacing: '.10em',
-              textTransform: 'uppercase', color: theme.accent, opacity: 0.85, lineHeight: 1,
-            }}>
-              {fase.label}
-            </span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, minWidth: 200 }}>
+            {/* LAS CUATRO PÁGINAS — la estructura raíz del espacio de trabajo, siempre visibles y
+                siempre en el mismo orden. Producción y Post-Producción existen aunque hoy no haya
+                nodos que produzcan ahí: se abren vacías. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {FASES.map((f, i) => {
+                const activa = i === faseIdx
+                return (
+                  <button
+                    key={f.key}
+                    onClick={() => setFaseIdx(i)}
+                    title={f.label}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7,
+                      padding: '6px 12px 6px 9px', borderRadius: 9, cursor: 'pointer',
+                      background: activa ? `color-mix(in srgb, ${theme.accent} 14%, var(--bg-2))` : 'transparent',
+                      border: `1px solid ${activa ? theme.accent + '88' : 'var(--line-2)'}`,
+                      color: activa ? theme.accent : 'var(--text-3)',
+                      transition: 'background 140ms ease, border-color 140ms ease, color 140ms ease',
+                    }}
+                  >
+                    <IconoFase clave={f.key} size={17} />
+                    <span style={{
+                      fontSize: 11, fontFamily: 'var(--font-mono)', letterSpacing: '.04em',
+                      fontWeight: activa ? 700 : 400, whiteSpace: 'nowrap',
+                    }}>{f.label}</span>
+                  </button>
+                )
+              })}
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {/* La paginación numérica solo existe en la tabla. En el lienzo, las páginas del
                 espacio de trabajo son las tres etapas y se cambian con las marcas laterales. */}
@@ -1100,7 +1705,28 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             }}
                             // Design Edits no exige que el activo sea una página de un deck: edita
                             // la imagen que haya, sea de donde sea.
-                            onDesignEdit={a => { setMenu(null); setEditando(a) }} />}
+                            onDesignEdit={a => { setMenu(null); pedirDesignEdit(a) }}
+                            // §8: Run nunca dispara de una. Primero el recuadro que dice QUÉ se va
+                            // a generar y POR QUÉ hace falta para el vertical slice — es lo que
+                            // separa ejecutar de entender qué estás ejecutando.
+                            onRun={a => { setMenu(null); setCorriendo({ asset: a, pasos: 1 }) }} />}
+
+      {corriendo && (
+        <AvisoRun
+          asset={corriendo.asset}
+          pasos={corriendo.pasos}
+          projectId={projectId}
+          accent={theme.accent}
+          onCancel={() => setCorriendo(null)}
+          onListo={ids => {
+            setCorriendo(null)
+            // Los ids vienen del propio despacho, así que no hay que adivinar qué es nuevo:
+            // se publican a la derecha del origen tal como pide §9.
+            if (ids.length) publicarALaDerecha(corriendo.asset.id, ids)
+            reload()
+          }}
+        />
+      )}
 
       {notando && (
         <NotaModal
@@ -1129,7 +1755,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           pedido={iterando.pedido}
           accent={theme.accent}
           onClose={() => setIterando(null)}
-          onListo={reload}
+          onListo={recargarYPublicar}
         />
       )}
       {aviso    && <NoDisponible  que={aviso}      accent={theme.accent} onClose={() => setAviso(null)} />}
@@ -1137,7 +1763,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       {detail && <Detail asset={detail.asset} from={detail.from} accent={theme.accent} onAprobado={reload}
                          notas={notasPorHoja[detail.asset.id] ?? []}
                          onNota={() => setNotando(detail.asset)}
-                         onDesignEdit={() => setEditando(detail.asset)}
+                         onDesignEdit={() => pedirDesignEdit(detail.asset)}
                          onMenu={(mx, my) => setMenu({ x: mx, y: my, asset: detail.asset })}
                          onClose={() => setDetail(null)} />}
     </div>
@@ -1162,6 +1788,47 @@ const MOTION: Record<string, { anim: string; dur: [number, number] }> = {
   fall:    { anim: 'mb-fall',   dur: [8, 3] },
   streak:  { anim: 'mb-streak', dur: [5, 2] },
   pulse:   { anim: 'mb-pulse',  dur: [3, 1] },
+}
+
+// Carga del lienzo: el propio lienzo. La trama de puntos ya dice que esto es un espacio de
+// trabajo, y encima solo hace falta decir que está llegando — con las zonas insinuadas, para que
+// lo que aparece después no sea una sorpresa de forma.
+function CargandoLienzo({ theme }: { theme: MoodboardTheme }) {
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, overflow: 'hidden',
+      background: 'rgba(4,5,7,0.55)',
+      backgroundImage: 'radial-gradient(rgba(255,255,255,0.10) 1px, transparent 1px)',
+      backgroundSize: '24px 24px',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      {/* Tres bloques fantasma, del tamaño de las zonas que van a aparecer. */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 46, opacity: 0.5 }}>
+        {[0, 1, 2].map(i => (
+          <div key={i} style={{
+            width: 300 + i * 40, height: 220,
+            border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14,
+            background: 'rgba(255,255,255,0.02)',
+            animation: `mb-latido 1.8s ease-in-out ${i * 260}ms infinite`,
+          }} />
+        ))}
+      </div>
+
+      <div style={{
+        position: 'relative', display: 'flex', alignItems: 'center', gap: 9,
+        padding: '9px 16px', borderRadius: 999,
+        background: 'rgba(6,7,9,0.8)', border: '1px solid rgba(255,255,255,0.12)',
+      }}>
+        <span style={{
+          width: 9, height: 9, borderRadius: '50%', background: theme.accent,
+          animation: 'mb-latido 1.1s ease-in-out infinite',
+        }} />
+        <span style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', letterSpacing: '.04em' }}>
+          Loading the board…
+        </span>
+      </div>
+    </div>
+  )
 }
 
 function LoadingWash({ theme, cols }: { theme: MoodboardTheme; cols: number }) {
@@ -1445,8 +2112,11 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
       )}
 
       {kind === 'image' && url ? (
-        <Image src={url} alt={asset.name} fill sizes="(max-width: 1100px) 50vw, 320px"
-               style={{ objectFit: 'cover' }} />
+        // `contain` y no `cover`: una hoja de guía de estilo recortada pierde justo lo que hay
+        // que leer, y estas páginas tienen que verse enteras. Se pide en tamaño grande porque el
+        // lienzo se acerca hasta 400% y con la miniatura la letra se deshace.
+        <Image src={url} alt={asset.name} fill sizes="1200px"
+               style={{ objectFit: 'contain' }} />
       ) : kind === 'video' && vid ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1968,14 +2638,15 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
 //   visual    — el menú radial de la referencia, con las cuatro acciones de la v.3.
 // Las acciones del radial todavía no hacen nada: se cablean en la Iteración 2 (contexto y
 // output) y en la 3 (edición). Se muestran apagadas en vez de simular que responden.
-function ContextMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdit }: {
+function ContextMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdit, onRun }: {
   x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
+  onRun: (a: UnifiedAsset) => void
 }) {
   // La descarga directa es solo para documentos; lo visual abre el radial.
   return kindOf(asset) === 'doc'
     ? <DownloadMenu x={x} y={y} asset={asset} onDone={onDone} />
-    : <RadialMenu   x={x} y={y} asset={asset} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} />
+    : <RadialMenu   x={x} y={y} asset={asset} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} />
 }
 
 function DownloadMenu({ x, y, asset, onDone }: {
@@ -2038,11 +2709,19 @@ function DownloadMenu({ x, y, asset, onDone }: {
 
 // El radial de la referencia: cuatro acciones en cruz —arriba, derecha, abajo, izquierda—
 // separadas por diagonales, anillo con degradado de la paleta del proyecto y Forgy en el centro.
+// Cinco sectores desde la actualización del 25-ago: entra `Run` y `Edit Output` pasa a llamarse
+// como lo nombra el documento, «New Art Style» — no es editar el output, es generarlo en otro
+// universo visual para poder fijarlo como contexto del proyecto.
+//
+// El orden es el del documento y se lee en el sentido del reloj desde arriba. Ya no hay `pos`:
+// con cinco sectores los cuadrantes fijos no alcanzan, así que se reparten con la misma
+// matemática que el submenú (`sectorPath`/`sectorAt`), que siempre fue por N.
 const RADIAL = [
-  { key: 'edit',    label: 'Edit',          hint: 'Iteration 3', pos: 'top'    },
-  { key: 'context', label: 'Add Context',   hint: 'Iteration 2', pos: 'right'  },
-  { key: 'output',  label: 'Edit Output',   hint: 'Iteration 2', pos: 'bottom' },
-  { key: 'library', label: 'Asset Library', hint: 'Iteration 3', pos: 'left'   },
+  { key: 'edit',    label: 'Edit',           hint: 'Iteration 3' },
+  { key: 'style',   label: 'New Art Style',  hint: 'Iteration 3' },
+  { key: 'context', label: 'Add Context',    hint: 'Iteration 2' },
+  { key: 'library', label: 'Asset Library',  hint: 'Iteration 3' },
+  { key: 'run',     label: 'Run',            hint: 'Iteration 2' },
 ] as const
 
 // ── Submenú de «Edit», contextual por tipo de asset ──────────────────────────
@@ -2700,6 +3379,168 @@ function NoDisponible({ que, accent, onClose }: { que: string; accent: string; o
   )
 }
 
+// ── Recuadro previo a Run (§8) ───────────────────────────────────────────────
+// Run no dispara de una. Antes dice QUÉ se va a generar y POR QUÉ hace falta para el vertical
+// slice: el sentido de cada ejecución tiene que entenderse ANTES de gastarla, no después de ver
+// el resultado. Es la misma decisión que ya se tomó para el ▶ RENDER del canvas — con la
+// diferencia de que acá el motivo es tan importante como el costo.
+//
+// Cancel y Run van separados y el que gasta no queda debajo del cursor.
+function AvisoRun({ asset, pasos, projectId, accent, onCancel, onListo }: {
+  asset: UnifiedAsset
+  pasos: number
+  projectId: string
+  accent: string
+  onCancel: () => void
+  onListo: (idsNuevos: string[]) => void
+}) {
+  const [paso,  setPaso]  = useState<PasoDeCadena | null | undefined>(undefined)
+  const [texto, setTexto] = useState('')
+  const [busy,  setBusy]  = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // El paso lo decide el BACKEND, que es quien conoce la cadena y en qué punto quedó la pieza.
+  // Calcularlo acá obligaría a duplicar el mapa de workflows en el front y a mantenerlo al día.
+  useEffect(() => {
+    let vivo = true
+    getNextChainStep(projectId, asset.id)
+      .then(r => { if (vivo) setPaso(r.paso) })
+      .catch(() => { if (vivo) setPaso(null) })
+    return () => { vivo = false }
+  }, [projectId, asset.id])
+
+  const correr = async () => {
+    if (!paso || busy) return
+    setBusy(true); setError(null)
+    try {
+      const r = await advanceAsset(projectId, asset.id, { pasos, prompt: paso.pide_prompt ? texto : null })
+      onListo(r.creados.map(c => c.id))
+    } catch (e) {
+      // El despacho no se reintenta solo: cada intento cuesta y no devuelve lo mismo.
+      setError(e instanceof Error ? e.message : 'The step failed')
+      setBusy(false)
+    }
+  }
+
+  const cerrable = !busy
+  return (
+    <div
+      onClick={() => cerrable && onCancel()}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 12200, display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(6,7,9,0.5)', backdropFilter: 'blur(3px)',
+      }}
+    >
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 440, padding: '22px 24px', borderRadius: 13,
+        background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+        boxShadow: '0 22px 64px rgba(0,0,0,0.6)', animation: 'mb-in 180ms ease',
+      }}>
+        {paso === undefined ? (
+          <div style={{ fontSize: 12.5, color: 'var(--text-3)', padding: '10px 0' }}>Reading the chain…</div>
+        ) : paso === null ? (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 9 }}>
+              Nothing left to run here
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 18 }}>
+              This page either has no production chain defined yet, or it already reached the last
+              step of its own. Character Sheet is the only chain defined so far.
+            </div>
+            <button onClick={onCancel} style={{
+              width: '100%', padding: '9px 0', borderRadius: 8, cursor: 'pointer',
+              background: 'transparent', border: `1px solid ${accent}66`, color: accent,
+              fontSize: 12, fontFamily: 'var(--font-sans)',
+            }}>Got it</button>
+          </>
+        ) : (
+          <>
+            <div style={{
+              fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '.08em',
+              color: accent, marginBottom: 9,
+            }}>
+              {paso.etiqueta_cadena.toUpperCase()} · {pasos > 1
+                ? `STEPS ${paso.indice}–${paso.de} OF ${paso.de}`
+                : `STEP ${paso.indice} OF ${paso.de}`}
+            </div>
+
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 12 }}>
+              {paso.etiqueta}
+            </div>
+
+            <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 10 }}>
+              <strong style={{ color: 'var(--text-1)' }}>What this generates.</strong> {paso.que}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 14 }}>
+              <strong style={{ color: 'var(--text-1)' }}>Why it is needed.</strong> {paso.porque}
+            </div>
+
+            {paso.pide_prompt && (
+              <textarea
+                value={texto}
+                onChange={e => setTexto(e.target.value)}
+                placeholder="Describe the design change to apply…"
+                disabled={busy}
+                rows={3}
+                style={{
+                  width: '100%', marginBottom: 14, padding: '9px 11px', borderRadius: 8,
+                  background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+                  color: 'var(--text-0)', fontSize: 12.5, fontFamily: 'var(--font-sans)',
+                  resize: 'vertical',
+                }}
+              />
+            )}
+
+            <div style={{
+              fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.55, marginBottom: 18,
+              padding: '9px 11px', borderRadius: 8,
+              background: 'color-mix(in srgb, #F59E0B 7%, transparent)',
+              border: '1px solid color-mix(in srgb, #F59E0B 22%, var(--line-2))',
+            }}>
+              Spends credit, and running it again never returns the same result. The output is
+              published to the right of this page, connected to it.
+            </div>
+
+            {error && (
+              <div style={{
+                fontSize: 11.5, color: '#F87171', lineHeight: 1.5, marginBottom: 14,
+                padding: '9px 11px', borderRadius: 8,
+                background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.28)',
+              }}>{error}</div>
+            )}
+
+            <div style={{ display: 'flex', gap: 9 }}>
+              <button
+                onClick={onCancel}
+                disabled={busy}
+                style={{
+                  flex: 1, padding: '9px 0', borderRadius: 8, cursor: busy ? 'default' : 'pointer',
+                  background: 'transparent', border: '1px solid var(--line-2)',
+                  color: 'var(--text-2)', fontSize: 12, fontFamily: 'var(--font-sans)',
+                  opacity: busy ? 0.5 : 1,
+                }}
+              >Cancel</button>
+              <button
+                onClick={correr}
+                disabled={busy || (paso.pide_prompt && !texto.trim())}
+                style={{
+                  flex: 1, padding: '9px 0', borderRadius: 8,
+                  cursor: busy || (paso.pide_prompt && !texto.trim()) ? 'default' : 'pointer',
+                  background: `color-mix(in srgb, ${accent} 16%, transparent)`,
+                  border: `1px solid ${accent}88`, color: accent,
+                  fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-sans)',
+                  opacity: busy || (paso.pide_prompt && !texto.trim()) ? 0.55 : 1,
+                }}
+              >{busy ? 'Running…' : pasos > 1 ? `Run ${paso.de - paso.indice + 1} steps` : 'Run'}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // Submenú de «Edit»: cinco sectores, contextual por tipo. Solo la primera opción responde.
 // Vuelve al radial principal con Escape o con el botón del centro, para no dejar sin salida a
 // quien entró por error.
@@ -2819,9 +3660,10 @@ function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewItera
   )
 }
 
-function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdit }: {
+function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdit, onRun }: {
   x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
+  onRun: (a: UnifiedAsset) => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<string | null>(null)
@@ -2880,42 +3722,57 @@ function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdi
         backdropFilter: 'blur(4px)',
       }} />
 
-      {/* divisores en diagonal */}
-      {[45, 135].map(deg => (
-        <div key={deg} style={{
-          position: 'absolute', left: '50%', top: 12, bottom: 12, width: 1,
-          background: `linear-gradient(to bottom, transparent, ${accent}55 18%, ${accent}55 82%, transparent)`,
-          transform: `translateX(-0.5px) rotate(${deg}deg)`, transformOrigin: 'center',
+      {/* Divisores: uno por frontera entre sectores. Eran dos diagonales fijas porque el radial
+          tenía cuatro cuadrantes; con cinco, las fronteras ya no caen en 45°. */}
+      {RADIAL.map((_, i) => (
+        <div key={i} style={{
+          position: 'absolute', left: '50%', top: 12, bottom: '50%', width: 1,
+          background: `linear-gradient(to top, transparent, ${accent}55 22%, ${accent}55 100%)`,
+          transform: `translateX(-0.5px) rotate(${(360 / RADIAL.length) * (i + 0.5)}deg)`,
+          transformOrigin: 'bottom center',
         }} />
       ))}
 
       {/* sectores + etiquetas */}
-      {RADIAL.map((q, i) => (
+      {RADIAL.map((q, i) => {
+        const n = RADIAL.length
+        // De dónde nace la etiqueta al abrir: del centro hacia SU sector. Antes era una tabla de
+        // cuatro entradas; con N sectores sale del mismo ángulo que ya posiciona la etiqueta.
+        const ang  = ((-90 + i * (360 / n)) * Math.PI) / 180
+        const vivo = q.key === 'edit' || q.key === 'run'
+        return (
         <div key={q.key}>
           <div
             onMouseEnter={() => setHot(q.key)}
             onMouseLeave={() => setHot(null)}
-            onClick={e => { if (q.key === 'edit') { e.stopPropagation(); setSub(true) } }}
-            title={q.key === 'edit' ? `${q.label} — open the editing menu` : `${q.label} — coming in ${q.hint}`}
+            onClick={e => {
+              if (q.key === 'edit') { e.stopPropagation(); setSub(true) }
+              if (q.key === 'run')  { e.stopPropagation(); onRun(asset) }
+            }}
+            title={
+              q.key === 'edit' ? `${q.label} — open the editing menu`
+              : q.key === 'run' ? 'Run — execute this page’s workflow and publish the result to the right'
+              : `${q.label} — coming in ${q.hint}`
+            }
             style={{
               position: 'absolute', inset: 3, borderRadius: '50%',
-              clipPath: SECTOR[q.pos],
+              clipPath: sectorPath(i, n),
               background: hot === q.key
                 ? `radial-gradient(circle at center, ${accent}00 34%, ${accent}26 100%)`
                 : 'transparent',
               transition: 'background 160ms ease',
-              cursor: q.key === 'edit' ? 'pointer' : 'default',
+              cursor: vivo ? 'pointer' : 'default',
             }}
           />
           <div style={{
-            position: 'absolute', ...AT[q.pos], transform: 'translate(-50%, -50%)',
+            position: 'absolute', ...sectorAt(i, n, 0.66), transform: 'translate(-50%, -50%)',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7,
-            width: 96, textAlign: 'center', pointerEvents: 'none',
+            width: 92, textAlign: 'center', pointerEvents: 'none',
             opacity: hot === q.key ? 1 : 0.72,
             transition: 'opacity 160ms ease',
-            // Cada uno sale del centro hacia su cuadrante, con retardo entre ellos.
-            ['--dx' as string]: `${FROM[q.pos][0]}px`,
-            ['--dy' as string]: `${FROM[q.pos][1]}px`,
+            // Cada uno sale del centro hacia su sector, con retardo entre ellos.
+            ['--dx' as string]: `${(-46 * Math.cos(ang)).toFixed(1)}px`,
+            ['--dy' as string]: `${(-46 * Math.sin(ang)).toFixed(1)}px`,
             animation: `mb-fan 560ms cubic-bezier(0.22,1,0.36,1) ${200 + i * 105}ms backwards`,
           }}>
             <RadialIcon kind={q.key} />
@@ -2924,7 +3781,7 @@ function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdi
             </span>
           </div>
         </div>
-      ))}
+      )})}
 
       {/* Forgy en el centro */}
       <div style={{
@@ -2952,6 +3809,10 @@ function RadialIcon({ kind }: { kind: string }) {
   if (kind === 'edit')    return <svg {...p}><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
   if (kind === 'context') return <svg {...p}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
   if (kind === 'library') return <svg {...p}><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
+  // Paleta: el sector genera la pieza en OTRO universo visual, no la edita.
+  if (kind === 'style')   return <svg {...p}><path d="M12 3a9 9 0 1 0 0 18 2.5 2.5 0 0 0 2-4 2.5 2.5 0 0 1 2-4h1a4 4 0 0 0 4-4 9 9 0 0 0-9-6z" /><path d="M7.5 10.5h.01" /><path d="M10.5 7.5h.01" /><path d="M14.5 7.5h.01" /></svg>
+  // Play dentro de un nodo: Run es un nodo inicial que corre el workflow de atrás.
+  if (kind === 'run')     return <svg {...p}><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M10 9.5l5 2.5-5 2.5z" /></svg>
   return <svg {...p}><path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" /><path d="M3 6h.01" /><path d="M3 12h.01" /><path d="M3 18h.01" /></svg>
 }
 
@@ -3007,15 +3868,14 @@ function UploadBar({ accent, uploading, hasContext, onFiles }: {
         }}
       >
         <CloudIcon />
-        {uploading > 0 ? `Uploading ${uploading}…` : last ?? 'Upload file'}
+        {uploading > 0 ? `Uploading ${uploading}…` : 'Upload file'}
         <input
           type="file" multiple hidden
           accept="image/*,video/*,audio/*,.glb,.pdf,.md,.markdown,.doc,.docx,.ppt,.pptx,.txt"
           onChange={e => {
-            if (e.target.files?.length) {
-              setLast(e.target.files.length === 1 ? e.target.files[0].name : `${e.target.files.length} files`)
-              onFiles(e.target.files)
-            }
+            if (e.target.files?.length) onFiles(e.target.files)
+            // El nombre del último archivo se queda pegado y el control parece no aceptar otro.
+            // El progreso ya lo dice el propio botón mientras sube; después vuelve a estar listo.
             e.target.value = ''
           }}
         />
@@ -3256,72 +4116,6 @@ function IconoFase({ clave, size = 27 }: { clave: string; size?: number }) {
     // Post-producción / live-ops: la señal al aire.
     default:     return svg(<><circle cx="12" cy="12" r="2" /><path d="M8.4 8.4a5 5 0 000 7.2M15.6 8.4a5 5 0 010 7.2" /><path d="M5.6 5.6a9 9 0 000 12.8M18.4 5.6a9 9 0 010 12.8" /></>)
   }
-}
-
-function Marca({ lado, fase, alcanzable, onClick }: {
-  lado: 'izq' | 'der'
-  fase?: { key: string; label: string }
-  alcanzable: boolean
-  onClick: () => void
-}) {
-  const [hover, setHover] = useState(false)
-  // Al caminar de fase, este mismo componente pasa a representar OTRA fase sin que el puntero se
-  // mueva, así que el `onMouseLeave` nunca llega y el tooltip se quedaba abierto mostrando el
-  // nombre de la fase anterior. Cambió la fase ⇒ el hover ya no significa nada.
-  useEffect(() => { setHover(false) }, [fase?.key, alcanzable])
-  if (!fase) return null
-  const activa = alcanzable
-  const izq    = lado === 'izq'
-  return (
-    <div
-      onClick={() => { if (activa) { setHover(false); onClick() } }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        position: 'absolute', top: 0, bottom: 0, [izq ? 'left' : 'right']: 0,
-        width: 56, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        cursor: activa ? 'pointer' : 'default',
-        userSelect: 'none', zIndex: 1,
-      }}
-    >
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-        <div style={{
-          width: 46, height: 46, borderRadius: 12,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          // Naranja de Forge cuando se puede ir; apagado cuando el proyecto no llegó ahí. El color
-          // dice «esto se puede tocar» sin necesidad de leer nada.
-          border: `1px solid ${activa ? 'color-mix(in srgb, var(--action) 45%, var(--line-2))' : 'var(--line-2)'}`,
-          background: activa
-            ? (hover ? 'color-mix(in srgb, var(--action) 16%, var(--bg-2))' : 'color-mix(in srgb, var(--action) 7%, var(--bg-2))')
-            : 'var(--bg-2)',
-          color: activa ? 'var(--action)' : 'var(--text-3)',
-          opacity: activa ? (hover ? 1 : 0.85) : 0.32,
-          transition: 'opacity 160ms ease, background 160ms ease, border-color 160ms ease',
-        }}>
-          <IconoFase clave={fase.key} />
-        </div>
-
-        {/* El nombre aparece al pasar el mouse, hacia el centro del tablero para no salirse. */}
-        {hover && (
-          <div style={{
-            position: 'absolute', top: '50%', transform: 'translateY(-50%)',
-            [izq ? 'left' : 'right']: 54, whiteSpace: 'nowrap',
-            padding: '5px 9px', borderRadius: 7,
-            background: 'var(--bg-3)', border: '1px solid var(--line-2)',
-            boxShadow: '0 8px 22px rgba(0,0,0,0.45)',
-            fontSize: 10.5, fontFamily: 'var(--font-mono)', letterSpacing: '.06em',
-            color: activa ? 'var(--action)' : 'var(--text-3)',
-            pointerEvents: 'none',
-          }}>
-            {izq ? '← ' : ''}{fase.label}{izq ? '' : ' →'}
-            {!activa && (
-              <span style={{ color: 'var(--text-4)' }}> · not reached yet</span>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  )
 }
 
 function Empty({ text }: { text: string }) {

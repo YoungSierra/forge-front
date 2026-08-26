@@ -27,6 +27,8 @@ export default function MoodboardButton({ projectId, projectName, nodeKey }: Pro
   const [drag,  setDrag]  = useState(false)
   // Un arrastre no debe abrir el moodboard al soltar: se distingue por distancia recorrida.
   const moved  = useRef(false)
+  // Dónde empezó el gesto, para medir si de verdad hubo arrastre.
+  const inicio = useRef({ x: 0, y: 0 })
   const offset = useRef({ x: 0, y: 0 })
 
   const clamp = useCallback((x: number, y: number) => ({
@@ -70,8 +72,12 @@ export default function MoodboardButton({ projectId, projectName, nodeKey }: Pro
     if (!drag) return
     const onMove = (e: PointerEvent) => {
       const next = clamp(e.clientX - offset.current.x, e.clientY - offset.current.y)
-      moved.current = true
-      setPos(next)
+      // Con umbral. Marcar «arrastre» ante CUALQUIER movimiento descartaba el clic: entre apretar
+      // y soltar el mouse se corre uno o dos píxeles casi siempre, así que el moodboard solo
+      // abría cuando la mano quedaba perfectamente quieta — de ahí los varios clics.
+      const d = Math.hypot(e.clientX - inicio.current.x, e.clientY - inicio.current.y)
+      if (d > 4) moved.current = true
+      if (moved.current) setPos(next)
     }
     const onUp = () => {
       setDrag(false)
@@ -92,6 +98,7 @@ export default function MoodboardButton({ projectId, projectName, nodeKey }: Pro
       <button
         onPointerDown={e => {
           moved.current = false
+          inicio.current = { x: e.clientX, y: e.clientY }
           offset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }
           setDrag(true)
         }}

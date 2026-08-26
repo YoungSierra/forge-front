@@ -311,6 +311,9 @@ export interface UnifiedAsset {
   /** Primeras líneas del texto, solo para documentos y solo en modo media: la tarjeta muestra
    *  un asomo del contenido en vez de un ícono. `content` sigue sin viajar. */
   preview?: string | null
+  /** De qué activo salió éste. Lo llena la cadena de producción y es lo que deja dibujar la
+   *  conexión en el moodboard: la pieza no aparece suelta, aparece colgando de su origen. */
+  derived_from?: string | null
   created_at: string
   versions: UnifiedAssetVersion[]
 }
@@ -1540,12 +1543,25 @@ export interface IteracionResultado {
   segundos: number
 }
 
-/** Acomodo del moodboard: dónde quedó cada hoja, por etapa. Es del proyecto, lo ve todo el equipo. */
-export type MoodboardLayout = Record<string, { x: number; y: number }>
+/** Un marco: un conjunto de hojas con nombre, que se mueve y se gestiona junto. */
+export interface MoodboardMarco { id: string; nombre: string; fase: string; ids: string[] }
 
-export async function getMoodboardLayout(projectId: string) {
-  const r = await request<{ success: boolean; layout: MoodboardLayout }>(`/api/projects/${projectId}/moodboard-layout`)
-  return r.layout ?? {}
+/**
+ * Acomodo del moodboard: dónde quedó cada hoja y qué marcos hay. Es del proyecto, lo ve todo el
+ * equipo. Se acepta también la forma vieja —solo posiciones, sin envoltorio— para no perder el
+ * acomodo de quien ya movió hojas antes de que existieran los marcos.
+ */
+export interface MoodboardLayout {
+  pos: Record<string, { x: number; y: number }>
+  marcos?: MoodboardMarco[]
+}
+
+export async function getMoodboardLayout(projectId: string): Promise<MoodboardLayout> {
+  const r = await request<{ success: boolean; layout: Record<string, unknown> }>(`/api/projects/${projectId}/moodboard-layout`)
+  const l = r.layout ?? {}
+  // Forma vieja: el objeto ERA el mapa de posiciones.
+  if (!('pos' in l)) return { pos: (l as MoodboardLayout['pos']) ?? {}, marcos: [] }
+  return { pos: (l.pos as MoodboardLayout['pos']) ?? {}, marcos: (l.marcos as MoodboardMarco[]) ?? [] }
 }
 
 export async function saveMoodboardLayout(projectId: string, layout: MoodboardLayout) {
@@ -1855,4 +1871,34 @@ export async function updateChangelogEntry(
 
 export async function deleteChangelogEntry(id: string): Promise<void> {
   await request<{ success: boolean }>(`/api/admin/changelog/${id}`, { method: 'DELETE' })
+}
+
+// ─── Cadenas de producción (§8 y §10 del documento de menús radiales) ────────
+// Una página no se rehace: avanza de etapa. `nextStep` es lo que el recuadro previo de Run
+// necesita para poder decir qué se genera y por qué ANTES de gastar; `advanceAsset` lo ejecuta.
+// Run pide un paso, Design Edits pide los tres — mismo motor, distinto `pasos`.
+export type PasoDeCadena = {
+  cadena: string; etiqueta_cadena: string
+  indice: number; de: number
+  clave: string; etiqueta: string; que: string; porque: string
+  pide_prompt: boolean; workflow: string
+}
+
+export async function getNextChainStep(projectId: string, assetId: string) {
+  return request<{ success: boolean; paso: PasoDeCadena | null }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/next-step`,
+  )
+}
+
+export async function advanceAsset(
+  projectId: string, assetId: string,
+  opts: { pasos?: number; prompt?: string | null; memberId?: string | null } = {},
+) {
+  return request<{ success: boolean; cadena: string; creados: { id: string; name: string; storage_url: string; format: string }[] }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/advance`,
+    {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pasos: opts.pasos ?? 1, prompt: opts.prompt ?? null, member_id: opts.memberId ?? null }),
+    },
+  )
 }
