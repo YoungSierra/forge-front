@@ -20,13 +20,31 @@ import { Paperclip } from 'lucide-react'
 // Extrae un array JSON del contenido (con o sin fences ```json) y devuelve un ítem
 // legible por objeto (prioriza title/one_liner). null si no hay array parseable.
 function parseJsonArrayItems(content: string): string[] | null {
-  const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const text  = fence ? fence[1] : content
-  const start = text.indexOf('[')
-  const end   = text.lastIndexOf(']')
-  if (start === -1 || end <= start) return null
-  let arr: unknown
-  try { arr = JSON.parse(text.slice(start, end + 1)) } catch { return null }
+  // Se miran TODOS los bloques cercados, empezando por los marcados ```json.
+  //
+  // Antes se tomaba el primero y punto. Medido el 26-08: una respuesta abría con un diagrama ASCII
+  // en un bloque sin lenguaje y traía las semillas en JSON más abajo — el extractor se quedaba con
+  // el diagrama, no encontraba array, y todo caía a raspar prosa. Las semillas venían
+  // estructuradas y no las leíamos. (Mismo bug que ya se había arreglado en el fan-out.)
+  const bloques = [...content.matchAll(/```(\w*)\s*([\s\S]*?)```/g)]
+    .map(m => ({ lang: (m[1] || '').toLowerCase(), cuerpo: m[2] }))
+  const candidatos = [
+    ...bloques.filter(b => b.lang === 'json').map(b => b.cuerpo),
+    ...bloques.filter(b => b.lang === '').map(b => b.cuerpo),
+    // Sin ningún bloque, el mensaje entero: hay respuestas que SON el array y nada más.
+    ...(bloques.length ? [] : [content]),
+  ]
+
+  let arr: unknown = null
+  for (const text of candidatos) {
+    const start = text.indexOf('[')
+    const end   = text.lastIndexOf(']')
+    if (start === -1 || end <= start) continue
+    try {
+      const p = JSON.parse(text.slice(start, end + 1))
+      if (Array.isArray(p) && p.length) { arr = p; break }
+    } catch { /* no era éste; sigue el próximo bloque */ }
+  }
   if (!Array.isArray(arr) || arr.length === 0) return null
 
   // La cabecera va primero y sin rótulo: es lo que identifica al ítem de un vistazo.
@@ -68,7 +86,14 @@ function parseJsonArrayItems(content: string): string[] | null {
 // El SUSTANTIVO importa: «cualquier palabra + número» tomaba también el título del documento
 // —«Concept Seeds · Pass 3»—. Con el vocabulario que la DNA usa de verdad, UN bloque ya alcanza:
 // una corrida incremental agrega una sola semilla y las anteriores no se repiten.
-const RX_ENUMERADO = /^(#{1,4})\s+.*?\b(?:seeds?|variations?|concepts?|angles?|images?|options?|pages?)\s*[·:.\-—]?\s*0*\d{1,3}\b/i
+// El encabezado EMPIEZA con el sustantivo: eso separa «## SEED I» —que nombra una entidad— de
+// «# SMACK — Concept Seeds · Iteration 4», que la menciona al pasar. Exigir además un NÚMERO
+// dejaba afuera las semillas nombradas con letra (SEED I, J, L), y ahí el nodo caía a viñetas y
+// ofrecía quince imágenes de la lista de mecánicas.
+// Y después del sustantivo tiene que venir un número, una letra sola o un separador — NO otra
+// palabra. Sin eso entraban «Seed Comparison at a Glance» y «Seed Shortlist», que son una tabla y
+// un índice: cada uno se llevaba un hueco de imagen que nadie pidió.
+const RX_ENUMERADO = /^(#{1,4})\s+\**\s*(?:seeds?|variations?|concepts?|angles?|images?|options?|pages?)\s*(?:[·:.\-—]|\d|[A-Z]\b)/i
 function bloquesEnumerados(texto: string): string[] | null {
   const lineas = String(texto || '').split('\n')
   const marcas: { i: number; nivel: number }[] = []
