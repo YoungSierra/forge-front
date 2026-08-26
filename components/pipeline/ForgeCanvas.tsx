@@ -2430,7 +2430,11 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
 
               // Gallery solo tiene sentido cuando el output tiene image_gen (para generar imágenes por ítem)
               // Outputs de texto puro siempre van a vista prosa/markdown
-              const PROSE_FORMATS = ['markdown', 'document', 'text', 'pptx', 'pdf']
+              // Un DOCUMENTO nunca es una galería, aunque genere imágenes: sus imágenes van
+              // incrustadas adentro, no al lado. La lista se escribió cuando «output con
+              // image_gen» quería decir PNG; desde v2.9.13 el `pitch_document` es docx CON
+              // image_gen, y sin `docx` acá la ventana mostraba las imágenes y escondía el texto.
+              const PROSE_FORMATS = ['markdown', 'md', 'document', 'docx', 'text', 'pptx', 'pdf']
               const parsedItems = section ? parseOutputItems(section, activeOut.format) : []
               const isGallery   = parsedItems.length >= 2 && !!activeOut.image_gen && !PROSE_FORMATS.includes(activeOut.format ?? '')
               // Construir image items si el output tiene image_gen
