@@ -15,7 +15,9 @@
 //
 // El resultado se guarda en localStorage: cada modelo se procesa una sola vez por navegador.
 
-const CACHE_PREFIX = 'forge_glb_thumb4:'   // v4: rampa de color del proyecto
+// v5: Y siempre en vertical. Hay que subir la versión o las miniaturas acostadas que ya se
+// cachearon en cada navegador se siguen mostrando: el cache es por modelo, no por código.
+const CACHE_PREFIX = 'forge_glb_thumb5:'
 const SIZE   = 320    // lado del PNG que se genera
 const HEAD   = 65536  // bytes iniciales para leer el chunk JSON
 
@@ -40,10 +42,20 @@ async function rango(url: string, desde: number, hasta: number): Promise<ArrayBu
 
 // Qué par de ejes deja ver mejor el modelo. Se decide con el bounding box, que viaja en el JSON:
 // se proyecta sobre las dos dimensiones más grandes, que es donde hay más forma que mirar.
+//
+// Cuál de las dos va en vertical NO se puede decidir por número de eje. En glTF **Y es el arriba
+// del modelo**, así que si Y se ve, Y va en vertical y punto. Ordenarlos por índice hacía que un
+// modelo con la envergadura en Z —como los que exporta Tripo, medido: X 0.20 · Y 1.00 · Z 0.90—
+// eligiera el par (Y, Z) y le tocara a Y el eje horizontal: el personaje salía acostado.
+//
+// Cuando Y es el eje de profundidad —una vista de planta— no hay arriba que respetar y el orden
+// por índice sigue valiendo.
 function elegirVista(min: number[], max: number[]): Vista {
   const d = [max[0] - min[0], max[1] - min[1], max[2] - min[2]]
   const orden = [0, 1, 2].sort((a, b) => d[b] - d[a])
-  const [a, b] = orden.slice(0, 2).sort((x, y) => x - y)
+  const [p, q] = orden.slice(0, 2)
+  if (p === 1 || q === 1) return [p === 1 ? q : p, 1, orden[2]]
+  const [a, b] = [p, q].sort((x, y) => x - y)
   return [a, b, orden[2]]   // el eje más chico queda de profundidad: se mira el lado ancho
 }
 
@@ -72,10 +84,19 @@ function pintar(pos: Float32Array, [a, b, c]: Vista, rampa: Rampa): string {
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2
   const esc = (N * 0.86) / Math.max(x1 - x0, y1 - y0, 1e-6)
 
-  // Z-buffer: cada píxel se queda con el punto más cercano al observador. La salpicadura de
-  // radio 2 cierra el espacio entre vértices — sin ella la superficie sale agujereada.
+  // Z-buffer: cada píxel se queda con el punto más cercano al observador. La salpicadura cierra
+  // el espacio entre vértices — sin ella la superficie sale agujereada.
+  //
+  // El radio se calcula, no se fija. El 2 estaba calibrado para las mallas de escaneo del
+  // proyecto —millones de vértices, un punto por píxel—, pero una malla de Tripo trae 7.600 y con
+  // ese radio la miniatura queda como una salpicadura de puntos sueltos en vez de un cuerpo. Se
+  // estima la separación entre puntos vecinos en pantalla y se cubre la mitad.
   const z = new Float32Array(N * N).fill(-Infinity)
-  const R = 2
+  const puntos = pos.length / 3
+  // Solo la mitad de los vértices mira a la cámara, y la silueta ocupa cerca de un tercio del
+  // cuadro. De ahí sale cuántos píxeles le tocan a cada punto, y su lado es la separación.
+  const separacion = Math.sqrt((N * N * 0.3) / Math.max(1, puntos / 2))
+  const R = Math.min(6, Math.max(2, Math.round(separacion / 2)))
   for (let i = 0; i < pos.length; i += 3) {
     const px = Math.round((pos[i + a] - cx) * esc + N / 2)
     const py = Math.round(N / 2 + signo * (pos[i + b] - cy) * esc)
