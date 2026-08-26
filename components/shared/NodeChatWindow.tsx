@@ -873,6 +873,10 @@ export interface ImageOutputDef {
   outputKey:      string
   format:         string
   imageGenModel:  string  // "provider:model" — ej: comfyui:concept_ref, openai:dall-e-3
+  /** El hermano que DECLARA sus imágenes, si lo hay. El pitch document no elige sus imágenes:
+   *  las elige `pitch_image_plan`, con una entrada por imagen y su título. Sin esto, el documento
+   *  sacaba los sujetos de su propia prosa y mandaba a ComfyUI las viñetas de mercado. */
+  declaradasPor?: string | null
 }
 
 // Deriva el doc_url del último mensaje del asistente con un doc_gen tool_call. Necesario para
@@ -1647,12 +1651,25 @@ export default function NodeChatWindow({
                 // Sin entidades no hay nada que ilustrar: no se ofrecen huecos. El caso típico
                 // es que el nodo corrió sin sus inputs y respondió pidiendo datos — ahí un botón
                 // de generar solo sirve para pagar la imagen de un párrafo.
-                if (!tieneEntidades(section, def.format)) {
+                if (!def.declaradasPor && !tieneEntidades(section, def.format)) {
                   sinEntidades.add(def.outputKey)
                   continue
                 }
 
-                const parsed = parseOutputItems(section, def.format)
+                // Si otro output declara sus imágenes, los ítems salen de la sección de ESE
+                // hermano — no de la prosa propia. Y si el hermano no está en la respuesta, no
+                // hay imágenes declaradas: mejor decirlo que inventar sujetos.
+                let fuente = section
+                if (def.declaradasPor) {
+                  const planRx = outputHeaderRx(def.declaradasPor)
+                  const m = planRx.exec(msg.content)
+                  if (!m) { sinEntidades.add(`${def.outputKey} (needs ${def.declaradasPor})`); continue }
+                  const after = msg.content.slice(m.index + m[0].length)
+                  const next  = /^(?:#{1,4}\s+)?[a-z_]+\s*$/im.exec(after)
+                  fuente = (next ? after.slice(0, next.index) : after).trim() || section
+                }
+
+                const parsed = parseOutputItems(fuente, def.format)
 
                 // Lo que generó ESTE turno manda. Iterar reescribe los prompts sin mover los
                 // índices, así que leer siempre el mapa de la sesión emparejaba la respuesta nueva

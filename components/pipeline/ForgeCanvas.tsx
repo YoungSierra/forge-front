@@ -5551,7 +5551,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           imageGenOutputs={(() => {
             const defs: ImageOutputDef[] = []
             for (const out of (chatForgeNode.outputs ?? [])) {
-              const o = out as unknown as { production?: string; pages?: number[] }
+              const o = out as unknown as { production?: string; pages?: number[]; uses?: { siblings?: string[]; siblings_if_present?: string[] } }
               // `production: deferred` se produce en otra etapa: el Art Bible compone arte
               // aprobado que en pre-producción no existe. El chat lo intentaba igual y el
               // servidor respondía 500.
@@ -5560,7 +5560,15 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               // grafo y se despachan juntas desde el Run. Se reconoce porque declara `pages`.
               if (Array.isArray(o.pages) && o.pages.length) continue
               if (out.image_gen && out.image_gen_model) {
-                defs.push({ outputKey: out.key || out.name, format: out.format, imageGenModel: out.image_gen_model })
+                defs.push({
+                  outputKey: out.key || out.name, format: out.format, imageGenModel: out.image_gen_model,
+                  // Qué hermano DECLARA sus imágenes. El pitch document no las decide: las decide
+                  // `pitch_image_plan`, una entrada por imagen con su título. Sin esto, el
+                  // documento sacaba los sujetos de su propia prosa y mandaba a ComfyUI las
+                  // viñetas de «Numbers That Matter» — datos de mercado como si fueran arte.
+                  declaradasPor: (o.uses?.siblings_if_present ?? o.uses?.siblings ?? [])
+                    .find(k => /plan$/i.test(k)) ?? null,
+                })
               }
             }
             return defs.length > 0 ? defs : undefined
