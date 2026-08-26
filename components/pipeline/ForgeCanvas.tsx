@@ -2125,7 +2125,14 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                   <span onMouseDown={e => e.stopPropagation()} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', background: 'var(--bg-3)', border: '1px solid var(--line-2)', padding: '2px 6px', borderRadius: 3, flexShrink: 0 }}>
                     {outSession.output_asset.format}
                   </span>
-                  {effectiveOutPdfUrl ? (
+                  {/* El PDF se rehace AL PEDIRLO, no se enlaza el que quedó de la corrida.
+                      Un documento con imágenes no puede rendirse automáticamente al terminar el
+                      Run: las imágenes de ComfyUI tardan y el PDF salía antes de que llegaran, así
+                      que el archivo quedaba sin ellas para siempre aunque después aparecieran.
+                      Regenerar no cuesta crédito —es pdfkit local— y el endpoint resuelve las
+                      imágenes del momento y actualiza el asset, así que el enlace viejo no aporta.
+                      El pptx sí se enlaza: ese archivo no se puede rehacer. */}
+                  {effectiveOutPdfUrl && (outSession.output_asset.format === 'pptx' || !outSession.output_asset.content) ? (
                     <a
                       onMouseDown={e => e.stopPropagation()}
                       href={effectiveOutPdfUrl}
