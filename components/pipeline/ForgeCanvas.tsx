@@ -4245,6 +4245,19 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       ...extra,
     })
 
+    // Un edge cuyo extremo no está en el canvas no se puede dibujar — pero descartarlo callado es
+    // lo que hace que un cable «desaparezca» sin explicación y que el usuario crea que se borró,
+    // cuando en la base sigue intacto. Se avisa, con nombre y apellido.
+    const huerfanos = (canvasData.edges ?? []).filter(e => !validIds.has(e.source) || !validIds.has(e.target))
+    if (huerfanos.length) {
+      console.warn(`[forge-canvas] ${huerfanos.length} edge(s) no se dibujan: un extremo no está en el canvas`,
+        huerfanos.map(e => ({
+          edge: e.id,
+          source: e.source, sourceEnCanvas: validIds.has(e.source),
+          target: e.target, targetEnCanvas: validIds.has(e.target),
+        })))
+    }
+
     const dbEdges: Edge[] = (canvasData.edges ?? [])
       .filter(e => validIds.has(e.source) && validIds.has(e.target))
       .map(e => {
@@ -4341,6 +4354,14 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         data:         makeEdgeData(color, { reales: [...reales], ...(waypoints ? { waypoints } : {}) }),
       })
     }
+
+    // Un cable puede no verse por dos razones distintas y hay que poder distinguirlas: o se
+    // descartó por tener un extremo fuera del canvas (arriba), o se dibujó OCULTO porque cruza un
+    // lane y lo reemplaza un edge virtual. Las dos se ven igual en pantalla — no hay cable — y
+    // llevan a arreglos opuestos.
+    const ocultos = dbEdges.filter(e => e.hidden && !e.id.startsWith('virtual-'))
+    console.log(`[forge-canvas] edges: ${(canvasData.edges ?? []).length} en la base · ${dbEdges.length} dibujados`
+      + ` · ${ocultos.length} ocultos por lane · ${huerfanos.length} descartados`)
 
     // El backend corre auto-wiring al cargar blueprints — los edges ya vienen en dbEdges
     setEdges(dbEdges)
