@@ -827,25 +827,24 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     centro: { x: number; y: number },
     cajas: ReturnType<typeof cajasDeMarcos>,
   ) => {
-    const dentro = (c: { x0: number; y0: number; x1: number; y1: number }, margen = 0) =>
-      centro.x >= c.x0 - margen && centro.x <= c.x1 + margen &&
-      centro.y >= c.y0 - margen && centro.y <= c.y1 + margen
+    const dentro = (c: { x0: number; y0: number; x1: number; y1: number }) =>
+      centro.x >= c.x0 && centro.x <= c.x1 && centro.y >= c.y0 && centro.y <= c.y1
 
-    // Primero, el marco donde cayó de verdad.
-    let destino = cajas.find(c => dentro(c))?.m ?? null
-
-    // Y si no cayó en ninguno, la hoja SIGUE en el suyo mientras esté cerca. La caja es el
-    // rectángulo justo de sus miembros con 16 px de aire: acomodar una hoja en un renglón nuevo
-    // —que para quien mira es «dentro del grupo», porque el grupo va a crecer con ella— la dejaba
-    // afuera, y al quedar el marco con una sola hoja se disolvía entero. De ahí la sensación de
-    // que reacomodar adentro expulsa.
+    // ARRASTRAR NUNCA SACA DEL GRUPO. Se intentó dos veces con un rectángulo —primero el justo,
+    // después con media hoja de margen— y las dos fallaron por lo mismo: la caja es el rectángulo
+    // de los miembros, así que CUALQUIER acomodo que corra una hoja más allá de sus vecinas cae
+    // fuera. Con dos hojas eso es correr la de la derecha un poco a la derecha, y como el marco
+    // quedaba con una sola, se disolvía en el acto. Ningún umbral arregla eso: el gesto de
+    // acomodar y el de expulsar son el mismo movimiento, y sólo se diferencian por cuánto.
     //
-    // Sacar una hoja del grupo sigue siendo posible: hay que alejarla de verdad, más de una hoja
-    // de distancia. Y si cayó dentro de OTRO marco, manda ese: mudarse es explícito.
-    if (!destino) {
-      const propio = cajas.find(c => c.m.ids.includes(hojaId))
-      if (propio && dentro(propio, HOJA_W / 2)) destino = propio.m
-    }
+    // Entonces se separan los gestos. Arrastrar ACOMODA —el marco crece con la hoja, que es lo
+    // que uno espera de un grupo— y para sacarla está `desagrupar`, en la etiqueta del marco, que
+    // es explícito y reversible. Mudarse a otro marco sigue siendo por arrastre, porque ahí la
+    // intención no es ambigua: la hoja cayó ADENTRO de otro.
+    const propio  = cajas.find(c => c.m.ids.includes(hojaId))?.m ?? null
+    const encima  = cajas.find(c => dentro(c) && c.m.id !== propio?.id)?.m ?? null
+    const destino = propio ? (encima ?? propio) : (cajas.find(c => dentro(c))?.m ?? null)
+
     setMarcos(ms => {
       const actual = ms.find(m => m.ids.includes(hojaId))
       if ((actual?.id ?? null) === (destino?.id ?? null)) return ms
@@ -855,7 +854,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           if (m.ids.includes(hojaId)) return { ...m, ids: m.ids.filter(x => x !== hojaId) }
           return m
         })
-        // Un marco con una sola hoja ya no agrupa nada.
+        // Un marco con una sola hoja ya no agrupa nada. Sólo puede pasar cuando la hoja se MUDÓ a
+        // otro marco: arrastrar dentro del propio ya no lo vacía.
         .filter(m => m.ids.length > 1)
     })
   }, [])
