@@ -1565,7 +1565,17 @@ export default function NodeChatWindow({
                 // con la imagen de la anterior. El mapa de la sesión queda como respaldo para los
                 // turnos anteriores a este historial.
                 const propias   = (msg.id ? imgsPorMsg[msg.id]?.[def.outputKey] : undefined) ?? msg.output_images?.[def.outputKey]
-                const savedList = propias ?? (isLastAssistant ? (outputImages[def.outputKey] ?? []) : [])
+
+                // El mapa de la sesión es el respaldo para el historial viejo, de cuando las
+                // imágenes no se guardaban por mensaje. Pero solo vale si NADIE más las reclama:
+                // si algún mensaje ya las tiene como propias, ese mapa es una copia de ESAS, y
+                // ofrecérselo a una respuesta nueva le colgaba las imágenes del turno anterior —
+                // que es justo lo contrario de que cada respuesta muestre las suyas.
+                const alguienLasTiene = messages.some(m =>
+                  (m.id ? imgsPorMsg[m.id]?.[def.outputKey] : undefined)?.length ||
+                  m.output_images?.[def.outputKey]?.length)
+                const respaldo  = isLastAssistant && !alguienLasTiene ? (outputImages[def.outputKey] ?? []) : []
+                const savedList = propias ?? respaldo
                 for (let idx = 0; idx < parsed.length; idx++) {
                   const itemText   = parsed[idx]
                   const saved      = savedList.find(s => s.index === idx)
