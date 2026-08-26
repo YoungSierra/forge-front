@@ -63,6 +63,28 @@ function parseJsonArrayItems(content: string): string[] | null {
   return items.length ? items : null
 }
 
+// Bloques encabezados que enumeran entidades. Se exige el MISMO nivel en todos: un `### Rationale`
+// dentro de un `## SEED 04` es parte de la semilla, no otra semilla.
+// El SUSTANTIVO importa: «cualquier palabra + número» tomaba también el título del documento
+// —«Concept Seeds · Pass 3»—. Con el vocabulario que la DNA usa de verdad, UN bloque ya alcanza:
+// una corrida incremental agrega una sola semilla y las anteriores no se repiten.
+const RX_ENUMERADO = /^(#{1,4})\s+.*?\b(?:seeds?|variations?|concepts?|angles?|images?|options?|pages?)\s*[·:.\-—]?\s*0*\d{1,3}\b/i
+function bloquesEnumerados(texto: string): string[] | null {
+  const lineas = String(texto || '').split('\n')
+  const marcas: { i: number; nivel: number }[] = []
+  for (let i = 0; i < lineas.length; i++) {
+    const m = RX_ENUMERADO.exec(lineas[i])
+    if (m) marcas.push({ i, nivel: m[1].length })
+  }
+  if (!marcas.length) return null
+  const nivel   = Math.min(...marcas.map(m => m.nivel))
+  const propias = marcas.filter(m => m.nivel === nivel)
+  return propias.map((p, k) => {
+    const hasta = k + 1 < propias.length ? propias[k + 1].i : lineas.length
+    return lineas.slice(p.i, hasta).join('\n').trim()
+  })
+}
+
 export function parseOutputItems(content: string, format: string): string[] {
   // Outputs de imagen: un output puede pedir VARIAS imágenes (ej. reference_images: 4-6 prompts
   // numerados). Extraer un ítem por prompt — cada bloque numerado, incluidas sus líneas siguientes
@@ -100,6 +122,15 @@ export function parseOutputItems(content: string, format: string): string[] {
     .replace(/```[\s\S]*?```/g, '')
     .replace(/^#{1,4}[ \t]+gaps_for_downstream[\s\S]*$/im, '')
     .trim()
+
+  // Entidades enumeradas por encabezado — «## SEED 01», «### Angle 2», «### Image 3». Van ANTES
+  // que las viñetas, que se llevan cualquier lista que encuentren.
+  //
+  // Medido el 26-08: a ComfyUI se le mandaron «Primary: Arcade / Action» y «Celeste (Extremely OK
+  // Games, 2018) — precision platformer…» como prompts de imagen. Eran la clasificación de género
+  // y los comparables del documento; las semillas, que son encabezados, nunca se miraron.
+  const enumerados = bloquesEnumerados(content)
+  if (enumerados) return enumerados
 
   // Bullet list: "- item", "* item", "• item"
   const bulletRx   = /^[ \t]*[-*•][ \t]+(.+)$/gm
@@ -1609,6 +1640,29 @@ export default function NodeChatWindow({
                         setGeneratingImgKeys(prev => { const n = new Set(prev); n.delete(key); return n })
                       }
                     },
+                  })
+                }
+
+                // Imágenes guardadas en un índice que este parseo ya no alcanza. Pasa cuando el
+                // parser cambia —o cuando la respuesta se reescribió con menos ítems— y son fotos
+                // que YA se pagaron: esconderlas porque el texto de al lado se movió es perder algo
+                // real por un desajuste de numeración. Se muestran al final, sin botón de generar,
+                // porque no hay ítem al que corresponderían.
+                for (const s of savedList) {
+                  if (s.index < parsed.length) continue
+                  const url = s.variations?.at(-1)?.url
+                  if (!url) continue
+                  items.push({
+                    itemKey:       `${def.outputKey}:${s.index}:huerfana`,
+                    index:         s.index,
+                    text:          '',
+                    imageUrl:      url,
+                    allVariations: s.variations ?? [],
+                    isGenerating:  false,
+                    onZoom:        u => setZoomImageUrl(u),
+                    // Sin ítem no hay texto que mandarle al modelo: regenerar acá no tendría con
+                    // qué. La imagen se mira y se amplía, nada más.
+                    onGenerate:    async () => {},
                   })
                 }
               }
