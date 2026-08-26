@@ -2132,6 +2132,18 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       Regenerar no cuesta crédito —es pdfkit local— y el endpoint resuelve las
                       imágenes del momento y actualiza el asset, así que el enlace viejo no aporta.
                       El pptx sí se enlaza: ese archivo no se puede rehacer. */}
+                  {/* Y solo para outputs que SON un documento. La pestaña activa manda: el
+                      `pitch_image_plan` es un registro de decisión —no se entrega, se revisa— y
+                      ofrecer ahí un PDF terminaba en «no tiene un documento aprobado del que sacar
+                      PDF». Lo mismo vale para las `connection`, que son datos para el nodo
+                      siguiente. */}
+                  {(() => {
+                    const def = (node.outputs ?? []).find(x => (x as {key?: string; name?: string}).key === outTab || x.name === outTab) as
+                      { type?: string; format?: string } | undefined
+                    const esDoc = !def
+                      || ['docx', 'pdf', 'document', 'markdown', 'md', 'pptx'].includes(String(def.format || '').toLowerCase())
+                    return esDoc
+                  })() && (<>
                   {effectiveOutPdfUrl && (outSession.output_asset.format === 'pptx' || !outSession.output_asset.content) ? (
                     <a
                       onMouseDown={e => e.stopPropagation()}
@@ -2149,6 +2161,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', background: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0, cursor: pdfLoading ? 'default' : 'pointer', opacity: pdfLoading ? 0.6 : 1 }}
                     >{pdfLoading ? '…' : '↓ PDF'}</button>
                   ) : null}
+                  </>)}
                   {outSession.output_asset.content && (
                     <button
                       onMouseDown={e => e.stopPropagation()}
