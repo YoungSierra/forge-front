@@ -1886,6 +1886,11 @@ export type PasoDeCadena = {
   indice: number; de: number
   clave: string; etiqueta: string; que: string; porque: string
   pide_prompt: boolean; workflow: string
+  /** Cuántos despachos son. Un paso normal es uno; uno que corre por cada salida del anterior son
+   *  tantos como partes haya — veinte en el escenario. Cada despacho es pago y no se repite, así
+   *  que el recuadro lo dice antes de que alguien apriete. */
+  despachos?: number
+  por_cada_salida_de?: string | null
 }
 
 export async function getNextChainStep(projectId: string, assetId: string) {
@@ -1896,13 +1901,16 @@ export async function getNextChainStep(projectId: string, assetId: string) {
 
 export async function advanceAsset(
   projectId: string, assetId: string,
-  opts: { pasos?: number; prompt?: string | null; memberId?: string | null } = {},
+  opts: { pasos?: number; prompt?: string | null; memberId?: string | null; limitePorCada?: number } = {},
 ) {
   return request<{ success: boolean; cadena: string; creados: { id: string; name: string; storage_url: string; format: string }[] }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/advance`,
     {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pasos: opts.pasos ?? 1, prompt: opts.prompt ?? null, member_id: opts.memberId ?? null }),
+      body: JSON.stringify({
+        pasos: opts.pasos ?? 1, prompt: opts.prompt ?? null, member_id: opts.memberId ?? null,
+        limite_por_cada: opts.limitePorCada ?? 0,
+      }),
     },
   )
 }

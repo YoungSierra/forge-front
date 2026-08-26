@@ -3418,11 +3418,11 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
     return () => { vivo = false }
   }, [projectId, asset.id])
 
-  const correr = async () => {
+  const correr = async (limitePorCada = 0) => {
     if (!paso || busy) return
     setBusy(true); setError(null)
     try {
-      const r = await advanceAsset(projectId, asset.id, { pasos: 1, prompt: paso.pide_prompt ? texto : null })
+      const r = await advanceAsset(projectId, asset.id, { pasos: 1, prompt: paso.pide_prompt ? texto : null, limitePorCada })
       onListo(r.creados.map(c => c.id))
     } catch (e) {
       // El despacho no se reintenta solo: cada intento cuesta y no devuelve lo mismo.
@@ -3505,8 +3505,11 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
               background: 'color-mix(in srgb, #F59E0B 7%, transparent)',
               border: '1px solid color-mix(in srgb, #F59E0B 22%, var(--line-2))',
             }}>
-              Spends credit, and running it again never returns the same result. The output is
-              published to the right of this page, connected to it.
+              {(paso.despachos ?? 1) > 1
+                ? `This runs ${paso.despachos} separate jobs — one per part. Each one is paid and
+                   none of them can be reproduced.`
+                : 'Spends credit, and running it again never returns the same result.'}
+              {' '}The output is published to the right of this page, connected to it.
             </div>
 
             {error && (
@@ -3529,7 +3532,7 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
                 }}
               >Cancel</button>
               <button
-                onClick={correr}
+                onClick={() => correr(0)}
                 disabled={busy || (paso.pide_prompt && !texto.trim())}
                 style={{
                   flex: 1, padding: '9px 0', borderRadius: 8,
@@ -3539,8 +3542,21 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
                   fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-sans)',
                   opacity: busy || (paso.pide_prompt && !texto.trim()) ? 0.55 : 1,
                 }}
-              >{busy ? 'Running…' : 'Run'}</button>
+              >{busy ? 'Running…' : (paso.despachos ?? 1) > 1 ? `Run all ${paso.despachos}` : 'Run'}</button>
             </div>
+
+            {(paso.despachos ?? 1) > 1 && !busy && (
+              // Mirar una antes de comprometer veinte. Las que no corras siguen ahí: cada parte
+              // arranca desde sí misma, así que avanzarlas después no pierde nada.
+              <button
+                onClick={() => correr(1)}
+                style={{
+                  width: '100%', marginTop: 8, padding: '7px 0', borderRadius: 8, cursor: 'pointer',
+                  background: 'transparent', border: '1px dashed var(--line-2)',
+                  color: 'var(--text-3)', fontSize: 11, fontFamily: 'var(--font-sans)',
+                }}
+              >Run just the first one — check before committing to {paso.despachos}</button>
+            )}
           </>
         )}
       </div>
