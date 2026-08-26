@@ -1642,29 +1642,6 @@ export default function NodeChatWindow({
                     },
                   })
                 }
-
-                // Imágenes guardadas en un índice que este parseo ya no alcanza. Pasa cuando el
-                // parser cambia —o cuando la respuesta se reescribió con menos ítems— y son fotos
-                // que YA se pagaron: esconderlas porque el texto de al lado se movió es perder algo
-                // real por un desajuste de numeración. Se muestran al final, sin botón de generar,
-                // porque no hay ítem al que corresponderían.
-                for (const s of savedList) {
-                  if (s.index < parsed.length) continue
-                  const url = s.variations?.at(-1)?.url
-                  if (!url) continue
-                  items.push({
-                    itemKey:       `${def.outputKey}:${s.index}:huerfana`,
-                    index:         s.index,
-                    text:          '',
-                    imageUrl:      url,
-                    allVariations: s.variations ?? [],
-                    isGenerating:  false,
-                    onZoom:        u => setZoomImageUrl(u),
-                    // Sin ítem no hay texto que mandarle al modelo: regenerar acá no tendría con
-                    // qué. La imagen se mira y se amplía, nada más.
-                    onGenerate:    async () => {},
-                  })
-                }
               }
               return items.length > 0 ? items : undefined
             }
