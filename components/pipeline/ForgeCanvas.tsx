@@ -1374,6 +1374,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   // La clave '' es el documento del nodo (la tarjeta, que no tiene pestañas).
   const [generatedPdfUrls, setGeneratedPdfUrls] = useState<Record<string, string>>({})
   const [pdfLoading, setPdfLoading] = useState(false)
+  // Por qué no salió el PDF. El botón atrapaba el error y lo mandaba a la consola, así que desde
+  // afuera «no hacía nada» — y el motivo más común es que el output todavía no se aceptó.
+  const [pdfError, setPdfError] = useState<string | null>(null)
   // Qué output se está renderizando, para no disparar dos a la vez.
   const [runningOutput, setRunningOutput] = useState<string | null>(null)
   const [renderJob, setRenderJob] = useState<{ clave: string; esperadas: number; error?: string } | null>(null)
@@ -1647,13 +1650,18 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const handleGeneratePdf = useCallback(async (e?: React.MouseEvent, outputKey = '') => {
     e?.stopPropagation()
     if (pdfLoading) return
-    setPdfLoading(true)
+    setPdfLoading(true); setPdfError(null)
     try {
       const r = await generateNodePdf(projectId, node.id, outputKey || null, canvasNode.project_node_id)
       setGeneratedPdfUrls(prev => ({ ...prev, [outputKey]: r.url }))
       window.open(r.url, '_blank')
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'PDF generation failed'
       console.error('[ForgeNodeCard] PDF generation failed:', err)
+      // El caso de todos los días dicho en criollo: el PDF se arma del output aceptado.
+      setPdfError(/documento aprobado|approved/i.test(msg)
+        ? 'Accept the output first — the PDF is built from the accepted document.'
+        : msg)
     } finally {
       setPdfLoading(false)
     }
@@ -2161,6 +2169,18 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', background: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0, cursor: pdfLoading ? 'default' : 'pointer', opacity: pdfLoading ? 0.6 : 1 }}
                     >{pdfLoading ? '…' : '↓ PDF'}</button>
                   ) : null}
+                  {pdfError && (
+                    <span
+                      onMouseDown={e => e.stopPropagation()}
+                      title={pdfError}
+                      style={{
+                        fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F87171',
+                        border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.08)',
+                        padding: '2px 8px', borderRadius: 3, flexShrink: 1,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260,
+                      }}
+                    >{pdfError}</span>
+                  )}
                   </>)}
                   {outSession.output_asset.content && (
                     <button
