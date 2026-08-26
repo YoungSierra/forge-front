@@ -1579,6 +1579,11 @@ export default function NodeChatWindow({
             const isLastAssistant = messages.slice(i + 1).every(m => m.role !== 'assistant')
 
             // Para mensajes del asistente: construir imageItems para el modal expandido
+            // Qué outputs se saltaron por no traer entidades. Se junta acá para poder DECIRLO:
+            // que no aparezcan huecos es la señal correcta, pero sin explicación parece que la
+            // función se rompió.
+            const sinEntidades = new Set<string>()
+
             const buildItems = (): InlineImageItem[] | undefined => {
               // En focus, restringir al output enfocado (no mostrar imágenes de otros outputs).
               const defs = targetOutputKey ? (imageGenOutputs ?? []).filter(d => d.outputKey === targetOutputKey) : (imageGenOutputs ?? [])
@@ -1618,7 +1623,7 @@ export default function NodeChatWindow({
                 // es que el nodo corrió sin sus inputs y respondió pidiendo datos — ahí un botón
                 // de generar solo sirve para pagar la imagen de un párrafo.
                 if (!tieneEntidades(section, def.format)) {
-                  console.warn(`[chat] ${def.outputKey}: la respuesta no trae entidades — no se ofrecen imágenes`)
+                  sinEntidades.add(def.outputKey)
                   continue
                 }
 
@@ -1694,6 +1699,24 @@ export default function NodeChatWindow({
                 {/* Cada respuesta pinta lo suyo. Atar esto al último turno era lo que hacía
                     desaparecer las imágenes de las respuestas anteriores al seguir conversando. */}
                 {imageItems && <ImageThumbnailRow items={imageItems} />}
+                {sinEntidades.size > 0 && (
+                  <div style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 7, maxWidth: '92%',
+                    margin: '2px 0 0 30px', padding: '7px 10px', borderRadius: 7,
+                    background: 'var(--bg-2)', border: '1px dashed var(--line-2)',
+                    fontSize: 10.5, lineHeight: 1.5, color: 'var(--text-3)',
+                  }}>
+                    <span style={{ flexShrink: 0, opacity: 0.7 }}>◇</span>
+                    <span>
+                      No images offered for{' '}
+                      <strong style={{ color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
+                        {[...sinEntidades].join(', ')}
+                      </strong>
+                      : this answer has no items to illustrate. It usually means the node ran
+                      without its inputs — check the cables before running it again.
+                    </span>
+                  </div>
+                )}
               </React.Fragment>
             )
           })}
