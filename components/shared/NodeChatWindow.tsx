@@ -183,6 +183,26 @@ export function parseOutputItems(content: string, format: string): string[] {
   return content.split('\n').map(l => l.trim()).filter(l => l.length > 5).slice(0, 20)
 }
 
+// ─── ¿El contenido trae ENTIDADES, o es un documento suelto? ──────────────────
+//
+// Un output `list<...>` promete varias piezas —semillas, vistas, páginas—. Cuando el modelo
+// devuelve prosa sin entidades, o directamente «I need more information about your concept», el
+// parser cae a su último recurso: tomar los primeros 700 caracteres como prompt. Ofrecer ahí un
+// botón de generar es invitar a pagar una imagen de un párrafo cualquiera.
+//
+// Medido el 26-08 sobre 45 corridas: 34 salieron sin estructura, varias eran pedidos de datos.
+//
+// Solo aplica a los que PROMETEN varias: un output de una sola imagen cuyo prompt viene en prosa
+// está perfecto y se deja como está.
+export function tieneEntidades(content: string, format: string): boolean {
+  const txt = String(content || '').trim()
+  if (!txt) return false
+  if (!/^list</.test(String(format || ''))) return true
+  const items = parseOutputItems(txt, format)
+  return !(items.length === 1 && txt.startsWith(items[0].slice(0, 60)))
+}
+
+
 const KEYFRAMES = `
   @keyframes chat-dot { 0%,80%,100%{opacity:.2;transform:scale(0.8)} 40%{opacity:1;transform:scale(1)} }
   @keyframes img-gen-pulse { 0%,100%{opacity:.35} 50%{opacity:1} }
@@ -1122,6 +1142,11 @@ export default function NodeChatWindow({
           })()
         : content
 
+      if (!tieneEntidades(section, def.format)) {
+        console.warn(`[chat] ${def.outputKey}: la respuesta no trae entidades — no se generan imágenes`)
+        continue
+      }
+
       const previos = textoItemsPrevios(def.outputKey, def.format)
       parseOutputItems(section, def.format).forEach((text, idx) => {
         const tieneImagen = (outputImages[def.outputKey] ?? []).some(s => s.index === idx && s.variations?.length > 0)
@@ -1588,6 +1613,14 @@ export default function NodeChatWindow({
 
                 // Solo marcar fullMsgUsed para outputs no-imagen
                 if (!sectionMatch && !isPng) fullMsgUsed = true
+
+                // Sin entidades no hay nada que ilustrar: no se ofrecen huecos. El caso típico
+                // es que el nodo corrió sin sus inputs y respondió pidiendo datos — ahí un botón
+                // de generar solo sirve para pagar la imagen de un párrafo.
+                if (!tieneEntidades(section, def.format)) {
+                  console.warn(`[chat] ${def.outputKey}: la respuesta no trae entidades — no se ofrecen imágenes`)
+                  continue
+                }
 
                 const parsed = parseOutputItems(section, def.format)
 
