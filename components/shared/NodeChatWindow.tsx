@@ -1681,8 +1681,17 @@ export default function NodeChatWindow({
                   const m = planRx.exec(msg.content)
                   if (!m) { sinEntidades.add(`${def.outputKey} (needs ${def.declaradasPor})`); continue }
                   const after = msg.content.slice(m.index + m[0].length)
-                  const next  = /^(?:#{1,4}\s+)?[a-z_]+\s*$/im.exec(after)
-                  fuente = (next ? after.slice(0, next.index) : after).trim() || section
+                  // El corte va en el ancla del PRÓXIMO output de este nodo. Cortar en «el
+                  // próximo encabezado que parezca un identificador» dejaba la sección en CERO
+                  // caracteres: la primera entrada del plan —`### pitch_01_hook`— también es un
+                  // identificador. Sin plan, el parseo caía a la prosa y cada CAMPO de cada entrada
+                  // («Target section:», «Subject:», «Generation prompt:») se volvía un hueco aparte.
+                  const cortes = (imageGenOutputs ?? [])
+                    .map(d => d.outputKey)
+                    .filter(k => k !== def.declaradasPor)
+                    .map(k => outputHeaderRx(k).exec(after)?.index)
+                    .filter((i): i is number => typeof i === 'number')
+                  fuente = after.slice(0, cortes.length ? Math.min(...cortes) : after.length).trim() || section
                 }
 
                 const parsed = parseOutputItems(fuente, def.format)
