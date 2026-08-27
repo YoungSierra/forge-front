@@ -159,12 +159,18 @@ function parseDeclaredImagePrompts(content: string): string[] | null {
   return null
 }
 
-export function parseOutputItems(content: string, format: string): string[] {
+export function parseOutputItems(content: string, format: string, outputKey?: string | null): string[] {
   // Outputs de imagen: un output puede pedir VARIAS imágenes (ej. reference_images: 4-6 prompts
   // numerados). Extraer un ítem por prompt — cada bloque numerado, incluidas sus líneas siguientes
   // hasta el próximo número. Antes esto devolvía SIEMPRE el contenido entero como 1 solo ítem, así
   // que un output de N imágenes generaba una sola. Sin lista numerada, el contenido entero = 1 prompt.
   if (format === 'png' || format === 'image') {
+    // Espejo de la regla del backend: la declaración que manda es la DEL OUTPUT. Un output que se
+    // nombra a sí mismo con la lista vacía —«development_images: []», que su DNA acepta como
+    // respuesta válida— no ofrece ningún hueco. Sin esto el back devolvía 0 ítems y el canvas
+    // dibujaba 3: el hueco que se muestra tiene que ser el prompt que se despacha.
+    if (outputKey && new RegExp('`?"?' + outputKey + '"?\\s*:\\s*\\[\\s*\\]').test(content)) return []
+
     // Un output de imagen puede DECLARAR sus imágenes en un bloque JSON, cada una con su prompt.
     // Eso manda sobre cualquier lectura de la prosa. Sin esto, el 2.2 declaró una imagen con su
     // prompt completo y el hueco que se ofreció llevaba la respuesta entera recortada a 700
@@ -279,11 +285,13 @@ export function parseOutputItems(content: string, format: string): string[] {
 //
 // Solo aplica a los que PROMETEN varias: un output de una sola imagen cuyo prompt viene en prosa
 // está perfecto y se deja como está.
-export function tieneEntidades(content: string, format: string): boolean {
+export function tieneEntidades(content: string, format: string, outputKey?: string | null): boolean {
   const txt = String(content || '').trim()
   if (!txt) return false
   if (!/^list</.test(String(format || ''))) return true
-  const items = parseOutputItems(txt, format)
+  const items = parseOutputItems(txt, format, outputKey)
+  // Un output que se declara VACIO no tiene nada que ilustrar.
+  if (!items.length) return false
   return !(items.length === 1 && txt.startsWith(items[0].slice(0, 60)))
 }
 
@@ -1235,13 +1243,13 @@ export default function NodeChatWindow({
           })()
         : content
 
-      if (!tieneEntidades(section, def.format)) {
+      if (!tieneEntidades(section, def.format, def.outputKey)) {
         console.warn(`[chat] ${def.outputKey}: la respuesta no trae entidades — no se generan imágenes`)
         continue
       }
 
       const previos = textoItemsPrevios(def.outputKey, def.format)
-      parseOutputItems(section, def.format).forEach((text, idx) => {
+      parseOutputItems(section, def.format, def.outputKey).forEach((text, idx) => {
         const tieneImagen = (outputImages[def.outputKey] ?? []).some(s => s.index === idx && s.variations?.length > 0)
         // Antes bastaba con tener imagen para saltarlo, y eso volvía inútil TODA iteración: la
         // primera corrida llenaba los N ítems y de ahí en más ninguna respuesta generaba nada,
@@ -1387,7 +1395,7 @@ export default function NodeChatWindow({
           })()
         : content
       if (!sectionMatch && !isPng) fullMsgUsed = true
-      const parsed = parseOutputItems(section, def.format)
+      const parsed = parseOutputItems(section, def.format, def.outputKey)
       const savedList = outputImages[def.outputKey] ?? []
       for (let idx = 0; idx < parsed.length; idx++) {
         const itemText = parsed[idx]
@@ -1715,7 +1723,7 @@ export default function NodeChatWindow({
                 // Sin entidades no hay nada que ilustrar: no se ofrecen huecos. El caso típico
                 // es que el nodo corrió sin sus inputs y respondió pidiendo datos — ahí un botón
                 // de generar solo sirve para pagar la imagen de un párrafo.
-                if (!def.declaradasPor && !tieneEntidades(section, def.format)) {
+                if (!def.declaradasPor && !tieneEntidades(section, def.format, def.outputKey)) {
                   sinEntidades.add(def.outputKey)
                   continue
                 }
@@ -1759,7 +1767,7 @@ export default function NodeChatWindow({
                   fuente = after.slice(0, cortes.length ? Math.min(...cortes) : after.length).trim() || section
                 }
 
-                const parsed = parseOutputItems(fuente, def.format)
+                const parsed = parseOutputItems(fuente, def.format, def.declaradasPor || def.outputKey)
 
                 // Lo que generó ESTE turno manda. Iterar reescribe los prompts sin mover los
                 // índices, así que leer siempre el mapa de la sesión emparejaba la respuesta nueva
