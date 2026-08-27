@@ -4091,7 +4091,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   }, [gateReady])
 
   const buildNodes = useCallback((canvasNodes: CanvasNode[]): Node[] => {
-    const savedPos = savedLayout?.nodes.reduce<Record<string, { x: number; y: number }>>((acc, n) => {
+    // `?.nodes.reduce` protegía el layout pero no la clave: un `canvas_layout` que existe y NO
+    // trae `nodes` -el de 13_lives_kitten_TEST, que quedó solo con `moodboard`- daba
+    // «undefined.reduce» y tumbaba el canvas entero con «This page couldn't load». Sin posiciones
+    // guardadas los nodos caen a su ubicación por defecto, que es exactamente lo que debe pasar.
+    const savedPos = savedLayout?.nodes?.reduce<Record<string, { x: number; y: number }>>((acc, n) => {
       acc[n.id] = n.position
       return acc
     }, {}) ?? {}

@@ -324,8 +324,10 @@ function PipelineApp({
       if (initialProject.canvas_layout) {
         seedLayoutFromDB(initialProject.id, initialProject.canvas_layout as CanvasLayout)
       }
+      // Un layout guardado puede no traer `nodes`/`edges`: `canvas_layout` tiene dos dueños y hay
+      // filas en la base que quedaron solo con `moodboard`. Sin este resguardo el canvas se cae.
       const saved = loadLayout(initialProject.id)
-      if (saved) return { nodes: hydrateNodes(saved.nodes, initialProject, saved.edges), edges: saved.edges }
+      if (saved?.nodes?.length) return { nodes: hydrateNodes(saved.nodes, initialProject, saved.edges ?? []), edges: saved.edges ?? [] }
       const fixed = buildFixedNodes(initialProject)
       return { nodes: hydrateNodes(fixed, initialProject), edges: [] as Edge[] }
     }
@@ -358,7 +360,7 @@ function PipelineApp({
         seedLayoutFromDB(initialProject.id, initialProject.canvas_layout as CanvasLayout)
       }
       const saved = loadLayout(initialProject.id)
-      if (saved) { setFlowNodes(hydrateNodes(saved.nodes, initialProject, saved.edges)); setFlowEdges(saved.edges); return }
+      if (saved?.nodes?.length) { setFlowNodes(hydrateNodes(saved.nodes, initialProject, saved.edges ?? [])); setFlowEdges(saved.edges ?? []); return }
       const fixed = buildFixedNodes(initialProject)
       setFlowNodes(hydrateNodes(fixed, initialProject)); setFlowEdges([]); return
     }

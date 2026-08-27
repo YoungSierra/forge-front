@@ -3,8 +3,11 @@ import { saveCanvasLayout } from './api'
 
 export interface CanvasLayout {
   templateId: string | null
-  nodes: Node[]
-  edges: Edge[]
+  // Opcionales a propósito: `canvas_layout` tiene dos dueños -el canvas y el moodboard- y en la
+  // base hay filas que quedaron solo con `moodboard`. Declararlos obligatorios hacía que el
+  // compilador aprobara `layout.nodes.reduce(...)` sobre algo que en producción era undefined.
+  nodes?: Node[]
+  edges?: Edge[]
   viewport?: Viewport
   container_layouts?: Record<string, ContainerLayoutData>
 }
