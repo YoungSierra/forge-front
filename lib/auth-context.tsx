@@ -52,13 +52,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user)
-      loadMember(user).finally(() => setLoading(false))
-    })
-
+    // La suscripción es la fuente: al suscribirse dispara `INITIAL_SESSION` con la sesión que ya
+    // hay guardada, sin red y sin pedir el candado del navegador.
+    //
+    // Antes esto arrancaba con `getUser()`, que va a la red Y toma `navigator.locks` — el mismo
+    // candado que pedía cada llamada de la API. Con varias pestañas abiertas o varias peticiones
+    // en paralelo se pisaban y una le robaba el candado a otra: «Lock was released because
+    // another request stole it» y la página no cargaba.
+    let vivo = true
+    let respondio = false
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
+        if (!vivo) return
+        respondio = true
         const u = session?.user ?? null
         setUser(u)
         loadMember(u)
@@ -66,7 +72,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     )
 
-    return () => subscription.unsubscribe()
+    // Red de seguridad: si `INITIAL_SESSION` no llegara, la app quedaría girando para siempre.
+    // Se resuelve leyendo la sesión guardada una sola vez.
+    const respaldo = setTimeout(() => {
+      if (!vivo || respondio) return
+      supabase.auth.getSession()
+        .then(({ data }) => {
+          if (!vivo) return
+          const u = data.session?.user ?? null
+          setUser(u)
+          return loadMember(u)
+        })
+        .catch(() => {})
+        .finally(() => { if (vivo) setLoading(false) })
+    }, 3000)
+
+    return () => { vivo = false; clearTimeout(respaldo); subscription.unsubscribe() }
   }, [])
 
   // Idle timeout — fuerza logout tras 1 hora de inactividad
