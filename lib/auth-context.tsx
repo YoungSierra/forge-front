@@ -110,16 +110,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user])
 
-  function signOut() {
+  async function signOut() {
     localStorage.removeItem(MEMBER_ID_KEY)
     localStorage.removeItem('forge_last_project')
     localStorage.removeItem('forge_active_org_id')
-    // Navegar de INMEDIATO: si esperáramos el signOut, React alcanza a renderizar el error de alguna
-    // request que quedó sin token (el "Invalid token" del backend) y se ve un parpadeo rojo antes del
-    // redirect. Revocamos la sesión en segundo plano y descargamos la página ya.
+
+    // `scope: 'local'` borra la sesión guardada SIN salir a la red. El signOut normal llama a
+    // `/auth/v1/logout`, y cuando esa llamada falla —auth saturado— la sesión quedaba intacta:
+    // apretabas Sign out, ibas a /welcome, volvías al home y seguías con el mismo token roto.
+    // Parecía que el botón no hacía nada.
+    try { await supabase.auth.signOut({ scope: 'local' }) } catch { /* se limpia a mano abajo */ }
+
+    // Red de seguridad: si algo quedó, se borra a mano. La sesión vive en `sb-<ref>-auth-token`,
+    // en localStorage y en cookies, y puede venir partida en `.0`, `.1`…
+    try {
+      Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k))
+      document.cookie.split(';')
+        .map(c => c.split('=')[0].trim())
+        .filter(n => n.startsWith('sb-'))
+        .forEach(n => { document.cookie = `${n}=; Max-Age=0; path=/` })
+    } catch { /* almacenamiento bloqueado: el redirect igual va */ }
+
+    // Revocar del lado del servidor es lo único que puede tardar, así que va suelto y sin esperar.
     supabase.auth.signOut().catch(() => {})
     window.location.replace('/welcome')
-    return Promise.resolve()
   }
 
   return (
