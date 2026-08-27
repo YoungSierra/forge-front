@@ -18,6 +18,50 @@ function sbClient() {
   if (!_sb) _sb = createClient()
   return _sb
 }
+// El token, cacheado hasta poco antes de vencer.
+//
+// `getSession()` toma un candado del navegador (`navigator.locks`) cada vez que se llama, y esto
+// se llamaba en CADA petición. El canvas dispara seis a la vez y la home varias más: los candados
+// se pisan y uno le roba el suyo a otro, que es el «Lock was released because another request
+// stole it» / «Lock broken by another request with the 'steal' option» que revienta la página.
+//
+// Se guarda el token y su vencimiento, y las llamadas concurrentes comparten UNA sola promesa en
+// vuelo. `onAuthStateChange` mantiene la caché al día — incluido el refresco del token—, así que
+// no se sirve un token vencido: el margen de 30 s cubre la latencia de la petición que lo usa.
+let _token: string | null = null
+let _tokenExp = 0
+let _enVuelo: Promise<string | null> | null = null
+let _suscrito = false
+
+const MARGEN_MS = 30_000
+
+async function tokenActual(): Promise<string | null> {
+  const client = sbClient()
+  if (!client) return null
+
+  if (!_suscrito) {
+    _suscrito = true
+    client.auth.onAuthStateChange((_e, session) => {
+      _token    = session?.access_token ?? null
+      _tokenExp = session?.expires_at ? session.expires_at * 1000 : 0
+    })
+  }
+
+  if (_token && Date.now() < _tokenExp - MARGEN_MS) return _token
+  if (_enVuelo) return _enVuelo
+
+  _enVuelo = client.auth.getSession()
+    .then(({ data }) => {
+      _token    = data.session?.access_token ?? null
+      _tokenExp = data.session?.expires_at ? data.session.expires_at * 1000 : 0
+      return _token
+    })
+    .catch(() => _token)   // si el candado falla igual, se usa el último token bueno
+    .finally(() => { _enVuelo = null })
+
+  return _enVuelo
+}
+
 export async function authHeaders(): Promise<Record<string, string>> {
   const h: Record<string, string> = {}
   if (typeof window !== 'undefined') {
@@ -26,12 +70,8 @@ export async function authHeaders(): Promise<Record<string, string>> {
     const orgId = localStorage.getItem('forge_active_org_id')
     if (orgId) h['x-org-id'] = orgId
   }
-  const client = sbClient()
-  if (client) {
-    const { data } = await client.auth.getSession()
-    const token = data.session?.access_token
-    if (token) h['Authorization'] = `Bearer ${token}`
-  }
+  const token = await tokenActual()
+  if (token) h['Authorization'] = `Bearer ${token}`
   return h
 }
 
