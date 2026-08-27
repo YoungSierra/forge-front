@@ -126,12 +126,48 @@ function bloquesEnumerados(texto: string): string[] | null {
   return bloquesPorMarcas(lineas, porSustantivo, 1) ?? bloquesPorMarcas(lineas, porIdentificador, 2)
 }
 
+/** Imágenes declaradas en un bloque JSON, una por objeto, con su prompt. Espejo de la misma
+ *  regla en `image-gen.service.js` del backend: los dos parsers tienen que ver lo mismo, o el
+ *  hueco que se dibuja no es el prompt que se despacha. */
+function parseDeclaredImagePrompts(content: string): string[] | null {
+  const bloques = [...String(content || '').matchAll(/```(\w*)\s*([\s\S]*?)```/g)]
+    .map(m => ({ lang: (m[1] || '').toLowerCase(), cuerpo: m[2] }))
+  for (const texto of [
+    ...bloques.filter(b => b.lang === 'json').map(b => b.cuerpo),
+    ...bloques.filter(b => b.lang === '').map(b => b.cuerpo),
+  ]) {
+    const a = texto.indexOf('['), b = texto.lastIndexOf(']')
+    if (a === -1 || b <= a) continue
+    let arr: unknown
+    try { arr = JSON.parse(texto.slice(a, b + 1)) } catch { continue }
+    if (!Array.isArray(arr) || !arr.length) continue
+    if (!arr.every(x => x && typeof x === 'object' && !Array.isArray(x))) continue
+    const prompts = (arr as Record<string, unknown>[])
+      .map(o => String(o.prompt ?? o.image_prompt ?? '').trim())
+    if (prompts.filter(Boolean).length * 2 < arr.length) continue
+    const items = prompts.filter(Boolean)
+    if (items.length) return items
+  }
+  return null
+}
+
 export function parseOutputItems(content: string, format: string): string[] {
   // Outputs de imagen: un output puede pedir VARIAS imágenes (ej. reference_images: 4-6 prompts
   // numerados). Extraer un ítem por prompt — cada bloque numerado, incluidas sus líneas siguientes
   // hasta el próximo número. Antes esto devolvía SIEMPRE el contenido entero como 1 solo ítem, así
   // que un output de N imágenes generaba una sola. Sin lista numerada, el contenido entero = 1 prompt.
   if (format === 'png' || format === 'image') {
+    // Un output de imagen puede DECLARAR sus imágenes en un bloque JSON, cada una con su prompt.
+    // Eso manda sobre cualquier lectura de la prosa. Sin esto, el 2.2 declaró una imagen con su
+    // prompt completo y el hueco que se ofreció llevaba la respuesta entera recortada a 700
+    // caracteres —empezando por «I have the concept data from the existing node output»— y ESO
+    // fue lo que se mandó a ComfyUI.
+    //
+    // Se exige un arreglo de objetos donde la mayoría traiga `prompt`, que es lo que distingue una
+    // declaración de imágenes de un arreglo de paleta o de gaps.
+    const declarados = parseDeclaredImagePrompts(content)
+    if (declarados) return declarados
+
     // Inicio de cada prompt. Cubre dos estilos: número al inicio ("1.", "**1.**", "### 1.") Y
     // "Palabra(s) N" + separador ("**Image 1 —**", "### Image 2:", "Image 3 -") — el LLM suele
     // titular las imágenes así en vez de una lista numerada, y antes eso quedaba como 1 solo prompt.
