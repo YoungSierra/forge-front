@@ -1723,13 +1723,21 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
       {/* Badge de stale / error — el ⚠ de stale solo aplica si el nodo YA produjo output
           (showStale); un nodo idle nunca corrió, así que no puede estar "desactualizado" */}
       {!isRunning && (showStale || isError) && (
-        <div style={{
-          position: 'absolute', top: -8, right: -8, zIndex: 10,
-          width: 18, height: 18, borderRadius: '50%',
-          background: isError ? '#EF4444' : '#F59E0B',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 9, border: '2px solid var(--bg-1)',
-        }}>
+        <div
+          // El badge no decía de qué se trata: un triángulo naranja sin explicación deja a
+          // cualquiera adivinando si perdió trabajo. «Stale» solo significa que algo aguas arriba
+          // se aceptó DESPUÉS de que este nodo produjo lo suyo — no que esté roto.
+          title={isError
+            ? 'This node failed on its last run. Open it to see the error.'
+            : 'Out of date: something upstream was accepted after this node produced its output. What it holds is still valid — run it again to rebuild it from the current inputs.'}
+          style={{
+            position: 'absolute', top: -8, right: -8, zIndex: 10,
+            width: 18, height: 18, borderRadius: '50%',
+            background: isError ? '#EF4444' : '#F59E0B',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 9, border: '2px solid var(--bg-1)', cursor: 'help',
+          }}
+        >
           {isError ? '✕' : '⚠'}
         </div>
       )}
@@ -5564,8 +5572,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             })
           })()}
           initialMessages={chatMessages}
-          onSend={async (msg, file, attachmentUrl) => {
-            const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined, file, attachmentUrl, chatTargetOutputKey, chatNode.project_node_id)
+          onSend={async (msg, file, attachmentUrl, signal) => {
+            const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined, file, attachmentUrl, chatTargetOutputKey, chatNode.project_node_id, signal)
             // Siempre setear (o resetear): si la respuesta nueva no trae doc (ej. connection),
             // limpiar el docUrl viejo para que no quede un botón de descarga stale.
             setChatDocUrl(r.doc_url ?? null); setChatDocFormat(r.doc_format ?? null)

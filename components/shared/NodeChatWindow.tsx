@@ -983,7 +983,7 @@ export interface NodeChatWindowProps {
   validateOutput?:   (data: unknown) => string | null  // null = válido, string = mensaje de error
   onClose:           () => void
   // Si se provee, reemplaza la llamada interna a chatWithNode
-  onSend?:          (userMessage: string, file?: File | null, attachmentUrl?: string) => Promise<{ reply: string; attachment?: ChatAttachment; messageId?: string }>
+  onSend?:          (userMessage: string, file?: File | null, attachmentUrl?: string, signal?: AbortSignal) => Promise<{ reply: string; attachment?: ChatAttachment; messageId?: string }>
   onAccept?:        (content: string) => Promise<void>
   docUrl?:          string
   docFormat?:       string
@@ -1018,6 +1018,8 @@ export default function NodeChatWindow({
   const [moodOpen,        setMoodOpen]        = useState(false)   // moodboard filtrado a este nodo
   const [input,           setInput]           = useState('')
   const [sending,         setSending]         = useState(false)
+  // El controlador del turno en vuelo, para que el botón Stop pueda abortarlo.
+  const abortRef = useRef<AbortController | null>(null)
   const [applying,        setApplying]        = useState(false)
   const [accepting,       setAccepting]       = useState(false)
   // Mostrar Accept solo si no había output aprobado al abrir, o si el usuario generó algo nuevo
@@ -1297,9 +1299,13 @@ export default function NodeChatWindow({
     setPendingUrl(null)
     setSending(true)
     setError(null)
+    // Abortarlo cierra la conexión, y el back traduce ese cierre en una señal que llega hasta el
+    // proveedor: la generación se corta de verdad y se deja de gastar.
+    const abortar = new AbortController()
+    abortRef.current = abortar
     try {
       if (onSend) {
-        const result = await onSend(text, file, urlAtt ?? undefined)
+        const result = await onSend(text, file, urlAtt ?? undefined, abortar.signal)
         // El id del turno se calcula ANTES de agregarlo al historial: `triggerAutoImageGen` mira
         // los mensajes previos para saber qué cambió, y si el nuevo ya estuviera ahí se compararía
         // contra sí mismo — todo saldría «sin cambios» y no se generaría nada.
@@ -1322,11 +1328,20 @@ export default function NodeChatWindow({
         triggerAutoImageGen(res.reply)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error contacting assistant')
+      // Cancelar no es un error: lo pidió el usuario. Se deja constancia en el hilo para que no
+      // parezca que el turno se perdió solo.
+      if ((err as Error)?.name === 'AbortError') {
+        setMessages(prev => [...prev, { role: 'assistant', content: '_Generation stopped._' }])
+      } else {
+        setError(err instanceof Error ? err.message : 'Error contacting assistant')
+      }
     } finally {
+      abortRef.current = null
       setSending(false)
     }
   }
+
+  const detener = () => abortRef.current?.abort()
 
   // Extrae JSON de la conversación, valida y llama onApply
   const applyOutput = async () => {
@@ -2117,20 +2132,41 @@ export default function NodeChatWindow({
                   <Paperclip size={15} strokeWidth={1.75} />
                 </button>
               )}
-              <button
-                onClick={send}
-                disabled={sending || !input.trim() || locked}
-                style={{
-                  flex: '1 1 0', width: '100%', borderRadius: 8, border: 'none',
-                  background: sending || !input.trim() || locked ? 'var(--bg-3)' : 'var(--action)',
-                  color:  sending || !input.trim() || locked ? 'var(--text-4)' : 'var(--action-fg)',
-                  fontSize: 18, cursor: sending || !input.trim() || locked ? 'not-allowed' : 'pointer',
-                  transition: 'background 120ms',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}
-              >
-                →
-              </button>
+              {/* Mientras genera, el mismo botón es Stop. Abortarlo cierra la conexión y el back
+                  corta la llamada al proveedor: se deja de gastar de verdad, no solo se suelta la
+                  ventana. */}
+              {sending ? (
+                <button
+                  onClick={detener}
+                  title="Stop generating — the model stops and no further credit is spent"
+                  style={{
+                    flex: '1 1 0', width: '100%', borderRadius: 8,
+                    border: '1px solid color-mix(in srgb, #EF4444 45%, var(--line-2))',
+                    background: 'color-mix(in srgb, #EF4444 12%, var(--bg-2))',
+                    color: '#EF4444', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
+                    fontFamily: 'var(--font-mono)', cursor: 'pointer', transition: 'background 120ms',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  }}
+                >
+                  <span style={{ width: 9, height: 9, background: '#EF4444', borderRadius: 1.5, display: 'inline-block' }} />
+                  STOP
+                </button>
+              ) : (
+                <button
+                  onClick={send}
+                  disabled={!input.trim() || locked}
+                  style={{
+                    flex: '1 1 0', width: '100%', borderRadius: 8, border: 'none',
+                    background: !input.trim() || locked ? 'var(--bg-3)' : 'var(--action)',
+                    color:  !input.trim() || locked ? 'var(--text-4)' : 'var(--action-fg)',
+                    fontSize: 18, cursor: !input.trim() || locked ? 'not-allowed' : 'pointer',
+                    transition: 'background 120ms',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  →
+                </button>
+              )}
             </div>
           </div>
         </div>

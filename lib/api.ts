@@ -1484,6 +1484,8 @@ export async function chatWithForgeNode(
   attachmentUrl?:   string,
   targetOutputKey?: string | null,
   projectNodeId?:   string | null,
+  /** Para el botón Stop: al abortarlo se cierra la conexión y el back corta la generación. */
+  signal?:          AbortSignal,
 ): Promise<{ reply: string; session_id: string; message_id?: string; output_images?: OutputImagesMap; doc_url?: string; doc_format?: string; attachment?: ChatAttachment }> {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
 
@@ -1509,6 +1511,7 @@ export async function chatWithForgeNode(
     method: 'POST',
     headers,
     body,
+    signal,
   })
 
   if (!res.ok) {
