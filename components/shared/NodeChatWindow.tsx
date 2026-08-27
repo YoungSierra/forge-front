@@ -142,9 +142,17 @@ function parseDeclaredImagePrompts(content: string): string[] | null {
     try { arr = JSON.parse(texto.slice(a, b + 1)) } catch { continue }
     if (!Array.isArray(arr) || !arr.length) continue
     if (!arr.every(x => x && typeof x === 'object' && !Array.isArray(x))) continue
-    const prompts = (arr as Record<string, unknown>[])
-      .map(o => String(o.prompt ?? o.image_prompt ?? '').trim())
+    // `prompt` primero; `depicts` como segunda opción — el 2.2 declara sus imágenes así.
+    const prompts = (arr as Record<string, unknown>[]).map(o => {
+      for (const campo of ['prompt', 'image_prompt', 'depicts']) {
+        const v = o[campo]
+        if (typeof v === 'string' && v.trim()) return v.trim()
+      }
+      return ''
+    })
     if (prompts.filter(Boolean).length * 2 < arr.length) continue
+    // Va COMPLETO, sin el tope de 700 del respaldo: ese existe para no mandar un documento
+    // entero, no para cortar a la mitad el prompt que el modelo escribió.
     const items = prompts.filter(Boolean)
     if (items.length) return items
   }
