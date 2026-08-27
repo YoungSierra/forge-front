@@ -3996,6 +3996,16 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     loadCanvas()
   }, [loadCanvas])
 
+  // Refresh tiene que traer lo que cambió por fuera de esta pestaña — que es para lo único que
+  // sirve. `onRefresh` solo recargaba la fila de `projects`, y como `loadCanvas` depende de
+  // `project.id` —que nunca cambia— el canvas no se volvía a pedir: los nodos, las sesiones y los
+  // outputs seguían siendo los de cuando abriste. Si otro miembro corría un nodo, no aparecía
+  // hasta recargar la página entera.
+  const refrescarTodo = useCallback(() => {
+    onRefresh()
+    loadCanvas()
+  }, [onRefresh, loadCanvas])
+
   const canvasNodeIds = useMemo(
     () => new Set((canvasData?.nodes ?? []).filter(cn => cn.node_type === 'forge_node').map(cn => cn.node!.id)),
     [canvasData],
@@ -5388,7 +5398,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     <ForgeToolbar
       project={{ ...project, name: localName }}
       phase={runPhase}
-      onRefresh={onRefresh}
+      onRefresh={refrescarTodo}
       onNameChange={handleNameChange}
       onRunPipeline={runPhase === 'idle' ? handleRunAll : undefined}
       onRunScope={runPhase === 'idle' ? runScope : undefined}
