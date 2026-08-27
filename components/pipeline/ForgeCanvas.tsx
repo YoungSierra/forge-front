@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import {
   ReactFlow, ReactFlowProvider,
   useNodesState, useEdgesState,
-  useReactFlow, useViewport,
+  useReactFlow, useViewport, useUpdateNodeInternals,
   addEdge,
   Handle, Position,
   type Node, type Edge, type Connection, type EdgeChange,
@@ -1026,6 +1026,15 @@ const AssetNodeCard = React.memo(function AssetNodeCard({ data }: { data: AssetN
   const { canvasNode, collapsed, projectId, onToggleCollapse, onRemove } = data
   const { asset } = canvasNode
   const [previewOpen, setPreviewOpen] = useState(false)
+
+  // Colapsar cambia la tarjeta de 240 px a 36 y remonta el Handle en otra posición. React Flow
+  // guarda las medidas del handle aparte y no las revisa solo: si quedan viejas, el cable que
+  // sale de este nodo deja de dibujarse aunque el edge siga en el arreglo y en la base.
+  const updateNodeInternals = useUpdateNodeInternals()
+  useEffect(() => {
+    updateNodeInternals(canvasNode.project_node_id)
+  }, [collapsed, canvasNode.project_node_id, updateNodeInternals])
+
   if (!asset) return null
 
   const icon = ASSET_TYPE_ICON[asset.asset_type] ?? '📎'
@@ -1135,6 +1144,15 @@ const TextInputCard = React.memo(function TextInputCard({ data }: { data: TextIn
     setLabel(canvasNode.text_label   ?? 'Text Input')
     setContent(canvasNode.text_content ?? '')
   }, [canvasNode.text_label, canvasNode.text_content])
+
+  // La vista colapsada y la expandida son dos árboles distintos, y el Handle cambia de sitio
+  // (top 10 vs top 40) y de tamaño de tarjeta (36 vs 240). React Flow cachea las medidas del
+  // handle: si no se le avisa, quedan viejas y el cable de este nodo deja de dibujarse — sigue
+  // en el arreglo de edges y en la base, pero no se ve. Es el «se ocultó el cable» del text input.
+  const updateNodeInternals = useUpdateNodeInternals()
+  useEffect(() => {
+    updateNodeInternals(canvasNode.project_node_id)
+  }, [collapsed, expanded, canvasNode.project_node_id, updateNodeInternals])
 
   // Cuando está expandido, ajusta la altura al contenido real
   useEffect(() => {
