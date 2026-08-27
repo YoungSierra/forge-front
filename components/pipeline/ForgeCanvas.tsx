@@ -5607,6 +5607,18 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           }}
           docUrl={chatDocUrl ?? undefined}
           docFormat={chatDocFormat ?? undefined}
+          // Lo aprobado de los OTROS outputs del nodo. El pitch document declara sus imágenes en
+          // su plan, y corriendo output por output ese plan no viene en la respuesta — está en su
+          // propio asset. Sin esto el chat avisaba «no hay imágenes que ofrecer» con el plan
+          // aprobado ahí mismo.
+          siblingContent={(() => {
+            const m: Record<string, string> = {}
+            for (const [k, s] of Object.entries(chatNode.output_sessions ?? {})) {
+              const c = (s as { output_asset?: { content?: string | null } })?.output_asset?.content
+              if (c && k !== chatTargetOutputKey) m[k] = c
+            }
+            return m
+          })()}
           imageGenOutputs={(() => {
             const defs: ImageOutputDef[] = []
             for (const out of (chatForgeNode.outputs ?? [])) {

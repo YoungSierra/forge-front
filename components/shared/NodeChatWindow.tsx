@@ -943,6 +943,10 @@ export interface NodeChatWindowProps {
   // Output enfocado: el chat trabaja sobre un output específico del nodo
   targetOutputKey?:     string | null
   targetOutputLabel?:   string | null
+  /** Contenido YA APROBADO de los otros outputs del nodo, por clave. Un output que declara sus
+   *  imágenes en un hermano —el pitch document las declara en su plan— necesita ese hermano, y
+   *  corriendo output por output el hermano no viene en la respuesta: vive en su propio asset. */
+  siblingContent?:      Record<string, string>
   // Prompt de sistema que se usará (solo lectura, para referencia del usuario)
   systemPrompt?:        string
   // Panel de contexto — solo para nodos gate
@@ -955,7 +959,7 @@ export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
   initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, docUrl, docFormat,
   approvedAsset, imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
-  targetOutputKey, targetOutputLabel, systemPrompt,
+  targetOutputKey, targetOutputLabel, systemPrompt, siblingContent,
   isGate, projectNodeId, onOpenOutput,
 }: NodeChatWindowProps) {
   const [messages,        setMessages]        = useState<ChatMessage[]>(initialMessages ?? [])
@@ -1678,9 +1682,26 @@ export default function NodeChatWindow({
                 let fuente = section
                 if (def.declaradasPor) {
                   const planRx = outputHeaderRx(def.declaradasPor)
-                  const m = planRx.exec(msg.content)
+                  let m = planRx.exec(msg.content)
+                  let texto = msg.content
+
+                  // Corriendo output por output, el hermano NO está en esta respuesta: vive en su
+                  // propio asset aprobado. Antes se avisaba «no hay imágenes que ofrecer» y el
+                  // pitch document se quedaba sin ninguna, teniendo su plan de 4 entradas
+                  // aprobado ahí al lado. El hermano solo se usa si el mensaje no lo trae: lo que
+                  // se acaba de generar siempre manda sobre lo guardado.
+                  if (!m) {
+                    const guardado = siblingContent?.[def.declaradasPor]
+                    if (guardado) {
+                      const m2 = outputHeaderRx(def.declaradasPor).exec(guardado)
+                      // El asset del hermano puede venir con su encabezado o sin él —depende de
+                      // si se aceptó el nodo entero o ese output suelto—; los dos casos sirven.
+                      texto = guardado
+                      m = m2 ?? ({ index: 0, 0: '' } as unknown as RegExpExecArray)
+                    }
+                  }
                   if (!m) { sinEntidades.add(`${def.outputKey} (needs ${def.declaradasPor})`); continue }
-                  const after = msg.content.slice(m.index + m[0].length)
+                  const after = texto.slice(m.index + m[0].length)
                   // El corte va en el ancla del PRÓXIMO output de este nodo. Cortar en «el
                   // próximo encabezado que parezca un identificador» dejaba la sección en CERO
                   // caracteres: la primera entrada del plan —`### pitch_01_hook`— también es un
