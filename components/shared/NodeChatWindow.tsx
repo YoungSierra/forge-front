@@ -987,6 +987,8 @@ export interface NodeChatWindowProps {
   onAccept?:        (content: string) => Promise<void>
   docUrl?:          string
   docFormat?:       string
+  /** Hay imágenes de este nodo renderizándose: el documento todavía no las tiene. */
+  imagesPending?:   boolean
   approvedAsset?:       ApprovedAsset
   // Image gen por item
   imageGenOutputs?:     ImageOutputDef[]
@@ -1009,7 +1011,7 @@ export interface NodeChatWindowProps {
 
 export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
-  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, docUrl, docFormat,
+  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, docUrl, docFormat, imagesPending,
   approvedAsset, imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
   targetOutputKey, targetOutputLabel, systemPrompt, siblingContent,
   isGate, projectNodeId, onOpenOutput,
@@ -1962,7 +1964,22 @@ export default function NodeChatWindow({
         </div>
 
         {/* Chip de descarga — mitad PDF, mitad MD (texto original). Del run recién generado o del tool_call persistido */}
-        {effectiveDocUrl && (
+        {/* Mientras las imágenes se renderizan el documento todavía no las tiene: bajarlo ahora
+            entrega el PDF con los [ IMAGE: … ] impresos como texto. */}
+        {effectiveDocUrl && imagesPending && (
+          <div style={{ padding: '6px 12px 0', borderTop: '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
+            <div style={{
+              padding: '7px 10px', borderRadius: 6, fontSize: 10, lineHeight: 1.5,
+              fontFamily: 'var(--font-mono)', color: '#F59E0B',
+              background: 'color-mix(in srgb, #F59E0B 10%, var(--bg-2))',
+              border: '1px solid color-mix(in srgb, #F59E0B 35%, transparent)',
+            }}>
+              ◷ RENDERING IMAGES — the document is not ready to download yet. It would print the
+              [ IMAGE: … ] markers as text.
+            </div>
+          </div>
+        )}
+        {effectiveDocUrl && !imagesPending && (
           <div style={{ padding: '6px 12px 0', borderTop: '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
             <div style={{ display: 'flex', gap: 6 }}>
               <a
@@ -2017,17 +2034,19 @@ export default function NodeChatWindow({
                   setAccepting(false)
                 }
               }}
-              disabled={accepting || sending}
+              // Con imágenes en vuelo el nodo NO terminó de producir: aceptar ahí congela un output
+              // al que todavía le faltan sus propias imágenes.
+              disabled={accepting || sending || !!imagesPending}
               style={{
                 width: '100%', padding: '7px 0', borderRadius: 6, border: 'none',
-                background: accepting || sending ? 'var(--bg-4)' : '#34D399',
-                color: accepting || sending ? 'var(--text-3)' : '#0a2e1f',
+                background: accepting || sending || imagesPending ? 'var(--bg-4)' : '#34D399',
+                color: accepting || sending || imagesPending ? 'var(--text-3)' : '#0a2e1f',
                 fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                cursor: accepting || sending ? 'not-allowed' : 'pointer',
+                cursor: accepting || sending || imagesPending ? 'not-allowed' : 'pointer',
                 letterSpacing: '.04em', transition: 'all 120ms',
               }}
             >
-              {accepting ? '⟳ Accepting…' : '✓ Accept as output'}
+              {accepting ? '⟳ Accepting…' : imagesPending ? '◷ Waiting for images…' : '✓ Accept as output'}
             </button>
           </div>
         )}

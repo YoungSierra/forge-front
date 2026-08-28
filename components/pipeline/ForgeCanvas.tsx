@@ -3847,6 +3847,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [chatDocUrl,        setChatDocUrl]        = useState<string | null>(null)
   const [chatDocFormat,     setChatDocFormat]     = useState<string | null>(null)
   const [chatOutputImages,     setChatOutputImages]     = useState<OutputImagesMap>({})
+  // Fuerza el recálculo de `imagesPending`, que se lee de localStorage en cada render
+  const [tickDespacho,         setTickDespacho]         = useState(0)
   const [chatApprovedAsset,    setChatApprovedAsset]    = useState<ApprovedAsset | null>(null)
   const [chatTargetOutputKey,  setChatTargetOutputKey]  = useState<string | null>(null)
   const [chatTargetOutputLabel,setChatTargetOutputLabel]= useState<string | null>(null)
@@ -4019,6 +4021,67 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     onRefresh()
     loadCanvas()
   }, [onRefresh, loadCanvas])
+
+  // Los despachos anotados se limpiaban SOLO al abrir el modal de outputs. Fuera de ahí —en el
+  // chat— un despacho que ya terminó dejaba el aviso «RENDERING IMAGES» puesto hasta que vencía
+  // a la media hora, y con él el bloqueo de la descarga. La verdad la tiene la sesión del output:
+  // en cuanto deja de estar activa, la nota se borra.
+  useEffect(() => {
+    if (!canvasData?.nodes?.length) return
+    const notas = leerDespachos()
+    const claves = Object.keys(notas)
+    if (!claves.length) return
+    let cambio = false
+    for (const k of claves) {
+      const corte = k.indexOf(':')
+      if (corte < 0) continue
+      const pnId = k.slice(0, corte), salida = k.slice(corte + 1)
+      const nodo = canvasData.nodes.find(n => n.project_node_id === pnId)
+      if (!nodo) continue                    // otro proyecto o nodo ya no está: no opinar
+      const est = (nodo.output_sessions ?? {})[salida]?.status
+      if (est === 'active') continue         // corriendo de verdad
+      // Sin sesión: recién despachado y el canvas todavía no la trae. Se le da un margen; pasado
+      // eso, la sesión no va a aparecer —murió o la borraron— y la nota no puede quedar eterna.
+      if (!est && Date.now() - (notas[k]?.desde ?? 0) < 3 * 60_000) continue
+      delete notas[k]; cambio = true
+    }
+    if (cambio) guardarDespachos(notas)
+  }, [canvasData])
+
+  // Con el chat abierto, el canvas no recarga: el aviso «RENDERING IMAGES» y el Accept bloqueado
+  // se quedaban puestos aunque las imágenes ya hubieran llegado. Se consulta la sesión del output
+  // mientras haya despacho vivo; al terminar se borra la nota, entran las imágenes y se releen los
+  // mensajes —el documento se rehizo del lado del motor y su enlace cambió.
+  useEffect(() => {
+    const pnId = chatNode?.project_node_id
+    const nodoId = chatNode?.node?.id
+    if (!pnId || !nodoId) return
+    const pref = `${pnId}:`
+    const claves = Object.keys(leerDespachos()).filter(k => k.startsWith(pref)).map(k => k.slice(pref.length))
+    if (!claves.length) return
+
+    let vigente = true
+    const t = setInterval(async () => {
+      for (const clave of claves) {
+        try {
+          const r = await getNodeSession(project.id, nodoId, clave, pnId)
+          const estado = r.session?.status
+          if (!estado || estado === 'active') continue
+
+          const notas = leerDespachos(); delete notas[pref + clave]; guardarDespachos(notas)
+          if (!vigente) return
+          if (r.session?.output_images) {
+            setChatOutputImages(prev => ({ ...prev, ...(r.session!.output_images as OutputImagesMap) }))
+          }
+          // El enlace del documento vive en los tool_calls del mensaje, y el motor lo sustituyó
+          const g = await getNodeSession(project.id, nodoId, null, pnId)
+          if (vigente && g.messages?.length) setChatMessages(g.messages)
+          if (vigente) setTickDespacho(x => x + 1)
+        } catch { /* se reintenta en el siguiente tick */ }
+      }
+    }, 8000)
+    return () => { vigente = false; clearInterval(t) }
+  }, [chatNode, project.id, tickDespacho])
 
   const canvasNodeIds = useMemo(
     () => new Set((canvasData?.nodes ?? []).filter(cn => cn.node_type === 'forge_node').map(cn => cn.node!.id)),
@@ -5379,7 +5442,16 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       const { session, messages, asset } = await getNodeSession(project.id, node.node!.id, outputKey, node.project_node_id)
       setChatSessionId(session?.id ?? null)
       setChatMessages(messages)
-      setChatOutputImages((session?.output_images as OutputImagesMap) ?? {})
+      // Las imágenes de un output despachado en el run del nodo entero viven en la sesión de ESE
+      // output, no en la general. Sin juntarlas, el chat mostraba los `[ IMAGE: … ]` como texto
+      // teniendo las imágenes ya renderizadas al lado.
+      setChatOutputImages(() => {
+        const mezcla: OutputImagesMap = { ...((session?.output_images as OutputImagesMap) ?? {}) }
+        for (const s of Object.values(node.output_sessions ?? {})) {
+          Object.assign(mezcla, (s.output_images as OutputImagesMap) ?? {})
+        }
+        return mezcla
+      })
       setChatApprovedAsset(asset ?? null)
     } catch {
       setChatSessionId(null)
@@ -5629,7 +5701,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               setCanvasData(prev => prev ? {
                 ...prev,
                 nodes: prev.nodes.map(n => {
-                  if (n.node?.id !== chatForgeNode.id) return n
+                  // Por INSTANCIA, no por nodo del catálogo: con fan-out el mismo 2.1 vive en varios lanes, y
+                  // comparar por node.id marcaba como corrido también el del lane vecino — el rombo se
+                  // ponía verde en los dos y solo recargar lo desmentía.
+                  if (n.project_node_id !== chatNode.project_node_id) return n
                   if (chatTargetOutputKey) {
                     // Sesión de output específico — va en output_sessions
                     return { ...n, output_sessions: { ...(n.output_sessions ?? {}), [chatTargetOutputKey]: newSess } }
@@ -5659,6 +5734,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           }}
           docUrl={chatDocUrl ?? undefined}
           docFormat={chatDocFormat ?? undefined}
+          // El documento se arma antes que las imágenes; mientras el despacho vive, bajarlo
+          // entrega el PDF con los marcadores impresos como texto.
+          imagesPending={!!chatNode.project_node_id && Object.keys(leerDespachos())
+            .some(k => k.startsWith(chatNode.project_node_id + ':'))}
           // Lo aprobado de los OTROS outputs del nodo. El pitch document declara sus imágenes en
           // su plan, y corriendo output por output ese plan no viene en la respuesta — está en su
           // propio asset. Sin esto el chat avisaba «no hay imágenes que ofrecer» con el plan
@@ -5706,7 +5785,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             setCanvasData(prev => prev ? {
               ...prev,
               nodes: prev.nodes.map(n => {
-                if (n.node?.id !== chatForgeNode.id) return n
+                // Por INSTANCIA, no por nodo del catálogo: con fan-out el mismo 2.1 vive en varios lanes, y
+                  // comparar por node.id marcaba como corrido también el del lane vecino — el rombo se
+                  // ponía verde en los dos y solo recargar lo desmentía.
+                  if (n.project_node_id !== chatNode.project_node_id) return n
                 // Actualizar per-output session si el chat está enfocado en un output específico
                 if (chatTargetOutputKey && (n.output_sessions ?? {})[chatTargetOutputKey]) {
                   const outSess = n.output_sessions![chatTargetOutputKey]
