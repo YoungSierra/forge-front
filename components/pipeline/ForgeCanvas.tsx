@@ -1668,6 +1668,20 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const handleGeneratePdf = useCallback(async (e?: React.MouseEvent, outputKey = '') => {
     e?.stopPropagation()
     if (pdfLoading) return
+
+    // Un PDF pedido mientras las imágenes se están generando sale con los `[ IMAGE: … ]` impresos
+    // como texto: el resolvedor lee `output_images` en el momento de armarlo, y durante el
+    // despacho todavía está vacío. Un documento a medias que alguien manda sin mirarlo es peor que
+    // esperar, así que no se entrega hasta que el render termine.
+    const pref = `${canvasNode.project_node_id}:`
+    const enCurso = Object.keys(leerDespachos())
+      .filter(k => k.startsWith(pref)).map(k => k.slice(pref.length))
+      .filter(k => !outputKey || k === outputKey)
+    if (enCurso.length) {
+      setPdfError(`Images are still rendering (${enCurso.join(', ')}). The PDF would print the [ IMAGE: … ] markers as text — wait for the render to finish.`)
+      return
+    }
+
     setPdfLoading(true); setPdfError(null)
     try {
       const r = await generateNodePdf(projectId, node.id, outputKey || null, canvasNode.project_node_id)
@@ -5584,9 +5598,25 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           initialMessages={chatMessages}
           onSend={async (msg, file, attachmentUrl, signal) => {
             const r = await chatWithForgeNode(project.id, chatForgeNode.id, msg, chatSessionId ?? undefined, file, attachmentUrl, chatTargetOutputKey, chatNode.project_node_id, signal)
+            // El run del nodo entero despacha en segundo plano las imágenes de los outputs que el
+            // front no genera (un documento con image_gen). Se anotan como despacho vivo: sin eso
+            // el PDF queda descargable durante los minutos del render y sale con los
+            // `[ IMAGE: … ]` impresos como texto, porque `output_images` todavía está vacío.
+            if (r.images_dispatched?.length && chatNode.project_node_id) {
+              const t = leerDespachos()
+              for (const clave of r.images_dispatched) {
+                t[`${chatNode.project_node_id}:${clave}`] = { esperadas: 0, desde: Date.now() }
+              }
+              guardarDespachos(t)
+            }
             // Siempre setear (o resetear): si la respuesta nueva no trae doc (ej. connection),
             // limpiar el docUrl viejo para que no quede un botón de descarga stale.
-            setChatDocUrl(r.doc_url ?? null); setChatDocFormat(r.doc_format ?? null)
+            // Con un despacho vivo el documento se armó ANTES que las imágenes, así que ese enlace
+            // entrega justo el PDF a medias que el guard de ↓ PDF impide. Se oculta; el PDF se pide
+            // cuando el render termina y entonces sí sale con las imágenes ancladas.
+            const docAMedias = !!r.images_dispatched?.length
+            setChatDocUrl(docAMedias ? null : (r.doc_url ?? null))
+            setChatDocFormat(docAMedias ? null : (r.doc_format ?? null))
             // Actualizar sesión en el estado local si es nueva
             chatSessionIdRef.current = r.session_id
             if (!chatSessionId) {
