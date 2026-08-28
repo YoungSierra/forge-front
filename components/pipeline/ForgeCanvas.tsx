@@ -29,7 +29,7 @@ import { CopyButton } from '@/components/shared/CopyButton'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { jsonToMarkdown } from '@/lib/json-display'
+import { forDisplay } from '@/lib/json-display'
 import { downloadTextFile, mdFilename } from '@/lib/download'
 import { compareNodeKey } from '@/lib/node-order'
 
@@ -2211,7 +2211,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                   {outSession.output_asset.content && (
                     <button
                       onMouseDown={e => e.stopPropagation()}
-                      onClick={() => { const c = outSession?.output_asset?.content; if (!c) return; downloadTextFile(jsonToMarkdown(c) ?? c, mdFilename(outSession?.output_asset?.name || 'document')) }}
+                      onClick={() => { const c = outSession?.output_asset?.content; if (!c) return; downloadTextFile(forDisplay(c), mdFilename(outSession?.output_asset?.name || 'document')) }}
                       title="Download Markdown (original text)"
                       style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', background: 'none', padding: '2px 8px', border: '1px solid var(--line-2)', borderRadius: 3, flexShrink: 0, cursor: 'pointer' }}
                     >↓ MD</button>
@@ -2699,7 +2699,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                       {/* JSON → markdown legible (solo presentación). Con image items se deja
                           crudo para no romper la inyección de botones ✦. */}
-                      {imageItems.length > 0 ? section : (jsonToMarkdown(section) ?? section)}
+                      {imageItems.length > 0 ? section : forDisplay(section)}
                     </ReactMarkdown>
                   ) : outSession?.output_asset?.storage_url ? (
                     <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>

@@ -65,6 +65,72 @@ function extractTopJson(content: string): { value: unknown; before: string; afte
   return { value, before: content.slice(0, content.indexOf(open)), after: content.slice(content.lastIndexOf(close) + 1), fence: null }
 }
 
+// ─── Bloques máquina — se conservan en el contenido, NO se muestran ───────────
+// El DNA hace que cada respuesta cierre con bloques que lee el motor: el contrato de carril
+// (`## <output_key>` + json) y el bloque de emisión de imágenes (`{"<output_key>": [{prompt}]}`).
+// Son necesarios aguas abajo, pero para el usuario son ruido. Estas funciones los quitan SOLO
+// al presentar; el contenido guardado en forge_messages / forge_assets queda intacto.
+
+const CLAVE_SALIDA = /^[a-z][a-z0-9_]*$/
+
+// ¿El cuerpo de un bloque cercado es una emisión de imágenes? {"<clave>": [{ prompt, ... }]}
+function esEmisionDeImagenes(cuerpo: string): boolean {
+  let v: unknown
+  try { v = JSON.parse(cuerpo) } catch { return false }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  const entradas = Object.entries(v as Record<string, unknown>)
+  if (entradas.length !== 1) return false
+  const [clave, valor] = entradas[0]
+  if (!CLAVE_SALIDA.test(clave) || !Array.isArray(valor)) return false
+  // [] es una emisión válida (cero imágenes) y también se oculta
+  return valor.every(x => x && typeof x === 'object' && 'prompt' in (x as object))
+}
+
+// ¿Es un contrato de carril? Array de objetos con `id` — la lista que instancia los carriles.
+function esContratoDeCarril(cuerpo: string): boolean {
+  let v: unknown
+  try { v = JSON.parse(cuerpo) } catch { return false }
+  return Array.isArray(v) && v.length > 0 &&
+    v.every(x => x && typeof x === 'object' && !Array.isArray(x) && 'id' in (x as object))
+}
+
+export function stripMachineBlocks(content: string): string {
+  if (!content) return content
+
+  // Los bloques máquina van al CIERRE de la respuesta, no pegados a su encabezado: el `##
+  // concept_seeds` de arriba titula la sección legible y debe quedarse. Así que se recorren los
+  // bloques desde el final y se van quitando mientras sigan siendo máquina.
+  const bloques = [...content.matchAll(/```json\n([\s\S]*?)\n```/g)]
+  let corte = content.length
+
+  for (let i = bloques.length - 1; i >= 0; i--) {
+    const b = bloques[i]
+    const cuerpo = b[1]
+    if (!esEmisionDeImagenes(cuerpo) && !esContratoDeCarril(cuerpo)) break
+    // Solo entre el cierre anterior y el final puede haber separadores o líneas sueltas
+    if (content.slice(b.index! + b[0].length, corte).trim().replace(/^-{3,}$/gm, '').trim()) break
+    corte = b.index!
+  }
+  if (corte === content.length) return content
+
+  // Al quitar el bloque suele quedar colgando el encabezado que lo anunciaba (`## concept_seeds`)
+  // sin nada debajo; se va con él. El encabezado que titula la sección legible no queda al final,
+  // así que esta poda no lo toca.
+  const podar = (s: string) => s.trim()
+    .replace(/(?:\n*-{3,})+$/, '').trim()
+    .replace(/\n#{2,3}[ \t]+[a-z][a-z0-9_]*$/, '').trim()
+  const out = podar(podar(content.slice(0, corte)))
+
+  // Un output cuya esencia ES el json (format json/structured) no debe quedar vacío
+  return out.length >= 400 ? out : content
+}
+
+// Lo que ve el usuario: sin bloques máquina y con el json restante en markdown legible.
+export function forDisplay(content: string): string {
+  const limpio = stripMachineBlocks(content)
+  return jsonToMarkdown(limpio) ?? limpio
+}
+
 export function jsonToMarkdown(content: string): string | null {
   const ext = extractTopJson(content)
   if (!ext) return null

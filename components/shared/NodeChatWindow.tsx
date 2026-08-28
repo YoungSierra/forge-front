@@ -10,7 +10,7 @@ import { chatWithNode, getNodeContextInputs } from '@/lib/api'
 import type { ChatMessage, ChatAttachment, ChatToolCall, ApprovedAsset, OutputImageItem, OutputImagesMap, NodeContextInput } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { jsonToMarkdown } from '@/lib/json-display'
+import { jsonToMarkdown, forDisplay, stripMachineBlocks } from '@/lib/json-display'
 import AttachmentCard from './AttachmentCard'
 import Moodboard from '@/components/moodboard/Moodboard'
 import { Paperclip } from 'lucide-react'
@@ -850,7 +850,7 @@ function MessageBubble({ msg, onExpand }: {
 }) {
   const isUser = msg.role === 'user'
   // Texto a copiar: la versión legible (markdown), igual a lo que se muestra
-  const copyText = jsonToMarkdown(msg.content) ?? msg.content
+  const copyText = forDisplay(msg.content)
   return (
     <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', gap: 8, flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
       {!isUser && msg.tool_calls && msg.tool_calls.length > 0 && (
@@ -886,7 +886,7 @@ function MessageBubble({ msg, onExpand }: {
             ) : (
               <div style={{ fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65 }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                  {jsonToMarkdown(msg.content) ?? msg.content}
+                  {forDisplay(msg.content)}
                 </ReactMarkdown>
               </div>
             )}
@@ -1982,7 +1982,7 @@ export default function NodeChatWindow({
                 ↓ Download {effectiveDocFormat === 'pptx' ? 'PPTX' : 'PDF'}
               </a>
               <button
-                onClick={() => { const m = [...messages].reverse().find(x => x.role === 'assistant'); const c = m?.content ?? ''; downloadTextFile(jsonToMarkdown(c) ?? c, mdFilename(stepLabel)) }}
+                onClick={() => { const m = [...messages].reverse().find(x => x.role === 'assistant'); const c = m?.content ?? ''; downloadTextFile(forDisplay(c), mdFilename(stepLabel)) }}
                 title="Download Markdown (original text)"
                 style={{
                   flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -2349,7 +2349,7 @@ export default function NodeChatWindow({
                             />
                           ),
                         }}>
-                          {jsonToMarkdown(inp.content) ?? inp.content}
+                          {forDisplay(inp.content)}
                         </ReactMarkdown>
                       </div>
                     )}
@@ -2399,7 +2399,7 @@ export default function NodeChatWindow({
               {effectiveDocUrl && (
                 <>
                   <button
-                    onClick={e => { e.stopPropagation(); downloadTextFile(jsonToMarkdown(expandedContent.content) ?? expandedContent.content, mdFilename(stepLabel)) }}
+                    onClick={e => { e.stopPropagation(); downloadTextFile(forDisplay(expandedContent.content), mdFilename(stepLabel)) }}
                     title="Download Markdown (original text)"
                     style={{
                       fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
@@ -2426,7 +2426,7 @@ export default function NodeChatWindow({
                   </a>
                 </>
               )}
-              <CopyButton text={jsonToMarkdown(expandedContent.content) ?? expandedContent.content} style={{ width: 24, height: 24, fontSize: 12 }} />
+              <CopyButton text={forDisplay(expandedContent.content)} style={{ width: 24, height: 24, fontSize: 12 }} />
               <button
                 onClick={() => setExpandedContent(null)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 16, lineHeight: 1, padding: '2px 6px', flexShrink: 0 }}
@@ -2441,7 +2441,8 @@ export default function NodeChatWindow({
               // de botones por ítem: el markdown de tarjetas no matchea el patrón "Variation N",
               // y las imágenes siguen disponibles en el thumbnail row del chat. Para contenido
               // markdown normal (ej. art direction) se mantiene la inyección de botones ✦.
-              const readable = jsonToMarkdown(expandedContent.content)
+              const limpio   = stripMachineBlocks(expandedContent.content)
+              const readable = jsonToMarkdown(limpio)
               const expandedItems = readable ? undefined : buildItemsFromContent(expandedContent.content)
               return (
                 <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
@@ -2450,7 +2451,7 @@ export default function NodeChatWindow({
                       remarkPlugins={[remarkGfm]}
                       components={expandedItems?.length ? buildImageGenComponents(expandedItems) : MD_COMPONENTS}
                     >
-                      {readable ?? expandedContent.content}
+                      {readable ?? limpio}
                     </ReactMarkdown>
                   </div>
 
