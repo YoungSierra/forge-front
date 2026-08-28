@@ -4057,11 +4057,14 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     const nodoId = chatNode?.node?.id
     if (!pnId || !nodoId) return
     const pref = `${pnId}:`
-    const claves = Object.keys(leerDespachos()).filter(k => k.startsWith(pref)).map(k => k.slice(pref.length))
-    if (!claves.length) return
 
+    // Las notas se leen EN CADA TICK, no al montar: la nota se escribe al enviar, después de que
+    // este efecto ya corrió, y capturarlas aquí dejaba el sondeo dormido para siempre — el aviso
+    // se quedaba puesto con las imágenes ya guardadas.
     let vigente = true
     const t = setInterval(async () => {
+      const claves = Object.keys(leerDespachos()).filter(k => k.startsWith(pref)).map(k => k.slice(pref.length))
+      if (!claves.length) return
       for (const clave of claves) {
         try {
           const r = await getNodeSession(project.id, nodoId, clave, pnId)
