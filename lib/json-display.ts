@@ -73,12 +73,22 @@ function extractTopJson(content: string): { value: unknown; before: string; afte
 
 const CLAVE_SALIDA = /^[a-z][a-z0-9_]*$/
 
-// ¿El cuerpo de un bloque cercado es una emisión de imágenes? {"<clave>": [{ prompt, ... }]}
+// ¿El cuerpo de un bloque cercado es un contrato de máquina? Hay varias formas, todas legítimas
+// según qué escriba cada nodo, y todas ilegibles para una persona:
+//   · el sobre de emisión      {"development_images": [{ id, prompt, placement }]}
+//   · el sobre vacío           {"development_images": []}
+//   · un registro de decisión  {"format": "development_image_plan", "decision": "zero_images", …}
+// Reconocer solo la primera dejaba las otras dos en pantalla — que es justo lo que se veía.
 function esEmisionDeImagenes(cuerpo: string): boolean {
   let v: unknown
   try { v = JSON.parse(cuerpo) } catch { return false }
   if (!v || typeof v !== 'object' || Array.isArray(v)) return false
-  const entradas = Object.entries(v as Record<string, unknown>)
+  const obj = v as Record<string, unknown>
+  const entradas = Object.entries(obj)
+
+  // Lleva `format` nombrando una clave de salida: es el registro de ese output, no prosa
+  if (typeof obj.format === 'string' && CLAVE_SALIDA.test(obj.format) && entradas.length <= 8) return true
+
   if (entradas.length !== 1) return false
   const [clave, valor] = entradas[0]
   if (!CLAVE_SALIDA.test(clave) || !Array.isArray(valor)) return false

@@ -1221,10 +1221,15 @@ export default function NodeChatWindow({
       const isPng = def.format === 'png' || def.format === 'image'
       // Auto-gen solo para outputs PNG/image — otros formatos usan botón on-demand
       if (!isPng) continue
-      // En una sesión focus solo auto-generamos la imagen del output enfocado; el run general
-      // (sin foco) genera todas las imágenes png/image_gen. Esto evita que un focus de OTRO output
-      // (ej. visual_targets) dispare la imagen de reference_images (gasto de crédito no deseado).
+      // En una sesión focus solo auto-generamos la imagen del output enfocado; esto evita que un
+      // focus de OTRO output (ej. visual_targets) dispare la imagen de reference_images.
       if (targetOutputKey && def.outputKey !== targetOutputKey) continue
+
+      // El run del NODO ENTERO ya no despacha desde acá: lo hace el motor, que lee los prompts del
+      // sobre de emisión y, si falta, se lo pide. Este parser cae a las viñetas del documento
+      // cuando no hay sobre, y eso mandó a ComfyUI párrafos de análisis de mercado como si fueran
+      // arte — medido: 3 renders, $0.12, ninguna imagen utilizable.
+      if (!targetOutputKey) continue
       const startRx = outputHeaderRx(def.outputKey)
       const sectionMatch = startRx.exec(content)
 
