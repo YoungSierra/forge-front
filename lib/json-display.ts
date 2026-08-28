@@ -96,12 +96,23 @@ function esEmisionDeImagenes(cuerpo: string): boolean {
   return valor.every(x => x && typeof x === 'object' && 'prompt' in (x as object))
 }
 
+// Campos con los que un nodo REGISTRA una decisión sobre sus imágenes, sin nombrar el output.
+// «Cero imágenes» se escribe así: {"decision": "zero_images_generated", "rationale": "…"}.
+const CAMPOS_DECISION = new Set(['format', 'decision', 'rationale', 'images', 'reason', 'note', 'count'])
+
 // ¿Es un contrato de carril? Array de objetos con `id` — la lista que instancia los carriles.
+// Un array VACÍO también es máquina: es una emisión de cero, nunca contenido para leer.
 function esContratoDeCarril(cuerpo: string): boolean {
   let v: unknown
   try { v = JSON.parse(cuerpo) } catch { return false }
-  return Array.isArray(v) && v.length > 0 &&
-    v.every(x => x && typeof x === 'object' && !Array.isArray(x) && 'id' in (x as object))
+  if (!Array.isArray(v)) {
+    // Registro de decisión: solo campos de decisión, ninguno de contenido
+    if (!v || typeof v !== 'object') return false
+    const claves = Object.keys(v as Record<string, unknown>)
+    return claves.length > 0 && claves.length <= 6 && claves.every(k => CAMPOS_DECISION.has(k))
+  }
+  if (v.length === 0) return true
+  return v.every(x => x && typeof x === 'object' && !Array.isArray(x) && 'id' in (x as object))
 }
 
 export function stripMachineBlocks(content: string): string {
