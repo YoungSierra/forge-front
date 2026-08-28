@@ -128,8 +128,22 @@ export function stripMachineBlocks(content: string): string {
     const b = bloques[i]
     const cuerpo = b[1]
     if (!esEmisionDeImagenes(cuerpo) && !esContratoDeCarril(cuerpo)) break
-    // Solo entre el cierre anterior y el final puede haber separadores o líneas sueltas
-    if (content.slice(b.index! + b[0].length, corte).trim().replace(/^-{3,}$/gm, '').trim()) break
+
+    // Entre dos bloques máquina consecutivos solo puede haber andamiaje: un separador o el TÍTULO
+    // del bloque siguiente —`**development_images**`, `## development_images`—, que es tan interno
+    // como el bloque que anuncia. Cualquier otra cosa detiene la poda: ahí empieza el documento, y
+    // seguir borrando hacia atrás se llevaría prosa que alguien escribió para leerse.
+    const entre = content.slice(b.index! + b[0].length, corte)
+      .split('\n')
+      .filter(l => {
+        const s = l.trim()
+        if (!s) return false
+        if (/^-{3,}$/.test(s)) return false                               // separador
+        if (/^#{1,4}\s+\**\s*[a-z][a-z0-9_]*\s*\**$/.test(s)) return false // ## clave_de_salida
+        if (/^\*\*\s*[a-z][a-z0-9_]*\s*\**:?\*\*$/.test(s)) return false   // **clave_de_salida**
+        return true
+      })
+    if (entre.length) break
     corte = b.index!
   }
   if (corte === content.length) return content
