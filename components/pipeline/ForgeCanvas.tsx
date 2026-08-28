@@ -5363,8 +5363,12 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
     // (bug: creaba la sesión general con el output_key de otro nodo, ej. visual_targets del 3.9).
     setChatTargetOutputKey(outputKey ?? null)
     if (!outputKey) setChatTargetOutputLabel(null)
-    // Si no se especifica output y el nodo ya tiene per-output sessions → abrir output modal
-    if (!outputKey && Object.keys(node.output_sessions ?? {}).length > 0) {
+    // Si no se especifica output y el nodo ya tiene per-output sessions → abrir output modal.
+    // Salvo que el nodo se haya corrido ENTERO: desde que el run despacha las imágenes de un
+    // documento en su propia sesión, `output_sessions` deja de estar vacío y reabrir el nodo
+    // rebotaba al modal de outputs en vez de volver a la conversación que el usuario acababa de
+    // tener. La sesión general manda; el modal sigue a un clic desde las pestañas.
+    if (!outputKey && !node.session && Object.keys(node.output_sessions ?? {}).length > 0) {
       setSelectedNode(null)
       setPendingOutputModalId(node.project_node_id)
       return
