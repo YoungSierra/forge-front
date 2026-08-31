@@ -1329,7 +1329,10 @@ function extractSection(content: string, sectionName: string, otherKeys: string[
   // y no una etiqueta de sección; en cualquier otro `##` seguiría siendo un match a ciegas.
   const primerEnc = /^(#{1,4})[ \t]+.+$/m.exec(content)
   if (!match && primerEnc) {
-    const tituloRx = new RegExp(`^#{1,4}\\s+\\**\\s*${escaped}\\w*(?:[\\s—\\-–:(\\[].*)?$`, 'im')
+    // El grupo de las almohadillas tiene que ser el mismo que en `startRx`: sin capturarlo,
+    // `nivel` salía 0, el título dejaba de reconocerse como título y la sección se cortaba en el
+    // primer `##` — el spec entero se veía como las tres líneas de "Output Format".
+    const tituloRx = new RegExp(`^(#{1,4}\\s+)\\**\\s*${escaped}\\w*(?:[\\s—\\-–:(\\[].*)?$`, 'im')
     const m2 = tituloRx.exec(content)
     if (m2 && m2.index === primerEnc.index) match = m2
   }
