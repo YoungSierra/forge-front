@@ -43,7 +43,10 @@ const TABS: { key: string; label: string; formats: string[] }[] = [
 // La partición es SOLO entre imágenes. Un GLB o un audio subidos siguen contando por su tipo,
 // que es lo que evitó el problema viejo de que un modelo subido fuera 3D y Ref a la vez y
 // desapareciera de la pestaña 3D.
-const ARTE = new Set(['3.9', '3.20'])
+// El 3.9 salió de acá el 31-08. Su resolución en el informe v3 lo dice con todas las letras: sus
+// `reference_images` van a Pre-Producción bajo la categoría Refs —no como documento— por ser
+// insumo directo del Art Style Guide. El arte propiamente dicho lo produce el 3.20.
+const ARTE = new Set(['3.20'])
 const ES_IMAGEN = ['image', 'png', 'jpg', 'jpeg']
 
 // ── Qué se puede iterar hoy ──────────────────────────────────────────────────
@@ -86,11 +89,32 @@ const FASES: { key: string; label: string; phases: string[] }[] = [
   { key: 'post', label: 'Post-Production',  phases: ['live-ops'] },
 ]
 
+// Los tres documentos gráficos de Pre-Producción, reconocidos por su nombre. La zona del lienzo
+// ya los distinguía así; acá se reutiliza el mismo criterio para decidir la ETAPA, porque el
+// formato no alcanza: el GDD Art Style y el Art Bible se guardan en docx y markdown, y una regla
+// por formato se los llevaba a Documentación junto con los specs.
+// Los tres documentos que Pre-Producción conserva —GDD Art Style, Art Style Guide y Art Bible—
+// los emite el 3.20, y ese es el criterio: el nodo, no el nombre. Por nombre se colaban dos cosas
+// que el informe manda a Documentación: el GDD Complete y el GDD Ref del 3.8 (texto, con «GDD»
+// en el título) y el «Art Bible Intake» del 3.9, que es el insumo del Art Bible y no el Art Bible.
+const NODO_DOCS_GRAFICOS = '3.20'
+
+const ES_GRAFICO = ['image', 'png', 'jpg', 'jpeg', 'model_3d', 'glb', 'video', 'mp4', 'audio']
+
 // null = el activo no pertenece a una fase. Lo que sube el usuario y lo legacy caen acá, y esa
 // es la regla: una referencia pertenece a su TIPO, no a un momento. Un PDF vive en Docs y se ve
 // camines a donde camines; tampoco cuenta para calcular hasta dónde llegó el proyecto.
-const faseDe = (a: UnifiedAsset) =>
-  FASES.find(f => f.phases.includes(String((a as { phase?: string | null }).phase ?? '')))?.key ?? null
+//
+// Excepción de Pre-Producción (informe v3 de Miguel, puntos 1 y 2): la etapa se llenaba de
+// specs escritos —Prototype Spec, Vertical Slice Spec, ADI, TDD, GDD Complete— porque sus nodos
+// son de pre-producción. Medido: de 312 activos de la etapa, 221 eran texto. Ahí solo van los
+// tres documentos gráficos y las imágenes; todo lo demás se lee en Documentación.
+const faseDe = (a: UnifiedAsset) => {
+  const base = FASES.find(f => f.phases.includes(String((a as { phase?: string | null }).phase ?? '')))?.key ?? null
+  if (base !== 'pre') return base
+  if (a.node_key === NODO_DOCS_GRAFICOS) return 'pre'
+  return ES_GRAFICO.includes(String(a.format).toLowerCase()) ? 'pre' : 'doc'
+}
 
 // El asset se guarda como "<título del nodo> — <label del output>", así que el output es lo
 // que va después del guion largo. Para un documento es el dato que lo identifica: dos ADI
@@ -436,15 +460,20 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     // Style y el Art Bible, y agrupar por nodo los metía a los tres en el mismo bloque. La zona
     // es el DOCUMENTO, que es como el equipo lo lee y lo nombra.
     const n = String(a.name || '')
-    if (/art\s*bible/i.test(n))          return 'Art Bible'
-    if (/gdd/i.test(n))                  return 'GDD Art Style'
-    if (/art\s*style\s*guide/i.test(n))  return 'Art Style Guide'
+    if (/art\s*bible/i.test(n))            return 'Art Bible'
+    if (/gdd\s*art\s*style/i.test(n))      return 'GDD Art Style'
+    if (/art\s*style\s*guide/i.test(n))    return 'Art Style Guide'
+    // El GDD escrito del 3.8 es su propio documento, no una hoja del GDD Art Style: con el `gdd`
+    // suelto de antes, GDD Complete y GDD Ref caían en el bloque gráfico y lo desordenaban.
+    if (/^gdd\b/i.test(n) || /—\s*gdd/i.test(n)) return 'GDD'
     return t
   }
 
   // Orden de lectura dentro de la etapa: primero el que se produce antes. Sin esto el orden lo
   // decidía el azar del recorrido y cambiaba entre cargas.
-  const ORDEN_ZONAS = ['GDD Art Style', 'Art Style Guide', 'Art Bible']
+  // La Librería va primero desde el 31-08 (informe v3, punto 11): es el insumo, no el resultado,
+  // y quedando a la derecha rompía la lectura de izquierda a derecha de menor a mayor.
+  const ORDEN_ZONAS = ['Refs', 'Library', 'GDD Art Style', 'Art Style Guide', 'Art Bible']
   const pesoZona = (nombre: string) => {
     const i = ORDEN_ZONAS.indexOf(nombre)
     return i === -1 ? ORDEN_ZONAS.length : i
