@@ -2604,8 +2604,13 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
       )}
 
       {/* Aprobar, fuera del marco y abajo a la derecha. Vive aca y no solo en el modal de
-          iteracion: si se cerraba sin decidir, no habia forma de volver a hacerlo. */}
-      {vers.length > 0 && verSel && (
+          iteracion: si se cerraba sin decidir, no habia forma de volver a hacerlo.
+          Una sola aprobada por pagina (informe v3, punto 9): aprobar otra desmarca la anterior y
+          el boton NO se bloquea — cambiar de opinion es parte de iterar. Se dice en el tooltip
+          para que reemplazar no sea una sorpresa. */}
+      {vers.length > 0 && verSel && (() => {
+        const otraAprobada = vers.find(v => v.approved_at && v.id !== verSel.id)
+        return (
         <button
           onClick={async () => {
             if (verSel.approved_at || aprobando) return
@@ -2614,7 +2619,11 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
             finally { setAprobando(false) }
           }}
           disabled={!!verSel.approved_at || aprobando}
-          title={verSel.approved_at ? 'Already approved' : `Approve version ${verSel.version_number}`}
+          title={verSel.approved_at
+            ? 'Already approved'
+            : otraAprobada
+              ? `Approve version ${verSel.version_number} — this replaces the approval on v${otraAprobada.version_number}`
+              : `Approve version ${verSel.version_number}`}
           style={{
             position: 'fixed',
             left: box.left + box.width, top: box.top + box.height + 10,
@@ -2629,7 +2638,8 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
             transition: `${FLIGHT}, opacity 220ms ease 140ms`,
           }}
         >{verSel.approved_at ? `v${verSel.version_number} approved` : aprobando ? 'Approving…' : `Approve v${verSel.version_number}`}</button>
-      )}
+        )
+      })()}
 
       {/* La misma barra del lienzo, arriba a la izquierda del marco: abrir la hoja no debería
           quitarte las acciones que tenías sobre ella. */}
