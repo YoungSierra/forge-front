@@ -354,6 +354,10 @@ export interface UnifiedAsset {
   /** De qué activo salió éste. Lo llena la cadena de producción y es lo que deja dibujar la
    *  conexión en el moodboard: la pieza no aparece suelta, aparece colgando de su origen. */
   derived_from?: string | null
+  /** Con qué opciones de generación se produjo. Es lo que se muestra bajo la imagen y lo que se
+   *  reusa al rehacerla: el workflow ya cambió de valores para entonces, así que leerlo de ahí
+   *  diría con qué se generaría hoy, no con qué se generó esto. */
+  opciones?: Record<string, unknown> | null
   created_at: string
   versions: UnifiedAssetVersion[]
 }
@@ -1648,10 +1652,16 @@ export async function saveAssetNote(projectId: string, assetId: string, body: st
  * aplicando SOLO eso. A diferencia de `iterateAssetPage`, no rehace la página desde el documento
  * — parte de la imagen que ya existe—, así que sirve para cualquier activo visual.
  */
-export async function designEditAsset(projectId: string, assetId: string, prompt: string, memberId?: string | null) {
+export async function designEditAsset(
+  projectId: string, assetId: string, prompt: string, memberId?: string | null,
+  opciones?: Record<string, unknown> | null,
+) {
   return request<{ success: boolean; version: { id: string; version_number: number; storage_url: string } }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/design-edit`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, member_id: memberId ?? null }) },
+    {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, member_id: memberId ?? null, opciones: opciones ?? null }),
+    },
   )
 }
 
@@ -1954,7 +1964,8 @@ export async function getNextChainStep(projectId: string, assetId: string) {
 
 export async function advanceAsset(
   projectId: string, assetId: string,
-  opts: { pasos?: number; prompt?: string | null; memberId?: string | null; limitePorCada?: number } = {},
+  opts: { pasos?: number; prompt?: string | null; memberId?: string | null; limitePorCada?: number
+          opciones?: Record<string, unknown> | null } = {},
 ) {
   return request<{ success: boolean; cadena: string; creados: { id: string; name: string; storage_url: string; format: string }[] }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/advance`,
@@ -1963,7 +1974,33 @@ export async function advanceAsset(
       body: JSON.stringify({
         pasos: opts.pasos ?? 1, prompt: opts.prompt ?? null, member_id: opts.memberId ?? null,
         limite_por_cada: opts.limitePorCada ?? 0,
+        opciones: opts.opciones ?? null,
       }),
     },
+  )
+}
+
+/** Una opción de generación que el workflow expone, con los valores que ComfyUI declara válidos.
+ *  No hay lista escrita en el front: una lista fija envejece en silencio y el error saldría recién
+ *  al pagar la corrida. */
+export interface OpcionWorkflow {
+  clave: string
+  etiqueta: string
+  tipo: 'COMBO' | 'INT' | 'FLOAT' | 'BOOLEAN' | 'STRING'
+  valor: unknown
+  valores: string[] | null
+  /** Qué campos hace aparecer cada valor, cuando la opción es un combo dinámico: elegir
+   *  «Geometry only» tiene que ESCONDER pbr y texture_quality, no solo dejar de escribirlos. */
+  ramas: Record<string, string[]> | null
+  ayuda: string | null
+  nodos: string[]
+  padre: string | null
+  /** Qué valores encarecen la corrida del lado del proveedor. */
+  sube_costo: string[]
+}
+
+export async function getWorkflowOptions(projectId: string, workflow: string) {
+  return request<{ success: boolean; opciones: OpcionWorkflow[]; imagenes: number; costo_por_imagen_usd: number }>(
+    `/api/projects/${projectId}/canvas/workflows/${encodeURIComponent(workflow)}/opciones`,
   )
 }

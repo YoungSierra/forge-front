@@ -19,7 +19,7 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco } from '@/lib/api'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow } from '@/lib/api'
 
 // ── Pestañas ─────────────────────────────────────────────────────────────────
 // El juego es el de la referencia. Las que no tienen activos se muestran apagadas en vez de
@@ -266,7 +266,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // La iteracion vive ACA y no en el radial: el menu se cierra al elegir, y el modal tiene que
   // sobrevivirlo. `aviso` es el caso de lo que todavia no se puede iterar.
   // `pagina` solo existe cuando se rehace una hoja de un deck; en Design Edits va `pedido`.
-  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string } | null>(null)
+  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string; opciones?: Record<string, unknown> | null } | null>(null)
   // §8: la hoja sobre la que se pidió Run, esperando el recuadro de confirmación. Run avanza UN
   // paso y nada más — correr los dos de la cadena es apretarlo dos veces, no hay encadenado.
   const [corriendo, setCorriendo] = useState<UnifiedAsset | null>(null)
@@ -1888,9 +1888,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       {editando && (
         <DesignEditPrompt
           asset={editando}
+          projectId={projectId}
           accent={theme.accent}
           onClose={() => setEditando(null)}
-          onSubmit={texto => { const a = editando; setEditando(null); setIterando({ asset: a, pagina: null, pedido: texto }) }}
+          onSubmit={(texto, opciones) => { const a = editando; setEditando(null); setIterando({ asset: a, pagina: null, pedido: texto, opciones }) }}
         />
       )}
       {iterando && (
@@ -1899,6 +1900,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           projectId={projectId}
           pagina={iterando.pagina}
           pedido={iterando.pedido}
+          opciones={iterando.opciones}
           accent={theme.accent}
           onClose={() => setIterando(null)}
           onListo={recargarYPublicar}
@@ -2720,6 +2722,36 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
           </div>
         )}
 
+      {/* Con qué opciones se generó esta pieza (informe v3, punto 12, paso 2). Debajo de la
+          imagen y no en un panel aparte: la pregunta «por qué salió así» se hace mirando la
+          imagen. Solo aparece si la pieza las trae — lo generado antes de esto no las tiene, y
+          rellenarlas con los valores de hoy diría con qué se generaría ahora, no con qué se hizo. */}
+      {asset.opciones && Object.keys(asset.opciones).length > 0 && (
+        <div
+          onPointerDown={e => e.stopPropagation()}
+          style={{
+            position: 'fixed', zIndex: 12051,
+            left: box.left, top: box.top + box.height + (vers.length > 1 ? 40 : 10),
+            maxWidth: box.width,
+            display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
+            opacity: open ? 1 : 0,
+            transition: `${FLIGHT}, opacity 220ms ease 140ms`,
+          }}
+        >
+          {Object.entries(asset.opciones).map(([k, v]) => (
+            <span key={k} style={{
+              fontSize: 9.5, fontFamily: 'var(--font-mono)', letterSpacing: '.02em',
+              padding: '3px 8px', borderRadius: 999, whiteSpace: 'nowrap',
+              background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.14)',
+              color: 'var(--text-2)',
+            }}>
+              {k.split('.').pop()!.replace(/_/g, ' ')}
+              <span style={{ color: 'var(--text-0)', marginLeft: 5 }}>{String(v)}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Lo que salió de esta página y se sacó del lienzo. Un clic la devuelve. */}
       {escondidas.length > 0 && (
         <div
@@ -3151,10 +3183,34 @@ function NotaModal({ asset, valor, otras, accent, onClose, onGuardar }: {
 // Es un paso aparte y no un campo dentro del modal de progreso: acá todavía no se gastó nada, y
 // el texto que se escriba es lo único que decide el resultado. Se avisa qué NO va a cambiar,
 // porque el workflow conserva la plantilla a propósito y sin decirlo se pide lo imposible.
-function DesignEditPrompt({ asset, accent, onClose, onSubmit }: {
-  asset: UnifiedAsset; accent: string; onClose: () => void; onSubmit: (texto: string) => void
+function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
+  asset: UnifiedAsset; projectId: string; accent: string; onClose: () => void
+  onSubmit: (texto: string, opciones: Record<string, unknown> | null) => void
 }) {
   const [texto, setTexto] = useState('')
+  // Rehacer ESTA imagen con otras opciones (informe v3, punto 12, paso 3). Se parte de las que
+  // produjeron la pieza, no de los valores del workflow: el workflow ya cambió para entonces y
+  // arrancar de ahí le cambiaría al usuario cosas que no tocó.
+  const [ops,      setOps]      = useState<OpcionWorkflow[]>([])
+  const [elegidas, setElegidas] = useState<Record<string, unknown>>({})
+  const [abierto,  setAbierto]  = useState(false)
+  useEffect(() => {
+    let vivo = true
+    getWorkflowOptions(projectId, 'V57_STUDIO_Moodboard_Iteration')
+      .then(r => { if (vivo) { setOps(r.opciones); setElegidas({ ...(asset.opciones || {}) }) } })
+      .catch(() => { if (vivo) setOps([]) })   // sin catálogo se edita igual, con los valores de siempre
+    return () => { vivo = false }
+  }, [projectId, asset.opciones])
+
+  // Solo lo que difiere de lo que ya traía la pieza: mandar el resto reescribiría cada nodo con
+  // el mismo valor y convertiría en letra muerta cualquier cambio futuro del workflow.
+  const base = (asset.opciones || {}) as Record<string, unknown>
+  const cambiadas = Object.fromEntries(
+    Object.entries(elegidas).filter(([k, v]) => {
+      const def = ops.find(o => o.clave === k)
+      const antes = k in base ? base[k] : def?.valor
+      return def && JSON.stringify(v) !== JSON.stringify(antes)
+    }))
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', k)
@@ -3180,11 +3236,74 @@ function DesignEditPrompt({ asset, accent, onClose, onSubmit }: {
           </div>
         </div>
 
+        {/* Las opciones de ESTA imagen. Vienen de la pieza; se manda solo lo que se cambie, para
+            no reescribir con lo mismo lo que el workflow ya traía. */}
+        {ops.length > 0 && (
+          <div>
+            <button
+              onClick={() => setAbierto(v => !v)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 7,
+                padding: '7px 10px', borderRadius: 8, cursor: 'pointer',
+                background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+                color: 'var(--text-1)', fontSize: 11.5, fontFamily: 'var(--font-sans)', textAlign: 'left',
+              }}
+            >
+              <span style={{ color: 'var(--text-3)', fontSize: 10 }}>{abierto ? '▾' : '▸'}</span>
+              Generation options for this image
+              <span style={{ marginLeft: 'auto', fontSize: 10.5, fontFamily: 'var(--font-mono)', color: Object.keys(cambiadas).length ? accent : 'var(--text-3)' }}>
+                {Object.keys(cambiadas).length ? `${Object.keys(cambiadas).length} changed` : 'as generated'}
+              </span>
+            </button>
+            {abierto && (
+              <div style={{
+                marginTop: 7, padding: '10px 11px', borderRadius: 8,
+                background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+                display: 'flex', flexDirection: 'column', gap: 9,
+              }}>
+                {ops.map(o => {
+                  const valor = elegidas[o.clave] ?? o.valor
+                  const set = (v: unknown) => setElegidas(prev => ({ ...prev, [o.clave]: v }))
+                  return (
+                    <div key={o.clave} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <label title={o.ayuda ?? undefined} style={{ flex: 1, fontSize: 11.5, color: 'var(--text-2)', textTransform: 'capitalize' }}>
+                        {o.etiqueta}
+                      </label>
+                      {o.tipo === 'BOOLEAN' ? (
+                        <input type="checkbox" checked={!!valor} onChange={e => set(e.target.checked)}
+                               style={{ width: 15, height: 15, accentColor: accent, cursor: 'pointer' }} />
+                      ) : o.valores ? (
+                        <select value={String(valor)} onChange={e => set(e.target.value)}
+                                style={{
+                                  width: 168, padding: '5px 8px', borderRadius: 6,
+                                  background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+                                  color: 'var(--text-0)', fontSize: 11.5, cursor: 'pointer',
+                                }}>
+                          {o.valores.map(v => (
+                            <option key={v} value={v}>{v}{(o.sube_costo ?? []).includes(v) ? '  ·  costs more' : ''}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input type="number" value={Number(valor)} onChange={e => set(Number(e.target.value))}
+                               style={{
+                                 width: 168, padding: '5px 8px', borderRadius: 6,
+                                 background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+                                 color: 'var(--text-0)', fontSize: 11.5,
+                               }} />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <textarea
           autoFocus
           value={texto}
           onChange={e => setTexto(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && texto.trim()) onSubmit(texto.trim()) }}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && texto.trim()) onSubmit(texto.trim(), cambiadas) }}
           placeholder="Describe the design change — a character, an environment, a prop…"
           rows={4}
           style={{
@@ -3206,7 +3325,7 @@ function DesignEditPrompt({ asset, accent, onClose, onSubmit }: {
             color: 'var(--text-2)', fontSize: 12, fontFamily: 'var(--font-mono)',
           }}>Cancel</button>
           <button
-            onClick={() => texto.trim() && onSubmit(texto.trim())}
+            onClick={() => texto.trim() && onSubmit(texto.trim(), cambiadas)}
             disabled={!texto.trim()}
             style={{
               padding: '7px 16px', borderRadius: 8,
@@ -3222,11 +3341,14 @@ function DesignEditPrompt({ asset, accent, onClose, onSubmit }: {
   )
 }
 
-function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pedido }: {
+function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pedido, opciones }: {
   asset: UnifiedAsset; projectId: string; pagina: { n: number; nombre: string } | null; accent: string
   onClose: () => void; onListo: () => void
   /** Design Edits: el cambio pedido en palabras. Sin esto, se rehace la página desde su documento. */
   pedido?: string
+  /** Las opciones de generación para ESTA imagen. Valen solo para ella: en Run valen para toda
+   *  la corrida, acá para la pieza que se está rehaciendo. */
+  opciones?: Record<string, unknown> | null
 }) {
   const [pct, setPct] = useState(0)
   const [listo, setListo] = useState(false)
@@ -3274,7 +3396,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
     // lo mandaba. Es el mismo id que usa el resto del front para atribuir el gasto.
     const miembro = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
     const trabajo = pedido
-      ? designEditAsset(projectId, asset.id, pedido, miembro)
+      ? designEditAsset(projectId, asset.id, pedido, miembro, opciones ?? null)
       : iterateAssetPage(projectId, asset.id, miembro)
     trabajo
       .then(r => {
@@ -3670,6 +3792,14 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
   const [busy,  setBusy]  = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Las opciones de generación del workflow (informe v3, punto 12). Se piden al backend, que las
+  // descubre preguntándole a ComfyUI: escribirlas acá envejecería en silencio y el valor inválido
+  // se descubriría recién al pagar la corrida.
+  const [ops,      setOps]      = useState<OpcionWorkflow[] | null>(null)
+  const [tamano,   setTamano]   = useState<{ imagenes: number; usd: number } | null>(null)
+  const [elegidas, setElegidas] = useState<Record<string, unknown>>({})
+  const [abierto,  setAbierto]  = useState(false)
+
   // El paso lo decide el BACKEND, que es quien conoce la cadena y en qué punto quedó la pieza.
   // Calcularlo acá obligaría a duplicar el mapa de workflows en el front y a mantenerlo al día.
   useEffect(() => {
@@ -3680,11 +3810,57 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
     return () => { vivo = false }
   }, [projectId, asset.id])
 
+  // Las opciones dependen del workflow del paso, así que se piden recién cuando el paso se conoce.
+  useEffect(() => {
+    if (!paso?.workflow) return
+    let vivo = true
+    getWorkflowOptions(projectId, paso.workflow)
+      .then(r => {
+        if (!vivo) return
+        setOps(r.opciones)
+        setTamano({ imagenes: (paso.despachos ?? 1) * r.imagenes, usd: r.costo_por_imagen_usd })
+      })
+      // Sin ComfyUI no hay catálogo. Se corre igual con los valores del workflow: quedarse sin
+      // Run porque no se pudo pintar un desplegable sería peor que no poder elegir.
+      .catch(() => { if (vivo) setOps([]) })
+    return () => { vivo = false }
+  }, [projectId, paso?.workflow, paso?.despachos])
+
+  // Qué opciones se muestran ahora. Un campo anidado solo existe si su padre está en la rama que
+  // lo declara: con «Geometry only» elegido, `pbr` y `texture_quality` no van en pantalla ni en el
+  // payload, porque ese modo no los admite.
+  const visibles = (ops ?? []).filter(o => {
+    if (!o.padre) return true
+    const padre = (ops ?? []).find(x => x.clave === o.padre)
+    if (!padre) return true
+    const valorPadre = String(elegidas[padre.clave] ?? padre.valor)
+    const hoja = o.clave.slice(o.padre.length + 1)
+    return !padre.ramas || (padre.ramas[valorPadre] ?? []).includes(hoja)
+  })
+
+  const cambiadas = Object.fromEntries(
+    Object.entries(elegidas).filter(([k, v]) => {
+      const def = (ops ?? []).find(o => o.clave === k)
+      return def && JSON.stringify(v) !== JSON.stringify(def.valor) && visibles.some(o => o.clave === k)
+    }))
+
+  // Qué opción elegida encarece la corrida. Es lo único honesto que se puede decir del precio: el
+  // sistema imputa un valor plano por imagen, así que un número por calidad sería inventado.
+  const caras = visibles.filter(o => {
+    const v = elegidas[o.clave] ?? o.valor
+    return (o.sube_costo ?? []).includes(String(v))
+  })
+
   const correr = async (limitePorCada = 0) => {
     if (!paso || busy) return
     setBusy(true); setError(null)
     try {
-      const r = await advanceAsset(projectId, asset.id, { pasos: 1, prompt: paso.pide_prompt ? texto : null, limitePorCada })
+      const r = await advanceAsset(projectId, asset.id, {
+        pasos: 1, prompt: paso.pide_prompt ? texto : null, limitePorCada,
+        // Solo lo que el usuario CAMBIÓ. Mandar el catálogo entero reescribiría cada nodo con lo
+        // que ya tenía y convertiría cualquier futuro cambio del workflow en letra muerta.
+        opciones: Object.keys(cambiadas).length ? cambiadas : null,
+      })
       onListo(r.creados.map(c => c.id))
     } catch (e) {
       // El despacho no se reintenta solo: cada intento cuesta y no devuelve lo mismo.
@@ -3761,6 +3937,92 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
               />
             )}
 
+            {/* Opciones de generación. Plegadas: quien solo quiere correr no tiene que leerlas,
+                y quien quiere elegir las tiene a un clic. */}
+            {visibles.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <button
+                  onClick={() => setAbierto(v => !v)}
+                  disabled={busy}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 7,
+                    padding: '8px 11px', borderRadius: 8, cursor: busy ? 'default' : 'pointer',
+                    background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+                    color: 'var(--text-1)', fontSize: 11.5, fontFamily: 'var(--font-sans)',
+                    textAlign: 'left',
+                  }}
+                >
+                  <span style={{ color: 'var(--text-3)', fontSize: 10 }}>{abierto ? '▾' : '▸'}</span>
+                  Generation options
+                  <span style={{ marginLeft: 'auto', fontSize: 10.5, fontFamily: 'var(--font-mono)', color: Object.keys(cambiadas).length ? accent : 'var(--text-3)' }}>
+                    {Object.keys(cambiadas).length ? `${Object.keys(cambiadas).length} changed` : 'defaults'}
+                  </span>
+                </button>
+
+                {abierto && (
+                  <div style={{
+                    marginTop: 8, padding: '11px 12px', borderRadius: 8,
+                    background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+                    display: 'flex', flexDirection: 'column', gap: 10,
+                  }}>
+                    {visibles.map(o => {
+                      const valor = elegidas[o.clave] ?? o.valor
+                      const set = (v: unknown) => setElegidas(prev => ({ ...prev, [o.clave]: v }))
+                      return (
+                        <div key={o.clave} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <label
+                            title={o.ayuda ?? undefined}
+                            style={{
+                              flex: 1, fontSize: 11.5, color: 'var(--text-2)',
+                              textTransform: 'capitalize', cursor: o.ayuda ? 'help' : 'default',
+                            }}
+                          >
+                            {o.etiqueta}
+                            {o.nodos.length > 1 && (
+                              <span style={{ marginLeft: 6, fontSize: 9.5, fontFamily: 'var(--font-mono)', color: 'var(--text-4)' }}>
+                                ×{o.nodos.length}
+                              </span>
+                            )}
+                          </label>
+                          {o.tipo === 'BOOLEAN' ? (
+                            <input
+                              type="checkbox" checked={!!valor} disabled={busy}
+                              onChange={e => set(e.target.checked)}
+                              style={{ width: 15, height: 15, accentColor: accent, cursor: 'pointer' }}
+                            />
+                          ) : o.valores ? (
+                            <select
+                              value={String(valor)} disabled={busy}
+                              onChange={e => set(e.target.value)}
+                              style={{
+                                width: 176, padding: '5px 8px', borderRadius: 6,
+                                background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+                                color: 'var(--text-0)', fontSize: 11.5, cursor: 'pointer',
+                              }}
+                            >
+                              {o.valores.map(v => (
+                                <option key={v} value={v}>{v}{(o.sube_costo ?? []).includes(v) ? '  ·  costs more' : ''}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="number" value={Number(valor)} disabled={busy}
+                              onChange={e => set(Number(e.target.value))}
+                              style={{
+                                width: 176, padding: '5px 8px', borderRadius: 6,
+                                background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+                                color: 'var(--text-0)', fontSize: 11.5,
+                              }}
+                            />
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{
               fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.55, marginBottom: 18,
               padding: '9px 11px', borderRadius: 8,
@@ -3772,6 +4034,20 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
                    none of them can be reproduced.`
                 : 'Spends credit, and running it again never returns the same result.'}
               {' '}The output is published to the right of this page, connected to it.
+              {/* El tamaño de la corrida en imágenes y el estimado que el sistema ya usa para
+                  cobrar. NO se calcula un precio por calidad: el precio por imagen es plano
+                  —medido, 405 corridas y un solo valor— así que variarlo sería inventarlo. Lo que
+                  sí se dice es cuál de las opciones elegidas encarece del lado del proveedor. */}
+              {tamano && (
+                <div style={{ marginTop: 7, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-2)' }}>
+                  {tamano.imagenes} image{tamano.imagenes === 1 ? '' : 's'} · ≈ ${(tamano.imagenes * tamano.usd).toFixed(2)} estimated
+                </div>
+              )}
+              {caras.length > 0 && (
+                <div style={{ marginTop: 5, fontSize: 11, color: '#F59E0B' }}>
+                  {caras.map(o => o.etiqueta).join(', ')} raise{caras.length === 1 ? 's' : ''} what the provider charges above that estimate.
+                </div>
+              )}
             </div>
 
             {error && (
