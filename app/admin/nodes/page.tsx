@@ -137,7 +137,7 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   groq:       ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
   together:   ['meta-llama/Llama-3-70b-chat-hf', 'mistralai/Mixtral-8x7B-Instruct-v0.1'],
   openrouter: ['meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-r1', 'anthropic/claude-3.5-sonnet'],
-  minimax:    ['MiniMax-M2.7', 'MiniMax-Text-01', 'abab6.5s-chat'],
+  minimax:    ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-Text-01', 'abab6.5s-chat'],
   mimo:       ['xiaomi/mimo-v2.5-pro', 'xiaomi/mimo-v2.5'],
   anthropic:  ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
 }
