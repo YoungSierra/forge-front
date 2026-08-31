@@ -985,6 +985,10 @@ export interface NodeChatWindowProps {
   // Si se provee, reemplaza la llamada interna a chatWithNode
   onSend?:          (userMessage: string, file?: File | null, attachmentUrl?: string, signal?: AbortSignal) => Promise<{ reply: string; attachment?: ChatAttachment; messageId?: string }>
   onAccept?:        (content: string) => Promise<void>
+  /** Le pide al backend que corte la generación. Es una petición aparte y no «cerrar el fetch»:
+   *  el backend ya no deduce el Stop de una conexión caída, porque una corrida larga la pierde
+   *  sola y así se tiraba trabajo ya pagado. */
+  onStop?:          () => Promise<unknown>
   docUrl?:          string
   docFormat?:       string
   /** Hay imágenes de este nodo renderizándose: el documento todavía no las tiene. */
@@ -1009,9 +1013,17 @@ export interface NodeChatWindowProps {
   onOpenOutput?:        (sourceProjectNodeId: string, outputKey?: string | null) => void
 }
 
+// Una conexión caída: el navegador la nombra distinto en cada motor —«Failed to fetch»,
+// «Load failed», «NetworkError»— y ninguno de esos textos significa que el servidor haya fallado.
+// La corrida sigue del otro lado y guarda al terminar.
+function esConexionCaida (err: unknown): boolean {
+  const m = err instanceof Error ? `${err.name} ${err.message}` : String(err)
+  return /failed to fetch|load failed|networkerror|network error|err_/i.test(m)
+}
+
 export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
-  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, docUrl, docFormat, imagesPending,
+  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, onStop, docUrl, docFormat, imagesPending,
   approvedAsset, imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
   targetOutputKey, targetOutputLabel, systemPrompt, siblingContent,
   isGate, projectNodeId, onOpenOutput,
@@ -1306,8 +1318,9 @@ export default function NodeChatWindow({
     setPendingUrl(null)
     setSending(true)
     setError(null)
-    // Abortarlo cierra la conexión, y el back traduce ese cierre en una señal que llega hasta el
-    // proveedor: la generación se corta de verdad y se deja de gastar.
+    // Abortarlo suelta al cliente. Parar de verdad la generación es otra cosa —`onStop`, que le
+    // pide al backend que corte— porque el backend ya no deduce el Stop de que se cierre la
+    // conexión: una corrida larga la pierde sola y así se tiraba trabajo pagado.
     const abortar = new AbortController()
     abortRef.current = abortar
     try {
@@ -1339,6 +1352,12 @@ export default function NodeChatWindow({
       // parezca que el turno se perdió solo.
       if ((err as Error)?.name === 'AbortError') {
         setMessages(prev => [...prev, { role: 'assistant', content: '_Generation stopped._' }])
+      } else if (esConexionCaida(err)) {
+        // La conexión se cayó, no la corrida: el backend sigue trabajando y guarda al terminar.
+        // Decir «failed to fetch» aquí hacía creer que se había perdido un TDD de trece minutos que
+        // en realidad estaba a medio hacer y terminó bien.
+        setMessages(prev => [...prev, { role: 'assistant', content:
+          '_The connection dropped, but the run kept going on the server. It will appear here when it finishes — reopening this node also shows it._' }])
       } else {
         setError(err instanceof Error ? err.message : 'Error contacting assistant')
       }
@@ -1348,7 +1367,13 @@ export default function NodeChatWindow({
     }
   }
 
-  const detener = () => abortRef.current?.abort()
+  // Parar es pedirlo, no colgar el teléfono. Se avisa al backend primero —es lo que corta el gasto
+  // de verdad— y recién después se suelta el fetch.
+  const detener = () => {
+    if (onStop) onStop().catch(() => {})
+    abortRef.current?.abort()
+  }
+
 
   // Extrae JSON de la conversación, valida y llama onApply
   const applyOutput = async () => {

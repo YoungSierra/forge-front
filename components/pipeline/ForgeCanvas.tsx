@@ -16,7 +16,7 @@ import OrthogonalEdge, { type WayPoint } from './OrthogonalEdge'
 import MoodboardButton from '../moodboard/MoodboardButton'
 import ModelViewer from '@/components/shared/ModelViewer'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
-import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName } from '@/lib/api'
+import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName, stopNodeRun } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap, RunPlan, GateAuthMode } from '@/lib/api'
 import type { Project, RunScope } from '@/lib/types'
@@ -5774,6 +5774,14 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               setChatSessionId(r.session_id)
             }
             return { reply: r.reply, attachment: r.attachment, messageId: r.message_id }
+          }}
+          // Parar de verdad: se le pide al backend que corte, que es lo que deja de gastar. Cerrar
+          // el fetch ya no cancela nada — una corrida larga pierde la conexión sola y así se
+          // estaba tirando trabajo pagado.
+          onStop={async () => {
+            const sid = chatSessionIdRef.current ?? chatSessionId
+            if (!sid) return
+            return stopNodeRun(project.id, chatForgeNode.id, sid)
           }}
           onAccept={async (content) => {
             if (!chatSessionId) return

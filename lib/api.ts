@@ -1547,6 +1547,16 @@ export async function getNodeContextInputs(projectId: string, projectNodeId: str
   return res.inputs ?? []
 }
 
+/** Para una corrida en curso. Es una petición aparte y no «cerrar el fetch»: el backend ya no
+ *  deduce el Stop de que se caiga la conexión, porque una corrida larga —el 3.12 tarda trece
+ *  minutos— pierde la conexión sola y se estaba tirando trabajo ya pagado. */
+export async function stopNodeRun(projectId: string, nodeId: string, sessionId: string) {
+  return request<{ success: boolean; session_id: string; status: string }>(
+    `/api/projects/${projectId}/canvas/nodes/${nodeId}/stop`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session_id: sessionId }) },
+  )
+}
+
 export async function acceptNodeOutput(
   projectId: string,
   nodeId:    string,
