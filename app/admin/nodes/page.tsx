@@ -139,7 +139,12 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   openrouter: ['meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-r1', 'anthropic/claude-3.5-sonnet'],
   minimax:    ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-Text-01', 'abab6.5s-chat'],
   mimo:       ['xiaomi/mimo-v2.5-pro', 'xiaomi/mimo-v2.5'],
-  anthropic:  ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+  // Los diez que devuelve el catálogo de la cuenta (client.models.list), del más nuevo al más
+  // viejo. Escribirlos a ojo no falla al guardar: falla el día que alguien corre ese nodo, con un
+  // 404 después de haber armado todo el contexto. Verificar con scripts/probar-modelos-anthropic.js.
+  anthropic:  ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5',
+               'claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-4-6', 'claude-opus-4-6',
+               'claude-opus-4-5-20251101', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-5-20250929'],
 }
 
 const PHASE_COLOR: Record<string, string> = {
