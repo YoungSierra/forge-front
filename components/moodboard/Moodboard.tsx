@@ -373,6 +373,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       .then(l => {
         if (!vivo) return
         setPosiciones(l.pos)
+        setOcultos(l.ocultos ?? {})
         setMarcos(l.marcos ?? [])
         for (const m of (l.marcos ?? [])) marcosVistos.current.add(m.id)
         marcosCargados.current = true
@@ -383,6 +384,15 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
 
   const posicionesRef = useRef<Record<string, { x: number; y: number }>>({})
   useEffect(() => { posicionesRef.current = posiciones }, [posiciones])
+
+  // Hojas escondidas del lienzo (informe v3, punto 3). Correr una pagina otra vez no reemplaza lo
+  // anterior: deja las dos tandas a la vista y el lienzo se llena. Esconder es de la VISTA — el
+  // activo sigue entero en la libreria y en el historial de su pagina madre, que es de donde se
+  // recupera con un clic. Es del proyecto, como el resto del acomodo: si alguien limpia el
+  // espacio de trabajo, el equipo lo ve limpio.
+  const [ocultos, setOcultos] = useState<Record<string, boolean>>({})
+  const ocultosRef = useRef<Record<string, boolean>>({})
+  useEffect(() => { ocultosRef.current = ocultos }, [ocultos])
 
   // Marcos: conjuntos con nombre. Viven en el mismo acomodo del proyecto, así que también son
   // compartidos — agrupar es una decisión de organización, no una preferencia de quien mira.
@@ -405,6 +415,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     saveMoodboardLayout(projectId, {
       pos: posicionesRef.current,
       marcos: marcosRef.current,
+      ocultos: ocultosRef.current,
       conocidos: [...marcosVistos.current],
     }).catch(e => console.error('[moodboard] guardar layout', e))
   }, [projectId])
@@ -767,7 +778,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   }
 
   const filtered = useMemo(() => {
-    const base = tab === 'all' ? shownSet : shownSet.filter(a => tabOf(a) === tab)
+    const conTab = tab === 'all' ? shownSet : shownSet.filter(a => tabOf(a) === tab)
+    // Lo escondido se cae del LIENZO, no de la tabla: la tabla es donde se busca, y no encontrar
+    // ahi algo que sigue existiendo es peor que verlo.
+    const base = view === 'table' ? conTab : conTab.filter(a => !ocultos[a.id])
 
     if (view === 'table') {
       const key = (a: UnifiedAsset) =>
@@ -794,6 +808,25 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const pages   = view === 'table' ? Math.max(1, Math.ceil(filtered.length / perPage)) : 1
   const visible = view === 'table' ? filtered.slice(page * perPage, (page + 1) * perPage) : filtered
 
+  // Esconder y devolver. `false` en vez de borrar la clave: el servidor mezcla el mapa por clave,
+  // y quitarla haria que la version del otro cliente —que todavia la tiene en `true`— la volviera
+  // a esconder al guardar. Guardar en el mismo gesto, que es como se guarda todo el acomodo.
+  const esconder = useCallback((ids: string[]) => {
+    if (!ids.length) return
+    setOcultos(o => { const n = { ...o }; for (const id of ids) n[id] = true; return n })
+    ocultosRef.current = { ...ocultosRef.current, ...Object.fromEntries(ids.map(id => [id, true])) }
+    setSeleccion(new Set())
+    setSel(null)
+    guardarLayout()
+  }, [guardarLayout])
+
+  const devolverAlLienzo = useCallback((ids: string[]) => {
+    if (!ids.length) return
+    setOcultos(o => { const n = { ...o }; for (const id of ids) n[id] = false; return n })
+    ocultosRef.current = { ...ocultosRef.current, ...Object.fromEntries(ids.map(id => [id, false])) }
+    guardarLayout()
+  }, [guardarLayout])
+
   // ── Ordenar la selección ────────────────────────────────────────────────────
   // Las alinea en cuadrícula desde la esquina superior izquierda de lo seleccionado, en el orden
   // en que están en el lienzo (arriba-abajo, izquierda-derecha) y NO en el orden de la lista: lo
@@ -819,6 +852,49 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     })
     setTimeout(guardarLayout, 0)
   }, [seleccion, posicionDe, visible, fase.key, guardarLayout])
+
+  // ── Reorganizar un documento en cuadrícula (informe v3, punto 10) ────────────
+  // Iterar una página no reemplaza la anterior: la deja al lado, y a las pocas vueltas el bloque
+  // del documento no se lee. El orden lo fijó él: POR NÚMERO DE PÁGINA, conservando las versiones
+  // anteriores junto a las nuevas —el historial se ve—, no solo la vigente.
+  //
+  // De ahí el desempate por fecha dentro del mismo número: las tres tandas de la página 28 quedan
+  // seguidas, de la más vieja a la más nueva, en vez de repartidas por el lienzo.
+  // El número tiene que ser PREFIJO de página, con su separador. Un dígito suelto no sirve:
+  // «3D production» —una salida de la cadena, no una página— aterrizaba en la página 3, entre
+  // 03_VisualPillars y 04_ShapeLanguage. Lo que no lleva número va al final, en orden de corrida.
+  const numeroDePagina = (a: UnifiedAsset) => {
+    const m = /^(\d{1,3})[_\s.-]/.exec(outputOf(a) ?? a.name)
+    return m ? Number(m[1]) : 9999
+  }
+
+  const ordenarZona = useCallback((nombre: string) => {
+    const hojas = visible.filter(a => zonaDe(a) === nombre)
+    if (hojas.length < 2) return
+    const orden = [...hojas].sort((a, b) =>
+      (numeroDePagina(a) - numeroDePagina(b)) ||
+      (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()))
+    const caja = disposicion.zonas.find(z => z.nombre === nombre)
+    const x0 = caja ? caja.x + 18 : 0
+    const y0 = caja ? caja.y + 62 : 0
+    const cols = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(orden.length))))
+    setPosiciones(m => {
+      const n = { ...m }
+      orden.forEach((a, i) => {
+        n[`${fase.key}:${a.id}`] = {
+          x: x0 + (i % cols) * (HOJA_W + HOJA_GAP),
+          y: y0 + Math.floor(i / cols) * (HOJA_H + HOJA_GAP),
+        }
+      })
+      return n
+    })
+    setTimeout(guardarLayout, 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, disposicion, fase.key, guardarLayout])
+
+  // Qué documento se pulsó con el botón derecho. Un menú propio y no el radial de cinco sectores:
+  // ese lo define el documento de menús del equipo y meterle una sexta opción le mueve las cinco.
+  const [menuZona, setMenuZona] = useState<{ x: number; y: number; nombre: string } | null>(null)
 
   // ── Marcos ──────────────────────────────────────────────────────────────────
   // Agrupar la selección en un conjunto con nombre. Una hoja pertenece a UN marco: estar en dos
@@ -1354,7 +1430,17 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                     borderRadius: 14,
                     background: 'rgba(255,255,255,0.018)',
                   }}>
-                    <div style={{
+                    {/* La pestaña del documento SÍ recibe el puntero: es donde se pulsa con el
+                        botón derecho para reorganizarlo. El resto de la zona sigue transparente,
+                        para no robarle el clic a las hojas que tiene dentro. */}
+                    <div
+                      onPointerDown={e => e.stopPropagation()}
+                      onContextMenu={e => {
+                        e.preventDefault(); e.stopPropagation()
+                        setMenuZona({ x: e.clientX, y: e.clientY, nombre: z.nombre })
+                      }}
+                      title={`${z.nombre} — right-click to re-organize`}
+                      style={{
                       position: 'absolute', left: -1, top: -1,
                       padding: '7px 18px 8px',
                       borderRadius: '14px 14px 0 0',
@@ -1362,6 +1448,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                       borderBottom: `2px solid ${theme.accent}`,
                       fontSize: 22, fontWeight: 700, letterSpacing: '-.01em',
                       color: 'var(--text-0)', whiteSpace: 'nowrap',
+                      pointerEvents: 'auto', cursor: 'context-menu',
                     }}>{z.nombre}</div>
                   </div>
                 ))}
@@ -1494,6 +1581,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                         }
                       }}>↓</BarraBtn>
                       <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.14)', margin: '0 3px' }} />
+                      {/* Sacar del lienzo, no borrar: los activos siguen en la libreria y en el
+                          historial de su pagina madre, de donde se traen de vuelta. */}
+                      <BarraBtn titulo="Remove from canvas — they stay in the library" onClick={() => esconder([...seleccion])}>⊘</BarraBtn>
                       <BarraBtn titulo="Clear selection" onClick={() => setSeleccion(new Set())}>✕</BarraBtn>
                     </div>
                   )
@@ -1522,6 +1612,22 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                         // Con la mano puesta el arrastre es del lienzo, no de la hoja.
                         if (e.button !== 0 || mano) return
                         e.stopPropagation()
+                        // Shift + clic: la segunda vía de selección del informe v3 (punto 4). El
+                        // marco de selección se queda como está —es el que sirve para barrer una
+                        // zona— y ésta es para ir eligiendo hoja por hoja, incluidas las que no
+                        // están juntas, que es justo lo que un rectángulo no puede hacer.
+                        // Alterna: volver a pulsar sobre una elegida la saca, si no, quitar una de
+                        // en medio obligaba a empezar de cero.
+                        if (e.shiftKey) {
+                          setSeleccion(prev => {
+                            const n = new Set(prev)
+                            if (n.has(a.id)) n.delete(a.id); else n.add(a.id)
+                            return n
+                          })
+                          setSel(null)
+                          arrastrado.current = true   // que el clic de detrás no abra la hoja
+                          return
+                        }
                         const inicio = { x: e.clientX, y: e.clientY, px: p.x, py: p.y }
                         // Foto de los marcos ANTES de mover: es contra estos rectángulos que se
                         // decide dónde cae la hoja, no contra los que quedan mientras se arrastra.
@@ -1593,6 +1699,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           }}>⛶</BarraBtn>
                           <BarraBtn titulo={(notasPorHoja[a.id]?.length ?? 0) > 0 ? `Notes (${notasPorHoja[a.id].length})` : 'Notes'} activo={(notasPorHoja[a.id]?.length ?? 0) > 0} onClick={() => setNotando(a)}>✎</BarraBtn>
                           <BarraBtn titulo="Save to my computer" onClick={() => bajarActivo(a)}>↓</BarraBtn>
+                          <BarraBtn titulo="Remove from canvas — it stays in the library" onClick={() => esconder([a.id])}>⊘</BarraBtn>
                           <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.14)', margin: '0 3px' }} />
                           <BarraBtn titulo="Design edits" onClick={() => setEditando(a)}>✦</BarraBtn>
                         </div>
@@ -1799,11 +1906,58 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       )}
       {aviso    && <NoDisponible  que={aviso}      accent={theme.accent} onClose={() => setAviso(null)} />}
 
+      {/* Menú del documento. Una sola opción hoy; existe como menú y no como botón porque el
+          informe pide el gesto de clic derecho sobre la sección. */}
+      {menuZona && (
+        <div
+          onPointerDown={e => e.stopPropagation()}
+          style={{ position: 'fixed', inset: 0, zIndex: 12060 }}
+          onClick={() => setMenuZona(null)}
+          onContextMenu={e => { e.preventDefault(); setMenuZona(null) }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              position: 'fixed', left: menuZona.x, top: menuZona.y,
+              background: 'rgba(10,12,16,0.97)', border: '1px solid rgba(255,255,255,0.16)',
+              borderRadius: 10, padding: 5, minWidth: 232,
+              boxShadow: '0 14px 40px rgba(0,0,0,0.6)',
+            }}
+          >
+            <div style={{
+              fontSize: 9.5, fontFamily: 'var(--font-mono)', color: 'var(--text-3)',
+              padding: '4px 9px 6px', letterSpacing: '.05em',
+            }}>{menuZona.nombre.toUpperCase()}</div>
+            <button
+              onClick={() => { ordenarZona(menuZona.nombre); setMenuZona(null) }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
+                padding: '8px 9px', borderRadius: 7, border: 'none', background: 'transparent',
+                color: 'var(--text-0)', fontSize: 12, fontFamily: 'var(--font-sans)',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+            >
+              Re-organize in a grid
+              <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2 }}>
+                By page number, earlier versions beside the new ones
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
       {detail && <Detail asset={detail.asset} from={detail.from} accent={theme.accent} onAprobado={reload}
                          notas={notasPorHoja[detail.asset.id] ?? []}
                          onNota={() => setNotando(detail.asset)}
                          onDesignEdit={() => pedirDesignEdit(detail.asset)}
                          onMenu={(mx, my) => setMenu({ x: mx, y: my, asset: detail.asset })}
+                         // Lo que salió de esta página y está fuera del lienzo. `derived_from` lo
+                         // llena la cadena de producción: las tres vistas de un Character Sheet
+                         // cuelgan de la página que las produjo, y son justo las que se acumulan
+                         // corrida tras corrida.
+                         escondidas={assets.filter(x => x.derived_from === detail.asset.id && ocultos[x.id])}
+                         onDevolver={devolverAlLienzo}
                          onClose={() => setDetail(null)} />}
     </div>
   )
@@ -2272,12 +2426,17 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
 // No es un visor a pantalla completa: es una CARD que fluye al frente desde su lugar en la
 // grilla, como en la referencia. La grilla sigue visible detrás, atenuada, así no se pierde
 // el contexto de dónde estaba la imagen. Al cerrar vuelve exactamente a su celda.
-function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNota, onDesignEdit }: {
+function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNota, onDesignEdit,
+                 escondidas, onDevolver }: {
   asset: UnifiedAsset; from: DOMRect; accent: string
   onMenu: (x: number, y: number) => void; onClose: () => void; onAprobado: () => void
   // Las mismas acciones que en el lienzo. Al abrir la hoja no se pierden: es la misma pieza,
   // vista más grande, y tener que cerrarla para poder anotarla era el camino largo.
   notas: AssetNote[]; onNota: () => void; onDesignEdit: () => void
+  // Lo que salió de ESTA página y está escondido del lienzo. El informe v3 es explícito sobre
+  // dónde se recupera: en el historial de la página madre, no en la Librería, que conserva su
+  // función de insertar o reutilizar piezas en un slot.
+  escondidas: UnifiedAsset[]; onDevolver: (ids: string[]) => void
 }) {
   const t   = kindOf(asset)
   // Historial de la pieza. Se mira desde aca: el badge de la tarjeta decia que habia dos
@@ -2560,6 +2719,62 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
 
           </div>
         )}
+
+      {/* Lo que salió de esta página y se sacó del lienzo. Un clic la devuelve. */}
+      {escondidas.length > 0 && (
+        <div
+          onPointerDown={e => e.stopPropagation()}
+          style={{
+            position: 'fixed', zIndex: 12051,
+            left: box.left - 86, top: box.top + 38,
+            maxHeight: Math.max(120, box.height - 38),
+            width: 74, display: 'flex', flexDirection: 'column', gap: 6,
+            overflowY: 'auto', overflowX: 'hidden', padding: 6, borderRadius: 9,
+            background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.16)',
+            opacity: open ? 1 : 0,
+            transition: `${FLIGHT}, opacity 220ms ease 140ms`,
+          }}
+        >
+          <div style={{
+            fontSize: 8.5, lineHeight: 1.35, color: 'var(--text-3)', textAlign: 'center',
+            padding: '2px 1px 4px', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: 2,
+          }}>
+            off the canvas
+          </div>
+          {escondidas.map(h => (
+            <button
+              key={h.id}
+              onClick={e => { e.stopPropagation(); onDevolver([h.id]) }}
+              title={`Bring "${outputOf(h) ?? h.name}" back to the canvas`}
+              style={{
+                position: 'relative', width: '100%', aspectRatio: '4 / 3', flexShrink: 0,
+                borderRadius: 6, overflow: 'hidden', cursor: 'pointer', padding: 0,
+                background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,0.16)', opacity: 0.65,
+              }}
+            >
+              {h.storage_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={h.storage_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              )}
+              <span style={{
+                position: 'absolute', left: 0, right: 0, bottom: 0,
+                fontSize: 8.5, fontFamily: 'var(--font-mono)', lineHeight: '13px',
+                background: 'rgba(6,7,9,0.8)', color: '#fff',
+              }}>restore</span>
+            </button>
+          ))}
+          {escondidas.length > 1 && (
+            <button
+              onClick={e => { e.stopPropagation(); onDevolver(escondidas.map(h => h.id)) }}
+              style={{
+                flexShrink: 0, padding: '5px 0', borderRadius: 6, cursor: 'pointer',
+                background: `${accent}22`, border: `1px solid ${accent}66`, color: accent,
+                fontSize: 9, fontFamily: 'var(--font-mono)',
+              }}
+            >all {escondidas.length}</button>
+          )}
+        </div>
+      )}
 
       {/* Autoría de la versión que se está mirando, abajo a la izquierda —enfrente del botón de
           aprobar—. En la tira solo caben 74 px, así que el nombre y la hora van acá, donde se leen

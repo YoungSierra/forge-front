@@ -1602,14 +1602,23 @@ export interface MoodboardLayout {
    *  distinguir un BORRADO —id conocido que ya no viene— de un marco que creó otra persona
    *  mientras tanto, que se conserva. Sin esto, dos pestañas se pisan el acomodo. */
   conocidos?: string[]
+  /** Hojas escondidas del lienzo (punto 3 del informe v3). `true` esconde, `false` la devuelve.
+   *  Se manda como mapa para que el servidor lo mezcle por clave: con una lista, dos personas
+   *  acomodando a la vez se pisarían el conjunto entero. Esconder es solo de la vista — el activo
+   *  sigue en la librería y en su página madre. */
+  ocultos?: Record<string, boolean>
 }
 
 export async function getMoodboardLayout(projectId: string): Promise<MoodboardLayout> {
   const r = await request<{ success: boolean; layout: Record<string, unknown> }>(`/api/projects/${projectId}/moodboard-layout`)
   const l = r.layout ?? {}
   // Forma vieja: el objeto ERA el mapa de posiciones.
-  if (!('pos' in l)) return { pos: (l as MoodboardLayout['pos']) ?? {}, marcos: [] }
-  return { pos: (l.pos as MoodboardLayout['pos']) ?? {}, marcos: (l.marcos as MoodboardMarco[]) ?? [] }
+  if (!('pos' in l)) return { pos: (l as MoodboardLayout['pos']) ?? {}, marcos: [], ocultos: {} }
+  return {
+    pos:     (l.pos as MoodboardLayout['pos']) ?? {},
+    marcos:  (l.marcos as MoodboardMarco[]) ?? [],
+    ocultos: (l.ocultos as Record<string, boolean>) ?? {},
+  }
 }
 
 export async function saveMoodboardLayout(projectId: string, layout: MoodboardLayout) {
