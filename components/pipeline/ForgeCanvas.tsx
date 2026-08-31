@@ -1314,18 +1314,39 @@ const TextInputCard = React.memo(function TextInputCard({ data }: { data: TextIn
 function extractSection(content: string, sectionName: string, otherKeys: string[] = []): string | null {
   const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
                              .replace(/_/g, '[_\\s]')  // "concept_list" también matchea "concept list"
-  // Acepta "## Concept Seeds — subtítulo" además de "## Concept Seeds" exacto
-  const startRx = new RegExp(`^(?:#{1,4}\\s+)?${escaped}(?:\\s*[—\\-–:].+)?\\s*$`, 'im')
+  // Acepta "## Concept Seeds — subtítulo" además de "## Concept Seeds" exacto.
+  // El paréntesis y el corchete entraron el 31-08: el 3.2 tituló "## Mechanic Specs (TDD §B)" y
+  // "## Feel Statement (level=mechanics)". Sin ellos ninguna de las dos secciones se encontraba,
+  // así que `core_loop` no hallaba dónde cortar y se comía 56.986 de los 57.526 chars, y las
+  // otras tres pestañas caían al documento entero: cuatro pestañas enseñando lo mismo.
+  const COLA    = '(?:\\s*[—\\-–:(\\[].*)?'
+  const startRx = new RegExp(`^(#{1,4}\\s+)?\\**\\s*${escaped}\\s*\\**${COLA}\\s*$`, 'im')
   const match   = startRx.exec(content)
   if (!match) return null
+  // Nivel del encabezado que abre: 0 cuando el título viene en negrita suelta, sin `#`.
+  const nivel = match[1] ? match[1].trim().length : 0
   const after = content.slice(match.index + match[0].length)
-  // nextRx dinámico: solo cortar en otras claves conocidas, nunca en headings arbitrarios
+  // nextRx dinámico: solo cortar en otras claves conocidas, nunca en headings arbitrarios.
+  // El corte tolera exactamente lo mismo que la apertura: si `mechanic_specs` abre con "(TDD §B)"
+  // y aquí se exigiera el título pelado, la sección anterior nunca encontraría su final.
   const otherEscaped = otherKeys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_\\s]'))
-  const nextRx = otherEscaped.length > 0
-    ? new RegExp(`^(?:#{1,4}\\s+)?(?:${otherEscaped.join('|')})\\s*$`, 'im')
-    : null
-  const next = nextRx ? nextRx.exec(after) : null
-  return (next ? after.slice(0, next.index) : after).trim() || null
+  if (!otherEscaped.length) return after.trim() || null
+  const nextRx = new RegExp(`^(#{1,4}\\s+)?\\**\\s*(?:${otherEscaped.join('|')})\\s*\\**${COLA}\\s*$`, 'gim')
+  // Un output cuyo nombre ES el título del documento —"# Core Gameplay Spec", "# Character
+  // Bible"— no es una sección entre pares: el documento entero es su contenido, y los demás
+  // outputs son apartados suyos. Cortarlo en el primer `##` lo dejaba en 64 chars con 92.000
+  // debajo. Solo en ese caso se salta un corte más profundo; abriendo en un `##` cualquiera se
+  // corta en la primera clave siguiente, como siempre.
+  const primerEnc = /^#{1,4}[ \t]+.+$/m.exec(content)
+  const esTitulo  = nivel > 0 && !!primerEnc && primerEnc.index === match.index
+  let next: RegExpExecArray | null
+  while ((next = nextRx.exec(after)) !== null) {
+    const nivelCorte = next[1] ? next[1].trim().length : 0
+    if (!esTitulo || nivelCorte === 0 || nivelCorte <= nivel) {
+      return after.slice(0, next.index).trim() || null
+    }
+  }
+  return after.trim() || null
 }
 
 // ─── ForgeNodeCard ────────────────────────────────────────────────────────────
@@ -2464,8 +2485,18 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
 
               // Tab de texto/markdown
               const otherKeys   = outputs.filter(o => ((o as {key?:string}).key || o.name) !== activeOutKey).map(o => (o as {key?:string}).key || o.name || '')
-              const section     = outSession?.output_asset?.content
-                ? (extractSection(outSession.output_asset.content, activeOutKey, otherKeys) ?? outSession.output_asset.content)
+              // Caer al documento entero cuando la sección no aparece solo es correcto si el
+              // documento NO viene seccionado — un nodo de un solo output escribe prosa suelta.
+              // Corriendo el nodo entero ese respaldo hacía que TODA pestaña sin sección mostrara
+              // el documento completo, y con él el de otro output: se veía siempre lo mismo y
+              // parecía que el output no traía nada propio. Si alguna otra clave sí está, la
+              // respuesta viene seccionada y la ausencia de esta es un hecho, no un caso a tapar.
+              const cuerpoOut   = outSession?.output_asset?.content ?? null
+              const seccionOut  = cuerpoOut ? extractSection(cuerpoOut, activeOutKey, otherKeys) : null
+              const vieneSeccionado = !!cuerpoOut && otherKeys.some(k => !!k && extractSection(cuerpoOut, k) !== null)
+              const sinSeccion  = !!cuerpoOut && !seccionOut && vieneSeccionado
+              const section     = cuerpoOut
+                ? (seccionOut ?? (vieneSeccionado ? null : cuerpoOut))
                 : null
 
               // Gallery solo tiene sentido cuando el output tiene image_gen (para generar imágenes por ítem)
@@ -2715,6 +2746,13 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                           crudo para no romper la inyección de botones ✦. */}
                       {imageItems.length > 0 ? section : forDisplay(section)}
                     </ReactMarkdown>
+                  ) : sinSeccion ? (
+                    // El documento sí viene seccionado y esta clave no está: decirlo, en vez de
+                    // enseñar el documento entero como si fuera el contenido de esta pestaña.
+                    <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', lineHeight: 1.8 }}>
+                      This run produced no <span style={{ color: 'var(--text-1)' }}>{activeOutKey}</span> section.
+                      <br />The reply is split by output and this one is missing — run this output on its own, or re-run the node.
+                    </div>
                   ) : outSession?.output_asset?.storage_url ? (
                     <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
                       This asset is stored as a file. Use the download button above to view it.
@@ -5723,7 +5761,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           }}
           onAccept={async (content) => {
             if (!chatSessionId) return
-            await acceptNodeOutput(project.id, chatForgeNode.id, chatSessionId, content, chatDocUrl ?? undefined, chatDocFormat ?? undefined)
+            await acceptNodeOutput(project.id, chatForgeNode.id, chatSessionId, content, chatDocUrl ?? undefined, chatDocFormat ?? undefined, chatNode.project_node_id)
             invalidateAssetDeckCache(project.id, chatForgeNode.id)
             setChatNode(null)
             setChatMessages([])

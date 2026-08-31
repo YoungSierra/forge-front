@@ -1550,11 +1550,12 @@ export async function acceptNodeOutput(
   content:   string,
   docUrl?:   string,
   docFormat?: string,
+  projectNodeId?: string | null,
 ): Promise<{ asset_id: string }> {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
   return request<{ success: boolean; asset_id: string }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/accept`,
-    { method: 'POST', body: JSON.stringify({ session_id: sessionId, content, member_id: memberId, doc_url: docUrl || undefined, doc_format: docFormat || undefined }) },
+    { method: 'POST', body: JSON.stringify({ session_id: sessionId, content, member_id: memberId, doc_url: docUrl || undefined, doc_format: docFormat || undefined, project_node_id: projectNodeId || undefined }) },
   )
 }
 
