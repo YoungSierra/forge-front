@@ -2320,9 +2320,14 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
   })
 
   // React registra onWheel como pasivo, así que no se puede frenar el scroll desde ahí.
+  //
+  // Un modelo 3D queda fuera: el zoom del marco mueve un `transform` que solo se le aplica a la
+  // imagen, así que sobre un .glb la rueda no hacía nada visible PERO igual se frenaba, y
+  // model-viewer se quedaba sin su gesto de acercarse. Ese era el «funciona de forma extraña»
+  // del informe: el visor manda sobre su propia cámara.
   useEffect(() => {
     const el = frame.current
-    if (!el) return
+    if (!el || t === '3d') return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const r    = el.getBoundingClientRect()
@@ -2339,7 +2344,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [zoom])
+  }, [zoom, t])
 
   // Caja de destino: alta pero sin llenar la pantalla — es una card, no un lightbox.
   // Se deja aire abajo para los datos y a la derecha para la X, que ahora van fuera del marco.
@@ -2370,10 +2375,13 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
     >
       <div
         ref={frame}
-        onPointerDown={e => { if (e.button === 0 && zoom > 1) { panning.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }; (e.target as HTMLElement).setPointerCapture?.(e.pointerId) } }}
+        // El paneo y el doble clic del marco tambien se apartan del 3D: capturar el puntero le
+        // robaba a model-viewer el arrastre con el que se orbita, que es justo lo que el informe
+        // pide que funcione al hacer clic izquierdo.
+        onPointerDown={e => { if (t !== '3d' && e.button === 0 && zoom > 1) { panning.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }; (e.target as HTMLElement).setPointerCapture?.(e.pointerId) } }}
         onPointerMove={e => { if (panning.current) setPan({ x: e.clientX - panning.current.x, y: e.clientY - panning.current.y }) }}
         onPointerUp={() => { panning.current = null }}
-        onDoubleClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}
+        onDoubleClick={() => { if (t === '3d') return; setZoom(1); setPan({ x: 0, y: 0 }) }}
         // El menu solo sobre la VIGENTE. Iterar no ramifica desde la version que estas mirando:
         // vuelve a ejecutar el prompt de la pagina contra su plantilla, asi que hacerlo parado en
         // la v1 o en la v3 da lo mismo. Ofrecerlo ahi prometeria algo que no pasa.

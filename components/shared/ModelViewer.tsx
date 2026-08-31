@@ -139,13 +139,19 @@ export default function ModelViewer({ url, style }: Props) {
 
   return (
     <div style={{ ...base, display: 'block', padding: 0 }} {...dropProps}>
+      {/* Sin `auto-rotate`: el modelo giraba solo, se frenaba al tocarlo y volvía a arrancar a los
+          pocos segundos, así que soltar el ratón te movía el encuadre que acababas de elegir. Eso
+          era el «funciona de forma extraña» del punto 7. Mirar un modelo es pararlo donde uno
+          quiere, y para eso el giro tiene que ser del usuario.
+          `touch-action: none` es lo que deja orbitar arrastrando también en tableta: sin él el
+          navegador se queda el gesto para hacer scroll de la página. */}
       <model-viewer
         src={blobUrl}
         alt="3D model"
         camera-controls=""
-        auto-rotate=""
+        interaction-prompt="none"
         shadow-intensity="1"
-        style={{ width: '100%', height: '100%', display: 'block', borderRadius: 'inherit' }}
+        style={{ width: '100%', height: '100%', display: 'block', borderRadius: 'inherit', touchAction: 'none' }}
       />
       {overlay}
     </div>
