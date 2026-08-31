@@ -1321,7 +1321,18 @@ function extractSection(content: string, sectionName: string, otherKeys: string[
   // otras tres pestañas caían al documento entero: cuatro pestañas enseñando lo mismo.
   const COLA    = '(?:\\s*[—\\-–:(\\[].*)?'
   const startRx = new RegExp(`^(#{1,4}\\s+)?\\**\\s*${escaped}\\s*\\**${COLA}\\s*$`, 'im')
-  const match   = startRx.exec(content)
+  let match     = startRx.exec(content)
+  // El TÍTULO del documento se deja nombrar en prosa: `core_gameplay_spec` sale como
+  // "# Core Gameplay Specification" y la regla estricta lo pierde por las cinco letras de más —
+  // el output era el documento completo y la pestaña decía que no existía. La holgura vale solo
+  // para el primer encabezado del documento, que es el único sitio donde el nombre es un título
+  // y no una etiqueta de sección; en cualquier otro `##` seguiría siendo un match a ciegas.
+  const primerEnc = /^(#{1,4})[ \t]+.+$/m.exec(content)
+  if (!match && primerEnc) {
+    const tituloRx = new RegExp(`^#{1,4}\\s+\\**\\s*${escaped}\\w*(?:[\\s—\\-–:(\\[].*)?$`, 'im')
+    const m2 = tituloRx.exec(content)
+    if (m2 && m2.index === primerEnc.index) match = m2
+  }
   if (!match) return null
   // Nivel del encabezado que abre: 0 cuando el título viene en negrita suelta, sin `#`.
   const nivel = match[1] ? match[1].trim().length : 0
@@ -1337,7 +1348,6 @@ function extractSection(content: string, sectionName: string, otherKeys: string[
   // outputs son apartados suyos. Cortarlo en el primer `##` lo dejaba en 64 chars con 92.000
   // debajo. Solo en ese caso se salta un corte más profundo; abriendo en un `##` cualquiera se
   // corta en la primera clave siguiente, como siempre.
-  const primerEnc = /^#{1,4}[ \t]+.+$/m.exec(content)
   const esTitulo  = nivel > 0 && !!primerEnc && primerEnc.index === match.index
   let next: RegExpExecArray | null
   while ((next = nextRx.exec(after)) !== null) {
@@ -2749,9 +2759,12 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                   ) : sinSeccion ? (
                     // El documento sí viene seccionado y esta clave no está: decirlo, en vez de
                     // enseñar el documento entero como si fuera el contenido de esta pestaña.
+                    // Sin afirmar que el contenido no se produjo: el 3.2 emitió los diez registros
+                    // de `mechanics_engineering` fundidos dentro de `mechanic_specs`, y decir «no
+                    // se generó» mandaba a recorrer un nodo que en realidad ya había respondido.
                     <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)', lineHeight: 1.8 }}>
-                      This run produced no <span style={{ color: 'var(--text-1)' }}>{activeOutKey}</span> section.
-                      <br />The reply is split by output and this one is missing — run this output on its own, or re-run the node.
+                      The reply has no section titled <span style={{ color: 'var(--text-1)' }}>{activeOutKey}</span>.
+                      <br />Other outputs do have one, so the model folded this one into a sibling instead of emitting it apart. Check the neighbouring tabs before re-running.
                     </div>
                   ) : outSession?.output_asset?.storage_url ? (
                     <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
