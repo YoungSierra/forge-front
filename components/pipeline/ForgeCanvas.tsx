@@ -19,6 +19,7 @@ import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
 import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName, stopNodeRun } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap, RunPlan, GateAuthMode } from '@/lib/api'
+import { unirOutputImages } from '@/lib/output-images'
 import type { Project, RunScope } from '@/lib/types'
 import NodeChatWindow, { parseOutputItems, buildImageGenComponents, ImageThumbnailRow, VariationPanel } from '@/components/shared/NodeChatWindow'
 import type { ImageOutputDef, InlineImageItem } from '@/components/shared/NodeChatWindow'
@@ -4138,7 +4139,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           const notas = leerDespachos(); delete notas[pref + clave]; guardarDespachos(notas)
           if (!vigente) return
           if (r.session?.output_images) {
-            setChatOutputImages(prev => ({ ...prev, ...(r.session!.output_images as OutputImagesMap) }))
+            setChatOutputImages(prev => unirOutputImages(prev, r.session!.output_images as OutputImagesMap))
           }
           // El enlace del documento vive en los tool_calls del mensaje, y el motor lo sustituyó
           const g = await getNodeSession(project.id, nodoId, null, pnId)
@@ -4328,7 +4329,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             onImagesUpdate: (imgs: OutputImagesMap, outputKey?: string) => {
               // Invalidar caché del deck para que muestre las nuevas variaciones
               invalidateAssetDeckCache(project.id, cn.node?.id ?? '')
-              setChatOutputImages(imgs)
+              setChatOutputImages(prev => unirOutputImages(prev, imgs))
               setCanvasData(prev => prev ? {
                 ...prev,
                 nodes: prev.nodes.map(n => {
@@ -5523,9 +5524,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
       // output, no en la general. Sin juntarlas, el chat mostraba los `[ IMAGE: … ]` como texto
       // teniendo las imágenes ya renderizadas al lado.
       setChatOutputImages(() => {
-        const mezcla: OutputImagesMap = { ...((session?.output_images as OutputImagesMap) ?? {}) }
+        let mezcla: OutputImagesMap = (session?.output_images as OutputImagesMap) ?? {}
         for (const s of Object.values(node.output_sessions ?? {})) {
-          Object.assign(mezcla, (s.output_images as OutputImagesMap) ?? {})
+          mezcla = unirOutputImages(mezcla, (s.output_images as OutputImagesMap) ?? null)
         }
         return mezcla
       })
@@ -5866,7 +5867,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             if (!sid) return { output_images: {} } as never
             const r = await generateItemImage(project.id, chatForgeNode.id, sid, outputKey, itemIndex, itemText, condition, messageId)
             const imgs = r.output_images
-            setChatOutputImages(imgs)
+            setChatOutputImages(prev => unirOutputImages(prev, imgs))
             setCanvasData(prev => prev ? {
               ...prev,
               nodes: prev.nodes.map(n => {
