@@ -19,7 +19,7 @@ import { Paperclip } from 'lucide-react'
 
 // Extrae un array JSON del contenido (con o sin fences ```json) y devuelve un ítem
 // legible por objeto (prioriza title/one_liner). null si no hay array parseable.
-function parseJsonArrayItems(content: string): string[] | null {
+function parseJsonArrayItems(content: string, outputKey?: string | null): string[] | null {
   // Se miran TODOS los bloques cercados, empezando por los marcados ```json.
   //
   // Antes se tomaba el primero y punto. Medido el 26-08: una respuesta abría con un diagrama ASCII
@@ -35,15 +35,45 @@ function parseJsonArrayItems(content: string): string[] | null {
     ...(bloques.length ? [] : [content]),
   ]
 
+  // El array se busca POR SU NOMBRE, no por ser el primero. Toda respuesta de concepto cierra con
+  // `gaps_for_downstream`, que también es un array de objetos, y el 1.1 lo emite ANTES de las
+  // semillas: pidiendo «el primer array» se ofrecía una imagen por cada hueco pendiente. Medido
+  // el 01-09: diez ítems, los diez gaps, cero semillas.
+  const esHueco = (o: unknown) => !!o && typeof o === 'object'
+    && ('gap' in (o as object) || 'node_that_needs_it' in (o as object))
+
+  const porNombre = (text: string): unknown[] | null => {
+    if (!outputKey) return null
+    const rx = new RegExp('"' + outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"\\s*:\\s*\\[')
+    const m = rx.exec(text)
+    if (!m) return null
+    const desde = text.indexOf('[', m.index)
+    // Cierre por conteo de corchetes: `lastIndexOf` se pasa al siguiente array del documento.
+    let nivel = 0
+    for (let i = desde; i < text.length; i++) {
+      if (text[i] === '[') nivel++
+      else if (text[i] === ']' && --nivel === 0) {
+        try { const v = JSON.parse(text.slice(desde, i + 1)); return Array.isArray(v) ? v : null } catch { return null }
+      }
+    }
+    return null
+  }
+
   let arr: unknown = null
   for (const text of candidatos) {
-    const start = text.indexOf('[')
-    const end   = text.lastIndexOf(']')
-    if (start === -1 || end <= start) continue
-    try {
-      const p = JSON.parse(text.slice(start, end + 1))
-      if (Array.isArray(p) && p.length) { arr = p; break }
-    } catch { /* no era éste; sigue el próximo bloque */ }
+    const nombrado = porNombre(text)
+    if (nombrado?.length) { arr = nombrado; break }
+  }
+  if (!Array.isArray(arr)) {
+    for (const text of candidatos) {
+      const start = text.indexOf('[')
+      const end   = text.lastIndexOf(']')
+      if (start === -1 || end <= start) continue
+      try {
+        const p = JSON.parse(text.slice(start, end + 1))
+        if (Array.isArray(p) && p.length && !p.every(esHueco)) { arr = p; break }
+      } catch { /* no era éste; sigue el próximo bloque */ }
+    }
   }
   if (!Array.isArray(arr) || arr.length === 0) return null
 
@@ -199,7 +229,7 @@ export function parseOutputItems(content: string, format: string, outputKey?: st
   // línea. 'structured' se incluye porque 027 cambió concept_seeds a ese format; sin él, el
   // parser caía al split por bullets y generaba una celda por campo en vez de una por seed.
   if (format === 'json' || format === 'structured' || /^list</.test(format ?? '')) {
-    const items = parseJsonArrayItems(content)
+    const items = parseJsonArrayItems(content, outputKey)
     if (items) return items
   }
   // Lo que NO es un ítem generable, fuera antes de mirar nada más:
