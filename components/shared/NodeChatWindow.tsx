@@ -212,6 +212,20 @@ export function parseOutputItems(content: string, format: string, outputKey?: st
     const declarados = parseDeclaredImagePrompts(content)
     if (declarados) return declarados
 
+    // Si el sobre EXISTE pero no se pudo leer, no se adivina: se ofrece cero. Espejo de la misma
+    // compuerta en el backend. El 2.2 emitió sus tres imágenes con `subject` y `composition_notes`
+    // pero sin `prompt`; `parseDeclaredImagePrompts` lo rechazó —con razón— y la línea de abajo
+    // ofrecía la respuesta entera recortada a 700 caracteres, que arranca con la tabla del Fact
+    // Sheet. Eso fue lo que se mandó a ComfyUI, y por eso la imagen no se parecía a nada del plan.
+    // Un sobre ilegible es un incumplimiento del contrato que hay que reportar, no rellenar.
+    const traeSobre = [...content.matchAll(/```(\w*)\s*([\s\S]*?)```/g)].some(m => {
+      try {
+        const v = JSON.parse(m[2])
+        return Array.isArray(v) && v.length > 0 && v.every(o => o && typeof o === 'object' && !Array.isArray(o))
+      } catch { return false }
+    })
+    if (traeSobre) return []
+
     // Inicio de cada prompt. Cubre dos estilos: número al inicio ("1.", "**1.**", "### 1.") Y
     // "Palabra(s) N" + separador ("**Image 1 —**", "### Image 2:", "Image 3 -") — el LLM suele
     // titular las imágenes así en vez de una lista numerada, y antes eso quedaba como 1 solo prompt.
