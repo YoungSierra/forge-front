@@ -121,7 +121,18 @@ function esContratoDeCarril(cuerpo: string): boolean {
     return claves.length > 0 && claves.length <= 6 && claves.every(k => CAMPOS_DECISION.has(k))
   }
   if (v.length === 0) return true
-  return v.every(x => x && typeof x === 'object' && !Array.isArray(x) && 'id' in (x as object))
+  if (!v.every(x => x && typeof x === 'object' && !Array.isArray(x) && 'id' in (x as object))) return false
+
+  // Un `id` NO alcanza para llamarlo máquina: las semillas del 1.1 también lo llevan, y con esta
+  // regla se borraban de la pantalla. Medido sobre las respuestas vivas: de 27 arrays de objetos
+  // con `id`, 22 son semillas —`id,title,one_liner,rationale,…`— y solo 5 son de máquina, que se
+  // reconocen porque llevan `prompt` o `url`: son instrucciones de despacho, no algo que leer.
+  //
+  // El contenido gana: si el objeto trae un campo que una persona lee, se muestra.
+  const CONTENIDO = ['title', 'name', 'one_liner', 'oneLiner', 'headline', 'description', 'summary']
+  const objetos = v as Record<string, unknown>[]
+  if (objetos.some(o => CONTENIDO.some(k => k in o))) return false
+  return objetos.every(o => 'prompt' in o || 'url' in o)
 }
 
 // Bloques que son máquina por su NOMBRE, no por su forma: un objeto cuya única clave de primer
