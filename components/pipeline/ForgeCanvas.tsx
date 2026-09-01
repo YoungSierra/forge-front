@@ -4419,16 +4419,26 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         let newIdx = 0
         return newNodes.map(n => {
           const existing = prev.find(p => p.id === n.id)
-          if (existing) return { ...n, position: existing.position }
+          if (existing) return { ...n, position: existing.position, measured: existing.measured }
           return { ...n, position: { x: maxX + NODE_W + NODE_GAP + newIdx++ * (NODE_W + NODE_GAP), y: baseY } }
         })
       })
       requestAnimationFrame(() => fitView({ padding: 0.3, duration: 300 }))
       pendingPositionsRef.current = {}
     } else {
+      // `measured` viaja junto con la posición, y no es un detalle de rendimiento: React Flow
+      // guarda las medidas de los handles aparte y las TIRA cuando el nodo llega sin `measured`
+      // —«if user re-initializes the node or removes `measured`… we reset the handleBounds», dice
+      // su propio `parseHandles`—. Reconstruir las tarjetas en cada cambio de `canvasData` sin
+      // arrastrarlas dejaba los puertos sin coordenadas, y un cable cuyo extremo no se puede
+      // ubicar no se dibuja: al llegar la respuesta al 2.1 el cable de la imagen de entrada
+      // desaparecía aunque el edge seguía en el arreglo y en la base, y solo recargar lo traía de
+      // vuelta. Los nodos que sí cambian de tamaño se recuperan solos porque el ResizeObserver
+      // vuelve a medirlos; los que no cambian —una tarjeta de asset, un text input— se quedaban
+      // sin cable hasta la próxima recarga.
       setNodes(prev => newNodes.map(n => {
         const existing = prev.find(p => p.id === n.id)
-        return existing ? { ...n, position: existing.position } : n
+        return existing ? { ...n, position: existing.position, measured: existing.measured } : n
       }))
       pendingPositionsRef.current = {}
     }
