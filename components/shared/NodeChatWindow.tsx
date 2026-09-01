@@ -228,10 +228,14 @@ export function parseOutputItems(content: string, format: string, outputKey?: st
         // lista de tres hex, que se llevaba el cupo. Un sobre se reconoce por dentro — objetos con
         // `prompt`/`image_prompt`/`depicts`—, así que se recorren todos y se toma el primero que
         // lo parezca. Mismo criterio que el backend, para que ambos vean lo mismo.
+        // `subject` cuenta: el modelo alterna entre `prompt` y `subject`+`composition`+`mood`, y
+        // exigiendo solo `prompt` la segunda forma no se reconocía — el chat ofrecía las mecánicas
+        // del documento como si fueran imágenes mientras el sobre declaraba otras tres.
+        const CAMPOS = ['prompt', 'image_prompt', 'depicts', 'subject']
         const esSobre = (v: unknown) => Array.isArray(v) && v.length > 0 && v.some(o => {
           if (!o || typeof o !== 'object' || Array.isArray(o)) return false
           const r = o as Record<string, unknown>
-          return ['prompt', 'image_prompt', 'depicts'].some(k => typeof r[k] === 'string' && (r[k] as string).trim().length >= 40)
+          return CAMPOS.some(k => typeof r[k] === 'string' && (r[k] as string).trim().length >= 40)
         })
         for (let ini = desde.indexOf('['); ini !== -1; ini = desde.indexOf('[', ini + 1)) {
           let nivel = 0
@@ -243,13 +247,19 @@ export function parseOutputItems(content: string, format: string, outputKey?: st
               try {
                 const v = JSON.parse(desde.slice(ini, i + 1))
                 if (esSobre(v)) {
+                  // Un `prompt` declarado va tal cual. Sin el, la entrada se arma con sus campos
+                  // -sujeto, composicion, animo, paleta-, que es lo que describe la imagen.
                   const items = (v as unknown[]).map(o => {
                     const r = o as Record<string, unknown>
-                    for (const campo of ['prompt', 'image_prompt', 'depicts']) {
+                    for (const campo of ['prompt', 'image_prompt']) {
                       const x = r?.[campo]
                       if (typeof x === 'string' && x.trim()) return x.trim()
                     }
-                    return ''
+                    const OCULTO = ['id', 'key', 'index']
+                    return Object.entries(r || {})
+                      .filter(([k, x]) => !OCULTO.includes(k) && typeof x === 'string' && x.trim())
+                      .map(([k, x]) => `${k.replace(/_/g, ' ')}: ${x}`)
+                      .join('\n')
                   }).filter(x => x)
                   if (items.length) return items
                 }
