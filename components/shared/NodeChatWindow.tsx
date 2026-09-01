@@ -228,15 +228,21 @@ export function parseOutputItems(content: string, format: string, outputKey?: st
         // lista de tres hex, que se llevaba el cupo. Un sobre se reconoce por dentro — objetos con
         // `prompt`/`image_prompt`/`depicts`—, así que se recorren todos y se toma el primero que
         // lo parezca. Mismo criterio que el backend, para que ambos vean lo mismo.
-        // `subject` cuenta: el modelo alterna entre `prompt` y `subject`+`composition`+`mood`, y
-        // exigiendo solo `prompt` la segunda forma no se reconocía — el chat ofrecía las mecánicas
-        // del documento como si fueran imágenes mientras el sobre declaraba otras tres.
-        const CAMPOS = ['prompt', 'image_prompt', 'depicts', 'subject']
-        const esSobre = (v: unknown) => Array.isArray(v) && v.length > 0 && v.some(o => {
-          if (!o || typeof o !== 'object' || Array.isArray(o)) return false
-          const r = o as Record<string, unknown>
-          return CAMPOS.some(k => typeof r[k] === 'string' && (r[k] as string).trim().length >= 40)
-        })
+        // No se exige NINGÚN nombre de campo. Cuatro corridas del 2.2 con la misma DNA emitieron
+        // cuatro esquemas distintos —`subject`+`composition_notes`, `prompt`,
+        // `subject`+`composition`+`mood`, y `purpose`+`type`+`style_inheritance`—: perseguir
+        // nombres dejaba el output en cero cada vez que aparecía uno nuevo.
+        //
+        // Lo que define un sobre no cambia: entradas que son objetos, que se identifican con `id`
+        // y se describen con algún texto con cuerpo. La lista de paleta del 2.4 —hex sueltos— no
+        // pasa: ni son objetos ni tienen id. Mismo criterio que el backend.
+        const esObj = (o: unknown): o is Record<string, unknown> => !!o && typeof o === 'object' && !Array.isArray(o)
+        const describe = (o: Record<string, unknown>) => Object.entries(o).some(([k, v]) =>
+          k !== 'id' && typeof v === 'string' && v.trim().length >= 40)
+        const esSobre = (v: unknown) => Array.isArray(v) && v.length > 0
+          && v.every(esObj)
+          && v.filter(o => typeof (o as Record<string, unknown>).id === 'string' && String((o as Record<string, unknown>).id).trim()).length >= Math.ceil(v.length / 2)
+          && v.some(o => describe(o as Record<string, unknown>))
         for (let ini = desde.indexOf('['); ini !== -1; ini = desde.indexOf('[', ini + 1)) {
           let nivel = 0
           let cerrado = false
