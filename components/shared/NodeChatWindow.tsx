@@ -10,7 +10,7 @@ import { chatWithNode, getNodeContextInputs } from '@/lib/api'
 import type { ChatMessage, ChatAttachment, ChatToolCall, ApprovedAsset, OutputImageItem, OutputImagesMap, NodeContextInput } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { jsonToMarkdown, forDisplay, stripMachineBlocks } from '@/lib/json-display'
+import { forDisplay, stripMachineBlocks } from '@/lib/json-display'
 import AttachmentCard from './AttachmentCard'
 import Moodboard from '@/components/moodboard/Moodboard'
 import { Paperclip } from 'lucide-react'
@@ -2490,8 +2490,13 @@ export default function NodeChatWindow({
               // de botones por ítem: el markdown de tarjetas no matchea el patrón "Variation N",
               // y las imágenes siguen disponibles en el thumbnail row del chat. Para contenido
               // markdown normal (ej. art direction) se mantiene la inyección de botones ✦.
+              // `forDisplay`, no `jsonToMarkdown`: éste convierte UN bloque y una respuesta trae
+              // varios —los gaps, el contrato de carril, las semillas, la emisión—, así que el
+              // contenido de verdad se quedaba crudo en pantalla mientras el primer bloque sí se
+              // veía bien. Es el mismo render que usa el chat; no hay motivo para que difieran.
               const limpio   = stripMachineBlocks(expandedContent.content)
-              const readable = jsonToMarkdown(limpio)
+              const render   = forDisplay(expandedContent.content)
+              const readable = render !== limpio
               const expandedItems = readable ? undefined : buildItemsFromContent(expandedContent.content)
               return (
                 <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
@@ -2500,7 +2505,7 @@ export default function NodeChatWindow({
                       remarkPlugins={[remarkGfm]}
                       components={expandedItems?.length ? buildImageGenComponents(expandedItems) : MD_COMPONENTS}
                     >
-                      {readable ?? limpio}
+                      {render}
                     </ReactMarkdown>
                   </div>
 

@@ -61,7 +61,16 @@ function extractTopJson(content: string): { value: unknown; before: string; afte
   let value: unknown
   try { value = JSON.parse(text.slice(start, end + 1)) } catch { return null }
   if (!value || typeof value !== 'object') return null
-  if (fenceMatch) return { value, before: '', after: '', fence: fenceMatch[0] }
+  // Dentro del bloque puede haber texto ANTES o DESPUÉS del json — el modelo a veces cierra con
+  // una nota. Devolverlo vacío hacía que reemplazar el bloque se llevara esa prosa por delante;
+  // con un solo bloque convertido casi no se notaba, convirtiéndolos todos se perdían párrafos
+  // enteros. Medido: 5 respuestas perdían entre 7 y 13 líneas.
+  if (fenceMatch) return {
+    value,
+    before: text.slice(0, start),
+    after:  text.slice(end + 1),
+    fence:  fenceMatch[0],
+  }
   return { value, before: content.slice(0, content.indexOf(open)), after: content.slice(content.lastIndexOf(close) + 1), fence: null }
 }
 
@@ -115,8 +124,27 @@ function esContratoDeCarril(cuerpo: string): boolean {
   return v.every(x => x && typeof x === 'object' && !Array.isArray(x) && 'id' in (x as object))
 }
 
+// Bloques que son máquina por su NOMBRE, no por su forma: un objeto cuya única clave de primer
+// nivel es una de éstas. `lane_contract` anuncia qué produce el nodo y a quién alimenta;
+// `image_emission` declara qué imágenes salen. Ninguna persona escribe eso, y ninguna necesita
+// leerlo — pero viven en MEDIO de la respuesta, así que el recorrido desde el final nunca los
+// alcanza. Se quitan por identidad, que es seguro justamente porque no se parecen a nada humano.
+const CLAVES_MAQUINA = new Set(['lane_contract', 'image_emission', 'emission_envelope'])
+
+function esBloqueMaquinaPorClave(cuerpo: string): boolean {
+  let v: unknown
+  try { v = JSON.parse(cuerpo) } catch { return false }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  const claves = Object.keys(v as Record<string, unknown>)
+  return claves.length === 1 && CLAVES_MAQUINA.has(claves[0])
+}
+
 export function stripMachineBlocks(content: string): string {
   if (!content) return content
+
+  // Primero los que se reconocen por su clave, en cualquier posición.
+  content = content.replace(/```json\n([\s\S]*?)\n```/g, (todo, cuerpo) =>
+    esBloqueMaquinaPorClave(cuerpo) ? '' : todo)
 
   // Los bloques máquina van al CIERRE de la respuesta, no pegados a su encabezado: el `##
   // concept_seeds` de arriba titula la sección legible y debe quedarse. Así que se recorren los
@@ -160,10 +188,38 @@ export function stripMachineBlocks(content: string): string {
   return out.length >= 400 ? out : content
 }
 
-// Lo que ve el usuario: sin bloques máquina y con el json restante en markdown legible.
+// Lo que ve el usuario: sin bloques máquina y con TODO el json restante en markdown legible.
+//
+// Todos, no el primero: una respuesta del 1.1 trae cuatro bloques —los gaps, el contrato de
+// carril, las semillas y la emisión— y convertir solo el primero dejaba las semillas, que son el
+// contenido, como JSON crudo en pantalla. El json sigue intacto en la base; esto es presentación.
 export function forDisplay(content: string): string {
   const limpio = stripMachineBlocks(content)
-  return jsonToMarkdown(limpio) ?? limpio
+  const bloques = [...limpio.matchAll(/```(?:json)?\n([\s\S]*?)\n```/g)]
+  if (bloques.length <= 1) return jsonToMarkdown(limpio) ?? limpio
+
+  let out = limpio
+  for (const b of bloques) {
+    // Solo se convierte un bloque que sea json CASI ENTERO. Un bloque de prosa que menciona
+    // `[1, 13]` tiene corchetes, y el extractor los tomaba por el json del bloque: cortaba desde
+    // ahí hasta el último `]` y se llevaba el texto de alrededor. Con un solo bloque convertido
+    // no se notaba; convirtiéndolos todos, tres respuestas perdían párrafos.
+    const cuerpo = b[1].trim()
+    if (!/^[{[]/.test(cuerpo) || !/[}\]]$/.test(cuerpo)) continue
+    const md = jsonToMarkdown(b[0])
+    if (md && md !== b[0]) out = out.replace(b[0], md)
+  }
+  return out
+}
+
+// Un objeto con UNA sola clave cuyo valor es una lista de objetos: la lista, con su nombre.
+function esListaEnvuelta(v: unknown): boolean {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  const e = Object.entries(v as Record<string, unknown>)
+  if (e.length !== 1) return false
+  const val = e[0][1]
+  return Array.isArray(val) && val.length > 0
+    && val.every(x => x && typeof x === 'object' && !Array.isArray(x))
 }
 
 export function jsonToMarkdown(content: string): string | null {
@@ -186,6 +242,16 @@ export function jsonToMarkdown(content: string): string | null {
     } else {
       md = value.map(v => `- ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join('\n')
     }
+  } else if (esListaEnvuelta(value)) {
+    // `{"concept_seeds": [ … ]}` es la lista con su nombre puesto: se desenvuelve y cada ítem sale
+    // como tarjeta. Sin esto quedaba un único bullet `- **concept_seeds:**` con las cinco semillas
+    // colgando dos niveles adentro, ilegible.
+    const [clave, items] = Object.entries(value as Record<string, unknown>)[0]
+    md = (items as Record<string, unknown>[]).map((o, i) => {
+      const title = (o.title || o.name || `${clave} ${i + 1}`) as string
+      const rest = Object.fromEntries(Object.entries(o).filter(([k]) => !OMIT_KEYS.includes(k)))
+      return [`### ${i + 1}. ${title}`, ...renderFields(rest, 0)].join('\n')
+    }).join('\n\n---\n\n')
   } else {
     // Objeto suelto (ej. concept_data): title/name como encabezado + campos
     const o = value as Record<string, unknown>
@@ -194,7 +260,9 @@ export function jsonToMarkdown(content: string): string | null {
     md = [...(title ? [`### ${title}`] : []), ...renderFields(rest, 0)].join('\n')
   }
 
-  if (fence) return content.replace(fence, md)
+  // Se conserva lo que acompañaba al json dentro del bloque: reemplazar el cercado entero por el
+  // markdown borraba esas líneas.
+  if (fence) return content.replace(fence, [before.trim(), md, after.trim()].filter(Boolean).join('\n\n'))
   return `${before}${md}${after}`.trim()
 }
 
