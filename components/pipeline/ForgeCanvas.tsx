@@ -5839,14 +5839,20 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           imageGenOutputs={(() => {
             const defs: ImageOutputDef[] = []
             for (const out of (chatForgeNode.outputs ?? [])) {
-              const o = out as unknown as { production?: string; pages?: number[]; uses?: { siblings?: string[]; siblings_if_present?: string[] } }
+              const o = out as unknown as { production?: string; pages?: number[]; deck?: boolean; uses?: { siblings?: string[]; siblings_if_present?: string[] } }
               // `production: deferred` se produce en otra etapa: el Art Bible compone arte
               // aprobado que en pre-producción no existe. El chat lo intentaba igual y el
               // servidor respondía 500.
               if (o.production === 'deferred') continue
-              // Un DECK no se genera ítem por ítem: sus páginas son nodos fijos de un mismo
-              // grafo y se despachan juntas desde el Run. Se reconoce porque declara `pages`.
-              if (Array.isArray(o.pages) && o.pages.length) continue
+              // Un DECK no se genera ítem por ítem: sus páginas son nodos fijos de un mismo grafo
+              // y se despachan juntas desde el Run.
+              //
+              // `pages` servía de señal, pero solo la declaran los outputs que se REPARTEN un
+              // workflow —el ASG parte 34 en 31 + 3—. `gdd_art_style_images` se lleva las 21
+              // enteras, así que no tiene `pages` y pasaba de largo: el 01-09 el chat disparó
+              // siete pedidos por ítem y el motor los rechazó los siete. Ahora la marca la manda
+              // el backend, que es el único que sabe qué workflow está registrado `per_page`.
+              if (o.deck || (Array.isArray(o.pages) && o.pages.length)) continue
               if (out.image_gen && out.image_gen_model) {
                 defs.push({
                   outputKey: out.key || out.name, format: out.format, imageGenModel: out.image_gen_model,
