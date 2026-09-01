@@ -209,6 +209,57 @@ export function parseOutputItems(content: string, format: string, outputKey?: st
     //
     // Se exige un arreglo de objetos donde la mayoría traiga `prompt`, que es lo que distingue una
     // declaración de imágenes de un arreglo de paleta o de gaps.
+    // El sobre se busca SIN depender de los cercados. Emparejar ``` funciona hasta que el modelo
+    // abre un bloque y no lo cierra: el número de marcas queda impar, el emparejamiento se corre y
+    // el sobre se vuelve invisible. Medido el 01-09 en el 2.2 — el modelo truncó su `concept_data`
+    // a mitad de una URL y la respuesta quedó con cinco marcas; acá se ofrecían SEIS huecos
+    // sacados de la prosa (las tres mecánicas y las tres entradas del plan) mientras el sobre
+    // declaraba tres imágenes con su id, y el backend despachaba otra cosa distinta.
+    //
+    // Espejo exacto del backend: se ancla en la sección DEL OUTPUT y se lee el primer arreglo
+    // balanceado, cerrando por conteo de corchetes. El hueco que se ve tiene que ser el prompt
+    // que se paga.
+    if (outputKey) {
+      const esc = outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const anc = new RegExp(`^#{1,4}[ \\t]+\\**\\s*${esc}\\b.*$`, 'im').exec(content)
+      if (anc) {
+        const desde = content.slice(anc.index + anc[0].length)
+        // No vale «el primer arreglo de la sección»: la del 2.4 abre con su tabla de paleta y una
+        // lista de tres hex, que se llevaba el cupo. Un sobre se reconoce por dentro — objetos con
+        // `prompt`/`image_prompt`/`depicts`—, así que se recorren todos y se toma el primero que
+        // lo parezca. Mismo criterio que el backend, para que ambos vean lo mismo.
+        const esSobre = (v: unknown) => Array.isArray(v) && v.length > 0 && v.some(o => {
+          if (!o || typeof o !== 'object' || Array.isArray(o)) return false
+          const r = o as Record<string, unknown>
+          return ['prompt', 'image_prompt', 'depicts'].some(k => typeof r[k] === 'string' && (r[k] as string).trim().length >= 40)
+        })
+        for (let ini = desde.indexOf('['); ini !== -1; ini = desde.indexOf('[', ini + 1)) {
+          let nivel = 0
+          let cerrado = false
+          for (let i = ini; i < desde.length && !cerrado; i++) {
+            if (desde[i] === '[') nivel++
+            else if (desde[i] === ']' && --nivel === 0) {
+              cerrado = true
+              try {
+                const v = JSON.parse(desde.slice(ini, i + 1))
+                if (esSobre(v)) {
+                  const items = (v as unknown[]).map(o => {
+                    const r = o as Record<string, unknown>
+                    for (const campo of ['prompt', 'image_prompt', 'depicts']) {
+                      const x = r?.[campo]
+                      if (typeof x === 'string' && x.trim()) return x.trim()
+                    }
+                    return ''
+                  }).filter(x => x)
+                  if (items.length) return items
+                }
+              } catch { /* no era legible; se prueba el siguiente */ }
+            }
+          }
+        }
+      }
+    }
+
     const declarados = parseDeclaredImagePrompts(content)
     if (declarados) return declarados
 
