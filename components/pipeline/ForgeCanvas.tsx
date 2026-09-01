@@ -2504,7 +2504,17 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               // el documento completo, y con él el de otro output: se veía siempre lo mismo y
               // parecía que el output no traía nada propio. Si alguna otra clave sí está, la
               // respuesta viene seccionada y la ausencia de esta es un hecho, no un caso a tapar.
-              const cuerpoOut   = outSession?.output_asset?.content ?? null
+              // Una IMAGEN no es el documento del output. `executeImageOutput` cuelga de la
+              // sesión el primer png como `output_asset_id`, y cada png guarda el texto de SU
+              // ítem — 814 chars, una sola semilla. Leerlo como documento partía esa semilla en
+              // sus siete campos y le ponía una imagen a cada uno por posición: se generó arte
+              // para «genre: Action» y «subgenre: Vertical score-attack platformer».
+              // El documento del nodo es el de la sesión general; el png es una de sus salidas.
+              const ES_IMG = ['png', 'image', 'jpg', 'jpeg']
+              const assetOut = outSession?.output_asset
+              const cuerpoOut = (assetOut && !ES_IMG.includes(String(assetOut.format).toLowerCase())
+                ? assetOut.content
+                : session?.output_asset?.content) ?? null
               const seccionOut  = cuerpoOut ? extractSection(cuerpoOut, activeOutKey, otherKeys) : null
               const vieneSeccionado = !!cuerpoOut && otherKeys.some(k => !!k && extractSection(cuerpoOut, k) !== null)
               const sinSeccion  = !!cuerpoOut && !seccionOut && vieneSeccionado
