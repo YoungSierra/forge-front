@@ -189,7 +189,12 @@ function parseDeclaredImagePrompts(content: string): string[] | null {
   return null
 }
 
-export function parseOutputItems(content: string, format: string, outputKey?: string | null): string[] {
+// `yaEsSeccion` lo dice el llamador cuando el texto YA viene recortado a la sección del output.
+// El chat corta la sección antes de parsear, y con eso se lleva el encabezado en el que el lector
+// del sobre se ancla: sin saberlo, el ancla no aparece, se cae a la prosa, y el 2.4 ofrecía UN
+// hueco rotulado «Five orientation images for…» mientras el sobre declaraba cinco prompts y el
+// backend despachaba cinco. Medido el 02-09: la respuesta entera daba 5 ítems, la sección sola, 1.
+export function parseOutputItems(content: string, format: string, outputKey?: string | null, yaEsSeccion = false): string[] {
   // Outputs de imagen: un output puede pedir VARIAS imágenes (ej. reference_images: 4-6 prompts
   // numerados). Extraer un ítem por prompt — cada bloque numerado, incluidas sus líneas siguientes
   // hasta el próximo número. Antes esto devolvía SIEMPRE el contenido entero como 1 solo ítem, así
@@ -222,8 +227,9 @@ export function parseOutputItems(content: string, format: string, outputKey?: st
     if (outputKey) {
       const esc = outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       const anc = new RegExp(`^#{1,4}[ \\t]+\\**\\s*${esc}\\b.*$`, 'im').exec(content)
-      if (anc) {
-        const desde = content.slice(anc.index + anc[0].length)
+      if (anc || yaEsSeccion) {
+        // Sin ancla pero con el texto ya recortado, la sección empieza donde empieza el texto.
+        const desde = anc ? content.slice(anc.index + anc[0].length) : content
         // No vale «el primer arreglo de la sección»: la del 2.4 abre con su tabla de paleta y una
         // lista de tres hex, que se llevaba el cupo. Un sobre se reconoce por dentro — objetos con
         // `prompt`/`image_prompt`/`depicts`—, así que se recorren todos y se toma el primero que
@@ -1381,7 +1387,7 @@ export default function NodeChatWindow({
       }
 
       const previos = textoItemsPrevios(def.outputKey, def.format)
-      parseOutputItems(section, def.format, def.outputKey).forEach((text, idx) => {
+      parseOutputItems(section, def.format, def.outputKey, true).forEach((text, idx) => {
         const tieneImagen = (outputImages[def.outputKey] ?? []).some(s => s.index === idx && s.variations?.length > 0)
         // Antes bastaba con tener imagen para saltarlo, y eso volvía inútil TODA iteración: la
         // primera corrida llenaba los N ítems y de ahí en más ninguna respuesta generaba nada,
@@ -1553,7 +1559,7 @@ export default function NodeChatWindow({
           })()
         : content
       if (!sectionMatch && !isPng) fullMsgUsed = true
-      const parsed = parseOutputItems(section, def.format, def.outputKey)
+      const parsed = parseOutputItems(section, def.format, def.outputKey, true)
       const savedList = outputImages[def.outputKey] ?? []
       for (let idx = 0; idx < parsed.length; idx++) {
         const itemText = parsed[idx]
