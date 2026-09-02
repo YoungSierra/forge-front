@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { CopyButton } from '@/components/shared/CopyButton'
 import { downloadTextFile, mdFilename } from '@/lib/download'
+import { unirOutputImages } from '@/lib/output-images'
 import { chatWithNode, getNodeContextInputs } from '@/lib/api'
 import type { ChatMessage, ChatAttachment, ChatToolCall, ApprovedAsset, OutputImageItem, OutputImagesMap, NodeContextInput } from '@/lib/api'
 import type { Project } from '@/lib/types'
@@ -1172,6 +1173,17 @@ export default function NodeChatWindow({
   const [pendingUrl,      setPendingUrl]      = useState<string | null>(null)
   const [dropTarget,      setDropTarget]      = useState(false)
   const [outputImages,    setOutputImages]    = useState<OutputImagesMap>(outputImagesProp ?? {})
+  // El prop solo se leía al montar, y las imágenes que despacha el MOTOR llegan después: el canvas
+  // las sondea y actualiza su mapa, pero esta ventana seguía con la foto vacía del arranque. En
+  // pantalla quedaban los huecos con su botón ✦ sobre imágenes que ya existían —se veían en las
+  // tarjetas del nodo, no acá— y solo recargar el proyecto las traía. Un clic ahí es un render
+  // pagado dos veces, que es justo lo que estamos persiguiendo.
+  //
+  // Se UNE, no se reemplaza: lo generado en esta pantalla no se pierde si el sondeo llega después.
+  useEffect(() => {
+    if (!outputImagesProp || !Object.keys(outputImagesProp).length) return
+    setOutputImages(prev => unirOutputImages(prev, outputImagesProp))
+  }, [outputImagesProp])
   // Lo generado en esta pantalla, por turno. El backend ya lo guarda en el mensaje, pero la
   // respuesta del generador trae el mapa de la SESIÓN: sin esto, la imagen recién hecha no
   // aparecería en su turno hasta recargar.
