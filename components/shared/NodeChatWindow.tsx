@@ -1329,7 +1329,7 @@ export default function NodeChatWindow({
       if (messages[i].role !== 'assistant') continue
       const m = outputHeaderRx(outputKey).exec(messages[i].content)
       const sec = m ? messages[i].content.slice(m.index + m[0].length) : messages[i].content
-      const items = parseOutputItems(sec.trim() || messages[i].content, format)
+      const items = parseOutputItems(sec.trim() || messages[i].content, format, outputKey, true)
       if (items.length) return items
     }
     return []
@@ -1931,7 +1931,7 @@ export default function NodeChatWindow({
                   fuente = after.slice(0, cortes.length ? Math.min(...cortes) : after.length).trim() || section
                 }
 
-                const parsed = parseOutputItems(fuente, def.format, def.declaradasPor || def.outputKey)
+                const parsed = parseOutputItems(fuente, def.format, def.declaradasPor || def.outputKey, true)
 
                 // Lo que generó ESTE turno manda. Iterar reescribe los prompts sin mover los
                 // índices, así que leer siempre el mapa de la sesión emparejaba la respuesta nueva
