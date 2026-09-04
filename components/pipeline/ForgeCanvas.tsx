@@ -33,6 +33,7 @@ import { MD_COMPONENTS } from '@/lib/md-components'
 import { forDisplay } from '@/lib/json-display'
 import { downloadTextFile, mdFilename } from '@/lib/download'
 import { compareNodeKey } from '@/lib/node-order'
+import { techoDeclarado, textoDeCuenta, type CuentaDeclarada } from '@/lib/image-count'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1439,7 +1440,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const [vivos, setVivos] = useState<Record<string, Despacho>>({})
   // Despacho pendiente de confirmar. Un render cuesta crédito y no se puede deshacer, así que no
   // sale de un solo clic.
-  const [confirmar, setConfirmar] = useState<{ clave: string; etiqueta: string; cuantas: number } | null>(null)
+  const [confirmar, setConfirmar] = useState<{ clave: string; etiqueta: string; cuantas: number; texto: string | null } | null>(null)
   const marcarVivo = useCallback((clave: string, esperadas: number) => {
     const t = leerDespachos()
     t[`${canvasNode.project_node_id}:${clave}`] = { esperadas, desde: Date.now() }
@@ -2170,6 +2171,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
         <ConfirmarRender
           etiqueta={confirmar.etiqueta}
           cuantas={confirmar.cuantas}
+          texto={confirmar.texto}
           onCancel={() => setConfirmar(null)}
           onOk={() => { const c = confirmar; setConfirmar(null); despacharOutput(c.clave, c.cuantas) }}
         />, document.body)}
@@ -2343,7 +2345,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       solo llama al modelo. */}
                   {outTab && (() => {
                     const o = (node.outputs ?? []).find(x => (x as {key?:string;name:string}).key === outTab || x.name === outTab) as
-                      { key?: string; name?: string; label?: string; image_gen?: boolean; image_count?: number; production?: string } | undefined
+                      { key?: string; name?: string; label?: string; image_gen?: boolean; image_count?: CuentaDeclarada; production?: string } | undefined
                     if (!o?.image_gen || o.production === 'deferred') return null
                     const clave = o.key || o.name || outTab
                     const vivo  = vivos[clave]
@@ -2363,12 +2365,12 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                           if (vivo) { setRenderJob({ clave, esperadas: vivo.esperadas }); return }
                           if (runningOutput) return
                           // Nunca despacha de una: primero dice qué va a hacer y cuánto.
-                          setConfirmar({ clave, etiqueta: o.label || o.name || clave, cuantas: o.image_count ?? 0 })
+                          setConfirmar({ clave, etiqueta: o.label || o.name || clave, cuantas: techoDeclarado(o.image_count), texto: textoDeCuenta(o.image_count) })
                         }}
                         disabled={!!runningOutput && !vivo}
                         title={vivo
                           ? 'This output is already rendering — click to see progress'
-                          : `Render this output${o.image_count ? ` — ${o.image_count} images` : ''}`}
+                          : `Render this output${textoDeCuenta(o.image_count) ? ` — ${textoDeCuenta(o.image_count)}` : ''}`}
                         style={{
                           border: '1px solid color-mix(in srgb, #F59E0B 35%, var(--line-2))',
                           background: 'color-mix(in srgb, #F59E0B 10%, var(--bg-2))',
@@ -2377,7 +2379,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                           color: '#F59E0B', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
                           lineHeight: 1, marginRight: 4, opacity: runningOutput || vivo ? 0.55 : 1,
                         }}
-                      >{vivo ? '◷ RENDERING…' : runningOutput === clave ? '…' : `▶ RENDER${o.image_count ? ` ${o.image_count}` : ''}`}</button>
+                      >{vivo ? '◷ RENDERING…' : runningOutput === clave ? '…' : `▶ RENDER${techoDeclarado(o.image_count) ? ` ${textoDeCuenta(o.image_count)?.replace(/ images?$/, '')}` : ''}`}</button>
                     )
                   })()}
                   {onOpenChat && outTab && (
@@ -3114,8 +3116,8 @@ function guardarDespachos(t: Record<string, Despacho>) {
 
 // Confirmación antes de gastar. Los dos botones van separados y el destructivo no es el que queda
 // bajo el cursor: el clic accidental fue el que costó tres despachos en paralelo.
-function ConfirmarRender({ etiqueta, cuantas, onCancel, onOk }: {
-  etiqueta: string; cuantas: number; onCancel: () => void; onOk: () => void
+function ConfirmarRender({ etiqueta, cuantas, texto, onCancel, onOk }: {
+  etiqueta: string; cuantas: number; texto?: string | null; onCancel: () => void; onOk: () => void
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
@@ -3135,7 +3137,7 @@ function ConfirmarRender({ etiqueta, cuantas, onCancel, onOk }: {
         boxShadow: '0 22px 64px rgba(0,0,0,0.6)',
       }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', marginBottom: 3 }}>
-          Render {cuantas ? `${cuantas} image${cuantas > 1 ? 's' : ''}` : 'this output'}?
+          Render {texto ?? (cuantas ? `${cuantas} image${cuantas > 1 ? 's' : ''}` : 'this output')}?
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: 12 }}>
           {etiqueta}
