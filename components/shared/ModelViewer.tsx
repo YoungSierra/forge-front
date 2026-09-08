@@ -23,9 +23,29 @@ export default function ModelViewer({ url, style }: Props) {
   // Solo para drag & drop — blobs locales que SÍ revocamos al reemplazar
   const localBlob = useRef<string | null>(null)
 
+  // El visor es un custom element que trae `@google/model-viewer`. Hasta que ese módulo carga y
+  // registra el elemento, `<model-viewer>` es una etiqueta desconocida: el navegador la acepta,
+  // no dibuja nada y no protesta. Con el `.catch(() => {})` que había, un fallo de carga se veía
+  // exactamente igual que un modelo que no gira — que es como se reportó dos informes seguidos.
+  //
+  // Ahora se espera al registro y se dice si no llega. No arregla la carga; hace que la próxima
+  // vez se sepa si el problema es este o es otro.
+  const [visorListo, setVisorListo] = useState(() =>
+    typeof window !== 'undefined' && !!window.customElements?.get('model-viewer'))
+
   useEffect(() => {
-    import('@google/model-viewer').catch(() => {})
-  }, [])
+    if (visorListo) return
+    let vivo = true
+    import('@google/model-viewer')
+      .then(() => window.customElements?.whenDefined('model-viewer'))
+      .then(() => { if (vivo) setVisorListo(true) })
+      .catch(e => {
+        if (!vivo) return
+        console.error('[ModelViewer] no se pudo cargar el visor 3D:', e)
+        setError('3D viewer failed to load — reload the page')
+      })
+    return () => { vivo = false }
+  }, [visorListo])
 
   // Drag & drop: crea blob local (no se cachea, se revoca al reemplazar)
   function loadLocalBlob(blob: Blob) {
@@ -128,10 +148,10 @@ export default function ModelViewer({ url, style }: Props) {
     </div>
   )
 
-  if (!blobUrl) return (
+  if (!blobUrl || !visorListo) return (
     <div style={base} {...dropProps}>
       <div style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: 11, color: 'var(--text-3)' }}>
-        {url ? 'Loading model…' : 'Drop a .glb file here'}
+        {!url ? 'Drop a .glb file here' : !visorListo ? 'Starting the 3D viewer…' : 'Loading model…'}
       </div>
       {overlay}
     </div>
