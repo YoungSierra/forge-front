@@ -253,6 +253,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const [maximizado, setMaximizado] = useState(false)
   useEffect(() => { setMaximizado(localStorage.getItem('forge:mb:max') === '1') }, [])
   const [sel,     setSel]     = useState<string | null>(null)
+  // Sobre qué hoja está el cursor. La barra de edición sale con el hover además de con la
+  // selección: antes había que abrir la hoja y cerrarla para que apareciera (informe v4, punto 6).
+  const [hoja,    setHoja]    = useState<string | null>(null)
   // Al abrir se guarda el rectángulo de la tarjeta: la imagen crece DESDE ahí, no aparece
   // centrada de golpe. Es el 'fluye al frente' de la referencia.
   const [detail,  setDetail]  = useState<{ asset: UnifiedAsset; from: DOMRect } | null>(null)
@@ -420,6 +423,78 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     }).catch(e => console.error('[moodboard] guardar layout', e))
   }, [projectId])
 
+  // ── Deshacer y rehacer (informe v4, punto 4) ────────────────────────────────
+  // El acomodo del lienzo son tres cosas: dónde está cada hoja, qué grupos hay y qué se quitó de
+  // la vista. Se guarda una FOTO de las tres antes de cada acción que las cambia, y Ctrl+Z la
+  // devuelve. Guardar la foto —y no el gesto inverso— es lo que hace que agrupar, reorganizar en
+  // cuadrícula y mover cincuenta hojas de una se deshagan igual de bien: son todas el mismo
+  // cambio de estado, por más que en pantalla parezcan acciones distintas.
+  //
+  // El encuadre (zoom y paneo) NO entra: mirar no es editar, y meterlo haría que Ctrl+Z a veces
+  // moviera la cámara en vez de devolver el trabajo, que es justo lo que uno no espera.
+  type Foto = { pos: Record<string, { x: number; y: number }>; marcos: MoodboardMarco[]; ocultos: Record<string, boolean> }
+  const pasado = useRef<Foto[]>([])
+  const futuro = useRef<Foto[]>([])
+  const LIMITE_HISTORIAL = 50
+
+  const fotoActual = useCallback((): Foto => ({
+    pos: { ...posicionesRef.current },
+    marcos: marcosRef.current.map(m => ({ ...m, ids: [...m.ids] })),
+    ocultos: { ...ocultosRef.current },
+  }), [])
+
+  // Se llama ANTES de cambiar nada. Una acción que no llega a cambiar el estado deja una foto
+  // repetida, y deshacer parecería no hacer nada: por eso se compara con la última.
+  const marcarHistorial = useCallback(() => {
+    const f = fotoActual()
+    const ultima = pasado.current[pasado.current.length - 1]
+    if (ultima && JSON.stringify(ultima) === JSON.stringify(f)) return
+    pasado.current.push(f)
+    if (pasado.current.length > LIMITE_HISTORIAL) pasado.current.shift()
+    futuro.current = []          // una acción nueva corta la rama de rehacer
+  }, [fotoActual])
+
+  const aplicarFoto = useCallback((f: Foto) => {
+    setPosiciones(f.pos);  posicionesRef.current = f.pos
+    setOcultos(f.ocultos); ocultosRef.current = f.ocultos
+    // `marcos` se persiste solo en su efecto; las posiciones y los ocultos no, así que se guarda
+    // acá una vez por deshacer y no tres veces por cada `set`.
+    setMarcos(f.marcos)
+    for (const m of f.marcos) marcosVistos.current.add(m.id)
+    saveMoodboardLayout(projectId, {
+      pos: f.pos, marcos: f.marcos, ocultos: f.ocultos, conocidos: [...marcosVistos.current],
+    }).catch(e => console.error('[moodboard] deshacer', e))
+  }, [projectId])
+
+  const deshacer = useCallback(() => {
+    const f = pasado.current.pop()
+    if (!f) return
+    futuro.current.push(fotoActual())
+    aplicarFoto(f)
+  }, [fotoActual, aplicarFoto])
+
+  const rehacer = useCallback(() => {
+    const f = futuro.current.pop()
+    if (!f) return
+    pasado.current.push(fotoActual())
+    aplicarFoto(f)
+  }, [fotoActual, aplicarFoto])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const t = e.target as HTMLElement | null
+      // En un campo de texto, Ctrl+Z es del campo: deshacer lo que uno acaba de escribir.
+      if (t && (/^(INPUT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable)) return
+      const k = e.key.toLowerCase()
+      if (k === 'z' && !e.shiftKey)      { e.preventDefault(); deshacer() }
+      else if (k === 'z' && e.shiftKey)  { e.preventDefault(); rehacer() }
+      else if (k === 'y')                { e.preventDefault(); rehacer() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [deshacer, rehacer])
+
   // Las notas del proyecto, TODAS las de cada hoja: una por persona. Aplanarlas a una sola por
   // activo hacía que ganara la última en llegar, y abrir el modal te ponía a editar el texto de
   // otro para guardarlo como tuyo. Cada quien edita la suya; las demás se leen.
@@ -506,6 +581,22 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     }
     const SEP = 90            // aire entre zonas
     const TITULO = 62         // alto reservado para la pestaña con el nombre del documento
+
+    // Dónde hay hojas COLOCADAS A MANO. La cuadrícula no las conocía y repartía celdas encima:
+    // medido en 13_lives_kitten, 102 de 167 hojas no tienen posición guardada y caen acá, así que
+    // cualquiera de ellas podía aparecer debajo de una que el usuario había movido. Ese es el
+    // punto 2 del informe v4 — «se publican encima de otras y no se reorganizan solas».
+    //
+    // La celda ocupada NO se reasigna: se SALTA. Reasignarla haría que arrastrar una hoja
+    // reacomodara todas las demás, y mover una cosa no debería mover el resto del lienzo.
+    const colocadas: { x: number; y: number }[] = []
+    for (const [k, p] of Object.entries(posiciones)) {
+      if (!k.startsWith(`${fase.key}:`)) continue
+      colocadas.push(p)
+    }
+    const chocaConColocada = (x: number, y: number) =>
+      colocadas.some(c => Math.abs(c.x - x) < HOJA_W && Math.abs(c.y - y) < HOJA_H)
+
     const pos = new Map<string, { x: number; y: number }>()
     const zonas: { nombre: string; x: number; y: number; w: number; h: number }[] = []
     let cursorX = 0
@@ -515,13 +606,34 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     for (const [nombre, items] of ordenadas) {
       // Bloque lo más cuadrado posible: una fila de 30 hojas no se lee, una columna tampoco.
       const cols = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(items.length))))
-      items.forEach((a, i) => {
-        pos.set(a.id, {
-          x: cursorX + (i % cols) * (HOJA_W + HOJA_GAP),
-          y: TITULO + Math.floor(i / cols) * (HOJA_H + HOJA_GAP),
-        })
+      const celda = (i: number) => ({
+        x: cursorX + (i % cols) * (HOJA_W + HOJA_GAP),
+        y: TITULO + Math.floor(i / cols) * (HOJA_H + HOJA_GAP),
       })
-      const filas = Math.ceil(items.length / cols)
+
+      let celdaLibre = 0
+      let ultima = 0
+      for (const a of items) {
+        // Una hoja con posición propia conserva su celda reservada aunque se dibuje en otro sitio:
+        // así el bloque no se recompone entero cada vez que alguien mueve algo.
+        if (posiciones[`${fase.key}:${a.id}`]) { pos.set(a.id, celda(celdaLibre)); celdaLibre++; continue }
+        // Tope por si el lienzo estuviera sembrado de hojas a mano: se cede antes que colgarse.
+        let vueltas = 0
+        while (vueltas++ < 500) {
+          const c = celda(celdaLibre)
+          if (!chocaConColocada(c.x, c.y)) break
+          celdaLibre++
+        }
+        const c = celda(celdaLibre)
+        pos.set(a.id, c)
+        ultima = celdaLibre
+        celdaLibre++
+      }
+
+      // El marco cubre hasta la última celda USADA, que con los saltos puede ser más baja que
+      // `items.length`: si se midiera por el conteo, las hojas empujadas hacia abajo quedarían
+      // fuera de su propio bloque.
+      const filas = Math.max(1, Math.floor(Math.max(ultima, celdaLibre - 1) / cols) + 1)
       const w = cols * HOJA_W + (cols - 1) * HOJA_GAP
       const h = filas * HOJA_H + (filas - 1) * HOJA_GAP
       // El marco respira: aire alrededor de la cuadrícula para que no toque las hojas.
@@ -529,7 +641,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       cursorX += w + SEP
     }
     return { pos, zonas }
-  }, [deLaFase])
+  }, [deLaFase, posiciones, fase.key])
 
   const posicionDe = useCallback((id: string, i: number) => {
     const guardada = posiciones[`${fase.key}:${id}`]
@@ -541,6 +653,30 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   }, [posiciones, fase.key, disposicion])
 
   useEffect(() => { assetsRef.current = assets }, [assets])
+
+  // Una hoja y TODO lo que salió de ella (informe v4, punto 9).
+  //
+  // La cadena deja escrito de qué pieza salió cada una en `derived_from`, así que el árbol ya
+  // existe: solo había que recorrerlo. Mover una página madre sin sus hijas obligaba a arrastrar
+  // veinte piezas de a una, que es lo que hacía inmanejable organizar el escenario.
+  const conDescendientes = useCallback((ids: string[]) => {
+    const hijosDe = new Map<string, string[]>()
+    for (const a of assetsRef.current) {
+      if (!a.derived_from) continue
+      const l = hijosDe.get(a.derived_from) ?? []
+      l.push(a.id)
+      hijosDe.set(a.derived_from, l)
+    }
+    const fuera = new Set<string>()
+    const pila = [...ids]
+    while (pila.length) {
+      const id = pila.pop()!
+      if (fuera.has(id)) continue      // un ciclo en los datos no debe colgar la interfaz
+      fuera.add(id)
+      for (const h of hijosDe.get(id) ?? []) pila.push(h)
+    }
+    return fuera
+  }, [])
 
   const moverElemento = useCallback((id: string, p: { x: number; y: number }) => {
     setPosiciones(m => ({ ...m, [`${fase.key}:${id}`]: p }))
@@ -812,6 +948,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // y quitarla haria que la version del otro cliente —que todavia la tiene en `true`— la volviera
   // a esconder al guardar. Guardar en el mismo gesto, que es como se guarda todo el acomodo.
   const esconder = useCallback((ids: string[]) => {
+    marcarHistorial()
     if (!ids.length) return
     setOcultos(o => { const n = { ...o }; for (const id of ids) n[id] = true; return n })
     ocultosRef.current = { ...ocultosRef.current, ...Object.fromEntries(ids.map(id => [id, true])) }
@@ -821,6 +958,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   }, [guardarLayout])
 
   const devolverAlLienzo = useCallback((ids: string[]) => {
+    marcarHistorial()
     if (!ids.length) return
     setOcultos(o => { const n = { ...o }; for (const id of ids) n[id] = false; return n })
     ocultosRef.current = { ...ocultosRef.current, ...Object.fromEntries(ids.map(id => [id, false])) }
@@ -869,6 +1007,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   }
 
   const ordenarZona = useCallback((nombre: string) => {
+    marcarHistorial()
     const hojas = visible.filter(a => zonaDe(a) === nombre)
     if (hojas.length < 2) return
     const orden = [...hojas].sort((a, b) =>
@@ -900,6 +1039,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // Agrupar la selección en un conjunto con nombre. Una hoja pertenece a UN marco: estar en dos
   // conjuntos a la vez no se puede dibujar sin mentir, así que al agrupar se saca de los demás.
   const agrupar = useCallback(() => {
+    marcarHistorial()
     const ids = [...seleccion]
     if (ids.length < 2) return
     const id = `m${Date.now().toString(36)}`
@@ -976,11 +1116,30 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     })
   }, [])
 
+  // Sacar UNA hoja de su grupo (informe v4, punto 10).
+  //
+  // Hasta ahora solo existía `desagrupar`, que disuelve el marco entero: una hoja que caia en el
+  // grupo equivocado no tenía cómo salir. Va como acción explícita y no como arrastre — arrastrar
+  // hacia afuera es el mismo gesto que acomodar dentro, y por eso un grupo de dos se disolvía solo
+  // al reordenarlo.
+  //
+  // Un marco que se queda con una sola hoja deja de ser un conjunto: se retira.
+  const quitarDelMarco = useCallback((hojaId: string) => {
+    marcarHistorial()
+    setMarcos(ms => ms
+      .map(m => (m.ids.includes(hojaId) ? { ...m, ids: m.ids.filter(x => x !== hojaId) } : m))
+      .filter(m => m.ids.length > 1))
+  }, [marcarHistorial])
+
+  const marcoDe = useCallback((hojaId: string) => marcos.find(m => m.ids.includes(hojaId)) ?? null, [marcos])
+
   const desagrupar = useCallback((id: string) => {
+    marcarHistorial()
     setMarcos(ms => ms.filter(m => m.id !== id))
   }, [guardarLayout])
 
   const renombrarMarco = useCallback((id: string, nombre: string) => {
+    marcarHistorial()
     setMarcos(ms => ms.map(m => m.id === id ? { ...m, nombre: nombre.trim() || 'Group' } : m))
     setRenombrando(null)
   }, [guardarLayout])
@@ -1480,6 +1639,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                         onPointerDown={e => {
                           // Arrastrar la etiqueta mueve el conjunto entero.
                           e.stopPropagation()
+                          // Igual que con una hoja: una foto por gesto, no por pixel.
+                          marcarHistorial()
                           const base = { ...posicionesRef.current }
                           const ini = { x: e.clientX, y: e.clientY }
                           const mover = (ev: PointerEvent) =>
@@ -1619,26 +1780,57 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                         // Alterna: volver a pulsar sobre una elegida la saca, si no, quitar una de
                         // en medio obligaba a empezar de cero.
                         if (e.shiftKey) {
+                          // Suma la hoja y lo que colgó de ella; al quitarla, se van juntas.
+                          const rama = conDescendientes([a.id])
                           setSeleccion(prev => {
                             const n = new Set(prev)
-                            if (n.has(a.id)) n.delete(a.id); else n.add(a.id)
+                            if (n.has(a.id)) for (const id of rama) n.delete(id)
+                            else            for (const id of rama) n.add(id)
                             return n
                           })
                           setSel(null)
                           arrastrado.current = true   // que el clic de detrás no abra la hoja
                           return
                         }
+                        // La foto va al EMPEZAR el arrastre: un movimiento son cientos de
+                        // `moverElemento`, y una foto por pixel llenaria el historial con el
+                        // mismo gesto. Deshacer devuelve la hoja a donde estaba antes de tocarla.
+                        marcarHistorial()
                         const inicio = { x: e.clientX, y: e.clientY, px: p.x, py: p.y }
                         // Foto de los marcos ANTES de mover: es contra estos rectángulos que se
                         // decide dónde cae la hoja, no contra los que quedan mientras se arrastra.
                         const cajas = cajasDeMarcos()
+
+                        // Arrastrar una hoja SELECCIONADA mueve toda la selección (informe v4,
+                        // punto 11: se marcaban en amarillo y no se podían desplazar).
+                        //
+                        // Se toman las posiciones de partida de todas ANTES de empezar: aplicando
+                        // el mismo desplazamiento a cada una desde su propio origen, las distancias
+                        // relativas se conservan y el bloque se mueve como un bloque. Leerlas en
+                        // cada paso las iría acumulando y el grupo se desarmaría al arrastrar.
+                        const enBloque = seleccion.has(a.id) ? [...seleccion] : [a.id]
+                        const partida = new Map<string, { x: number; y: number }>()
+                        for (const id of enBloque) {
+                          const q = posicionesRef.current[`${fase.key}:${id}`] ?? disposicion.pos.get(id)
+                          if (q) partida.set(id, q)
+                        }
+                        partida.set(a.id, { x: p.x, y: p.y })
+
                         let movido = false
                         const mover = (ev: PointerEvent) => {
                           const dx = (ev.clientX - inicio.x) / vista.z
                           const dy = (ev.clientY - inicio.y) / vista.z
                           if (!movido && Math.hypot(dx, dy) < 4) return   // un clic no es un arrastre
                           movido = true
-                          moverElemento(a.id, { x: inicio.px + dx, y: inicio.py + dy })
+                          if (partida.size > 1) {
+                            setPosiciones(m => {
+                              const n = { ...m }
+                              for (const [id, q] of partida) n[`${fase.key}:${id}`] = { x: q.x + dx, y: q.y + dy }
+                              return n
+                            })
+                          } else {
+                            moverElemento(a.id, { x: inicio.px + dx, y: inicio.py + dy })
+                          }
                         }
                         const soltar = () => {
                           window.removeEventListener('pointermove', mover)
@@ -1675,13 +1867,47 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                     >
                       <Card asset={a} index={i} accent={theme.accent} colors={theme.colors}
                             selected={sel === a.id || seleccion.has(a.id)}
+                            onSelect={() => setSel(a.id)}
+                            onHover={dentro => setHoja(dentro ? a.id : h => (h === a.id ? null : h))}
                             onOpen={(from) => { setSel(a.id); setDetail({ asset: a, from }) }}
                             onMenu={(x, y) => setMenu({ x, y, asset: a })} />
 
+                      {/* Con qué opciones se generó la pieza, DEBAJO de ella (informe v4, punto 8).
+                          La vista ampliada ya las mostraba; en el lienzo no, y ahí es donde uno
+                          compara dos hojas y se pregunta por qué una salió distinta. Escala en
+                          contra del zoom, como la barra de arriba. */}
+                      {a.opciones && Object.keys(a.opciones).length > 0 && (hoja === a.id || sel === a.id) && (
+                        <div
+                          onPointerDown={e => e.stopPropagation()}
+                          onMouseEnter={() => setHoja(a.id)}
+                          style={{
+                            position: 'absolute', left: '50%', top: HOJA_H + 6,
+                            transform: `translate(-50%, 0) scale(${1 / vista.z})`,
+                            transformOrigin: 'top center',
+                            display: 'flex', flexWrap: 'wrap', justifyContent: 'center',
+                            gap: 4, maxWidth: HOJA_W * vista.z, pointerEvents: 'none',
+                          }}
+                        >
+                          {Object.entries(a.opciones).map(([k, v]) => (
+                            <span key={k} style={{
+                              fontSize: 9, fontFamily: 'var(--font-mono)', letterSpacing: '.02em',
+                              padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap',
+                              background: 'rgba(10,12,16,0.92)', border: '1px solid rgba(255,255,255,0.14)',
+                              color: 'var(--text-2)',
+                            }}>
+                              {k.split('.').pop()} <b style={{ color: 'var(--text-0)' }}>{String(v)}</b>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
                       {/* Barra del elemento seleccionado. Va anclada a la hoja y escala en
                           contra del zoom: a 30 % los íconos serían ilegibles. */}
-                      {sel === a.id && (
+                      {(sel === a.id || hoja === a.id) && (
                         <div
+                          // La barra también cuenta como «encima»: si no, moverse de la hoja a sus
+                          // botones la hace desaparecer justo cuando uno va a pulsarlos.
+                          onMouseEnter={() => setHoja(a.id)}
                           onPointerDown={e => e.stopPropagation()}
                           style={{
                             position: 'absolute', left: '50%', top: -12,
@@ -1700,6 +1926,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           <BarraBtn titulo={(notasPorHoja[a.id]?.length ?? 0) > 0 ? `Notes (${notasPorHoja[a.id].length})` : 'Notes'} activo={(notasPorHoja[a.id]?.length ?? 0) > 0} onClick={() => setNotando(a)}>✎</BarraBtn>
                           <BarraBtn titulo="Save to my computer" onClick={() => bajarActivo(a)}>↓</BarraBtn>
                           <BarraBtn titulo="Remove from canvas — it stays in the library" onClick={() => esconder([a.id])}>⊘</BarraBtn>
+                          {marcoDe(a.id) && (
+                            <BarraBtn titulo={`Take it out of "${marcoDe(a.id)!.nombre}"`} onClick={() => quitarDelMarco(a.id)}>⇱</BarraBtn>
+                          )}
                           <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.14)', margin: '0 3px' }} />
                           <BarraBtn titulo="Design edits" onClick={() => setEditando(a)}>✦</BarraBtn>
                         </div>
@@ -1953,6 +2182,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                          notas={notasPorHoja[detail.asset.id] ?? []}
                          onNota={() => setNotando(detail.asset)}
                          onDesignEdit={() => pedirDesignEdit(detail.asset)}
+                         // Quitar del lienzo cierra la vista: dejarla abierta mostraría en grande
+                         // una hoja que acaba de dejar de estar ahí.
+                         onQuitar={() => { const id = detail.asset.id; setDetail(null); esconder([id]) }}
                          onMenu={(mx, my) => setMenu({ x: mx, y: my, asset: detail.asset })}
                          // Lo que salió de esta página y está fuera del lienzo. `derived_from` lo
                          // llena la cadena de producción: las tres vistas de un Character Sheet
@@ -2253,9 +2485,11 @@ function useAudioThumb(url: string, id: string, accent: string) {
   return { data, cargando }
 }
 
-function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
+function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu }: {
   asset: UnifiedAsset; index: number; accent: string; colors: string[]
-  selected: boolean; onOpen: (from: DOMRect) => void; onMenu: (x: number, y: number) => void
+  selected: boolean; onOpen: (from: DOMRect) => void
+  onSelect?: () => void; onHover?: (dentro: boolean) => void
+  onMenu: (x: number, y: number) => void
 }) {
   const [hover, setHover] = useState(false)
   const t    = tabOf(asset)
@@ -2271,12 +2505,16 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
 
   return (
     <div
-      // Clic izquierdo: el activo fluye al frente desde su lugar en la grilla — también los
-      // documentos, que desde ahí se pueden abrir. El clic derecho abre el menú (descargar).
-      onClick={e => onOpen(e.currentTarget.getBoundingClientRect())}
+      // Clic simple SELECCIONA; doble clic AMPLÍA (informe v4, puntos 6 y 7).
+      //
+      // Antes el clic simple abría la vista grande, y como la barra de edición solo aparece sobre
+      // la hoja seleccionada, para llegar a ella había que abrir y cerrar. Dos gestos distintos
+      // para dos intenciones distintas: elegir una hoja no es querer verla en grande.
+      onClick={() => onSelect?.()}
+      onDoubleClick={e => onOpen(e.currentTarget.getBoundingClientRect())}
       onContextMenu={e => { e.preventDefault(); onMenu(e.clientX, e.clientY) }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onMouseEnter={() => { setHover(true); onHover?.(true) }}
+      onMouseLeave={() => { setHover(false); onHover?.(false) }}
       style={{
         // El tamaño lo daba la celda de la grilla. En el lienzo cada hoja va en posición absoluta
         // y sin esto la tarjeta colapsa a cero: se veían los bordes y nada adentro.
@@ -2429,12 +2667,15 @@ function Card({ asset, index, accent, colors, selected, onOpen, onMenu }: {
 // grilla, como en la referencia. La grilla sigue visible detrás, atenuada, así no se pierde
 // el contexto de dónde estaba la imagen. Al cerrar vuelve exactamente a su celda.
 function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNota, onDesignEdit,
-                 escondidas, onDevolver }: {
+                 onQuitar, escondidas, onDevolver }: {
   asset: UnifiedAsset; from: DOMRect; accent: string
   onMenu: (x: number, y: number) => void; onClose: () => void; onAprobado: () => void
   // Las mismas acciones que en el lienzo. Al abrir la hoja no se pierden: es la misma pieza,
   // vista más grande, y tener que cerrarla para poder anotarla era el camino largo.
-  notas: AssetNote[]; onNota: () => void; onDesignEdit: () => void
+  //
+  // «La misma barra» lo decía el comentario pero no el código: faltaba quitar del lienzo, que en
+  // el informe v4 es el punto 12 — la acción estaba a la vista y no hacía nada.
+  notas: AssetNote[]; onNota: () => void; onDesignEdit: () => void; onQuitar: () => void
   // Lo que salió de ESTA página y está escondido del lienzo. El informe v3 es explícito sobre
   // dónde se recupera: en el historial de la página madre, no en la Librería, que conserva su
   // función de insertar o reutilizar piezas en un slot.
@@ -2904,6 +3145,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
       >
         <BarraBtn titulo={notas.length ? `Notes (${notas.length})` : 'Notes'} activo={notas.length > 0} onClick={onNota}>✎</BarraBtn>
         <BarraBtn titulo="Save to my computer" onClick={() => bajarActivo(asset)}>↓</BarraBtn>
+        <BarraBtn titulo="Remove from canvas — it stays in the library" onClick={onQuitar}>⊘</BarraBtn>
         <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.14)', margin: '0 3px' }} />
         <BarraBtn titulo="Design edits" onClick={onDesignEdit}>✦</BarraBtn>
       </div>
@@ -3565,10 +3807,20 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
               </svg>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-1)', marginBottom: 3 }}>
-                  The iteration did not complete
+                  {pagina ? `Page ${pagina.n} · ${pagina.nombre} did not complete` : 'The iteration did not complete'}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5, wordBreak: 'break-word' }}>
                   {error}
+                </div>
+                {/* Lo que el informe v4 pide saber antes de volver a apretar: si esto ya se pagó, y
+                    desde dónde arranca el reintento. El cobro es por render entregado, así que un
+                    fallo antes de que llegue la imagen no consume; y el reintento parte del último
+                    pedido aplicado, no de la versión original — lo que se escribió no se pierde. */}
+                <div style={{ fontSize: 10.5, color: 'var(--text-3)', lineHeight: 1.5, marginTop: 7, opacity: 0.85 }}>
+                  {pct > 0 && pct < 100
+                    ? 'The render had already started, so this attempt may have been charged.'
+                    : 'No image came back, so nothing was charged for this attempt.'}
+                  {' '}Retrying starts from the last edit you applied, not from the original page.
                 </div>
               </div>
             </div>
@@ -3819,6 +4071,12 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
         if (!vivo) return
         setOps(r.opciones)
         setTamano({ imagenes: (paso.despachos ?? 1) * r.imagenes, usd: r.costo_por_imagen_usd })
+        // Run parte de las opciones CON LAS QUE SE GENERÓ ESTA PIEZA (informe v4, punto 8).
+        // Arrancando siempre de los valores del workflow, ajustar la calidad y volver a correr
+        // devolvía el diálogo en blanco y había que reelegir todo — y lo que uno no reelige se
+        // corre con el valor viejo sin que nada lo diga.
+        const previas = (asset.opciones || {}) as Record<string, unknown>
+        if (Object.keys(previas).length) setElegidas({ ...previas })
       })
       // Sin ComfyUI no hay catálogo. Se corre igual con los valores del workflow: quedarse sin
       // Run porque no se pudo pintar un desplegable sería peor que no poder elegir.
@@ -3885,7 +4143,23 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
         boxShadow: '0 22px 64px rgba(0,0,0,0.6)', animation: 'mb-in 180ms ease',
       }}>
         {paso === undefined ? (
-          <div style={{ fontSize: 12.5, color: 'var(--text-3)', padding: '10px 0' }}>Reading the chain…</div>
+          // Con el texto solo, «Reading the chain…» quieto durante unos segundos se lee como que
+          // la plataforma se colgó — informe v4, punto 13. Un anillo girando dice que la petición
+          // sigue viva, y la segunda línea dice qué se está averiguando: sin eso el aviso informa
+          // de que espera, pero no de qué.
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 0' }}>
+            <span style={{
+              width: 15, height: 15, flexShrink: 0, borderRadius: '50%',
+              border: '2px solid rgba(255,255,255,0.16)', borderTopColor: 'var(--text-1)',
+              animation: 'mb-spin 720ms linear infinite',
+            }} />
+            <div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-1)' }}>Reading the chain…</div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
+                Working out which step this page is on, and what it would produce.
+              </div>
+            </div>
+          </div>
         ) : paso === null ? (
           <>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 9 }}>
