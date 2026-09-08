@@ -1450,6 +1450,11 @@ export interface ChatMessage {
   // Lo que generó ESTE turno. El mapa de la sesión es lo último vigente; esto es el historial,
   // y es lo que evita que una respuesta nueva se pinte con las imágenes de la anterior.
   output_images?: OutputImagesMap
+  // Este turno no lo escribió el modelo: es un aviso del cliente puesto en el hilo para que no
+  // parezca que se perdió («se cortó la conexión», «generación detenida»). Todo lo que INSPECCIONA
+  // la respuesta —qué imágenes ofrecer, qué secciones trae— tiene que saltárselo: analizarlo es
+  // analizar nuestro propio texto y sacar conclusiones sobre el nodo a partir de él.
+  aviso?: true
 }
 
 export async function saveChatHistory(

@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm'
 import { CopyButton } from '@/components/shared/CopyButton'
 import { downloadTextFile, mdFilename } from '@/lib/download'
 import { unirOutputImages } from '@/lib/output-images'
-import { chatWithNode, getNodeContextInputs } from '@/lib/api'
+import { chatWithNode, getNodeContextInputs, checkHealth } from '@/lib/api'
 import type { ChatMessage, ChatAttachment, ChatToolCall, ApprovedAsset, OutputImageItem, OutputImagesMap, NodeContextInput } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import { MD_COMPONENTS } from '@/lib/md-components'
@@ -1480,13 +1480,22 @@ export default function NodeChatWindow({
       // Cancelar no es un error: lo pidió el usuario. Se deja constancia en el hilo para que no
       // parezca que el turno se perdió solo.
       if ((err as Error)?.name === 'AbortError') {
-        setMessages(prev => [...prev, { role: 'assistant', content: '_Generation stopped._' }])
+        setMessages(prev => [...prev, { role: 'assistant', content: '_Generation stopped._', aviso: true }])
       } else if (esConexionCaida(err)) {
-        // La conexión se cayó, no la corrida: el backend sigue trabajando y guarda al terminar.
-        // Decir «failed to fetch» aquí hacía creer que se había perdido un TDD de trece minutos que
-        // en realidad estaba a medio hacer y terminó bien.
-        setMessages(prev => [...prev, { role: 'assistant', content:
-          '_The connection dropped, but the run kept going on the server. It will appear here when it finishes — reopening this node also shows it._' }])
+        // «failed to fetch» no distingue dos situaciones opuestas: una corrida viva cuyo canal se
+        // cortó —el 3.12 tarda trece minutos y el navegador suelta antes—, y una petición que
+        // nunca llegó porque el servidor no estaba. El texto afirmaba siempre lo primero. El 08-09
+        // el back se reinició en pleno `execute` y el usuario leyó que su corrida seguía viva:
+        // no había ninguna, no existe ni la sesión en la BD.
+        //
+        // Preguntar cuesta una petición: si el servidor contesta, el que se cayó fue el canal y la
+        // corrida sigue; si no contesta, no empezó nunca. Decir cuál de las dos es cambia lo que
+        // el usuario hace después — esperar, o volver a intentar.
+        let vivo = false
+        try { await checkHealth(); vivo = true } catch { vivo = false }
+        setMessages(prev => [...prev, { role: 'assistant', aviso: true, content: vivo
+          ? '_The connection dropped, but the run kept going on the server. It will appear here when it finishes — reopening this node also shows it._'
+          : '_The server was unreachable, so the run never started. Nothing was lost and nothing is running — try again once it is back._' }])
       } else {
         setError(err instanceof Error ? err.message : 'Error contacting assistant')
       }
@@ -1862,6 +1871,12 @@ export default function NodeChatWindow({
             const sinEntidades = new Set<string>()
 
             const buildItems = (): InlineImageItem[] | undefined => {
+              // Un aviso nuestro no es una respuesta del nodo. Analizarlo era leer nuestro propio
+              // texto y sacar conclusiones sobre el nodo a partir de él: el 08-09, sobre el aviso
+              // de conexión caída, el chat anunció «No images offered for visual_pitch (needs
+              // visual_pitch_plan) — check the cables». No faltaba ningún cable; no había corrido
+              // nada. El consejo mandaba a revisar justo donde no estaba el problema.
+              if (msg.aviso) return undefined
               // En focus, restringir al output enfocado (no mostrar imágenes de otros outputs).
               const defs = targetOutputKey ? (imageGenOutputs ?? []).filter(d => d.outputKey === targetOutputKey) : (imageGenOutputs ?? [])
               if (defs.length === 0 || !onGenerateItemImage) return undefined
