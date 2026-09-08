@@ -22,6 +22,7 @@ export default function ModelViewer({ url, style }: Props) {
   const [dragging, setDragging] = useState(false)
   // Solo para drag & drop — blobs locales que SÍ revocamos al reemplazar
   const localBlob = useRef<string | null>(null)
+  const visor = useRef<HTMLElement | null>(null)
 
   // El visor es un custom element que trae `@google/model-viewer`. Hasta que ese módulo carga y
   // registra el elemento, `<model-viewer>` es una etiqueta desconocida: el navegador la acepta,
@@ -46,6 +47,27 @@ export default function ModelViewer({ url, style }: Props) {
       })
     return () => { vivo = false }
   }, [visorListo])
+
+  // El primer gesto del usuario apaga el giro automático, y no vuelve.
+  //
+  // `auto-rotate` por sí solo se reanuda tras `auto-rotate-delay`, así que el encuadre que uno
+  // acaba de elegir se lo lleva la animación a los pocos segundos. Quitar el atributo al primer
+  // toque lo convierte en lo que tiene que ser: una presentación de bienvenida, no un estado.
+  //
+  // El evento es `camera-change`, que model-viewer emite con `detail.source`: solo cuenta
+  // `user-interaction`, porque el propio giro automático también mueve la cámara y si no se
+  // filtrara se apagaría solo en el primer fotograma.
+  useEffect(() => {
+    const el = visor.current
+    if (!el || !blobUrl || !visorListo) return
+    const onCambio = (e: Event) => {
+      if ((e as CustomEvent).detail?.source !== 'user-interaction') return
+      el.removeAttribute('auto-rotate')
+      el.removeEventListener('camera-change', onCambio)
+    }
+    el.addEventListener('camera-change', onCambio)
+    return () => el.removeEventListener('camera-change', onCambio)
+  }, [blobUrl, visorListo])
 
   // Drag & drop: crea blob local (no se cachea, se revoca al reemplazar)
   function loadLocalBlob(blob: Blob) {
@@ -159,16 +181,21 @@ export default function ModelViewer({ url, style }: Props) {
 
   return (
     <div style={{ ...base, display: 'block', padding: 0 }} {...dropProps}>
-      {/* Sin `auto-rotate`: el modelo giraba solo, se frenaba al tocarlo y volvía a arrancar a los
-          pocos segundos, así que soltar el ratón te movía el encuadre que acababas de elegir. Eso
-          era el «funciona de forma extraña» del punto 7. Mirar un modelo es pararlo donde uno
-          quiere, y para eso el giro tiene que ser del usuario.
+      {/* Gira solo al abrirlo, y se para PARA SIEMPRE en cuanto lo tocás.
+          El giro automático estuvo apagado un tiempo porque `auto-rotate` vuelve a arrancar a los
+          pocos segundos de soltar el ratón: uno elegía un ángulo y el modelo se lo llevaba. Eso
+          era el «funciona de forma extraña» del punto 7. Pero sin girar tampoco se ve que es una
+          pieza 3D — parece una foto, que es el punto 1 del informe v4.
+          Las dos cosas se arreglan si el giro es una PRESENTACIÓN y no un estado: arranca solo,
+          muestra la pieza por todos lados, y el primer gesto del usuario se lo queda. No vuelve.
           `touch-action: none` es lo que deja orbitar arrastrando también en tableta: sin él el
           navegador se queda el gesto para hacer scroll de la página. */}
       <model-viewer
+        ref={visor}
         src={blobUrl}
         alt="3D model"
         camera-controls=""
+        auto-rotate=""
         interaction-prompt="none"
         shadow-intensity="1"
         style={{ width: '100%', height: '100%', display: 'block', borderRadius: 'inherit', touchAction: 'none' }}
