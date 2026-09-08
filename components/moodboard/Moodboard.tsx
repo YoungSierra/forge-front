@@ -21,6 +21,9 @@ import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow } from '@/lib/api'
 
+import VerticalSliceScope from './VerticalSliceScope'
+import type { Estados } from './vs-scope'
+
 // ── Pestañas ─────────────────────────────────────────────────────────────────
 // El juego es el de la referencia. Las que no tienen activos se muestran apagadas en vez de
 // esconderse: la barra no cambia de forma entre proyectos y se ve qué tipos faltan por producir.
@@ -253,6 +256,17 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const [maximizado, setMaximizado] = useState(false)
   useEffect(() => { setMaximizado(localStorage.getItem('forge:mb:max') === '1') }, [])
   const [sel,     setSel]     = useState<string | null>(null)
+  // El panel de alcance del Vertical Slice. Se abre a pedido: es una vista de producción, no algo
+  // que uno quiera encima mientras acomoda hojas.
+  const [alcanceAbierto, setAlcanceAbierto] = useState(false)
+  // Los estados de los 22 elementos. Hoy viven en el navegador y a propósito: la spec dice que los
+  // alimentan eventos reales de Forge —aprobar una página, cerrar un Run, pasar el gate— y ese
+  // cableado todavía no existe. Guardarlos en la BD como si fueran producción real haría que el
+  // panel enseñe un avance que nadie produjo. Cuando el evento esté definido, cambia de dónde
+  // salen y el panel no se toca.
+  const [alcance, setAlcance] = useState<Estados>({})
+  // Qué página del ASG está señalada. Es lo que hace que el menú y el lienzo se sigan.
+  const [paginaAlcance, setPaginaAlcance] = useState<string | null>(null)
   // Sobre qué hoja está el cursor. La barra de edición sale con el hover además de con la
   // selección: antes había que abrir la hoja y cerrarla para que apareciera (informe v4, punto 6).
   const [hoja,    setHoja]    = useState<string | null>(null)
@@ -1327,6 +1341,20 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
 
           <div style={{ flex: 1 }} />
 
+          {/* El alcance se abre a pedido. Es una vista de produccion —que falta para cerrar el
+              slice— y no algo que uno quiera tapando el lienzo mientras acomoda hojas. */}
+          <button
+            onClick={() => setAlcanceAbierto(v => !v)}
+            title="Alcance del Vertical Slice"
+            style={{
+              padding: '5px 10px', borderRadius: 7, fontSize: 11, cursor: 'pointer',
+              fontFamily: 'var(--font-sans)', marginRight: 6,
+              background: alcanceAbierto ? 'var(--bg-3)' : 'transparent',
+              border: `1px solid ${alcanceAbierto ? theme.accent : 'var(--line-2)'}`,
+              color: alcanceAbierto ? 'var(--text-0)' : 'var(--text-2)',
+            }}
+          >Vertical Slice</button>
+
           <div style={{ position: 'relative', marginRight: 2 }}>
             <SearchIcon />
             <input
@@ -1406,6 +1434,18 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
         <div
           style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '18px 58px', position: 'relative' }}
         >
+          {/* El alcance del Vertical Slice, sobre el lienzo. Va acá dentro y no al nivel del
+              modal para que se arrastre dentro del área de trabajo y no encima de la barra. */}
+          {alcanceAbierto && (
+            <VerticalSliceScope
+              estados={alcance}
+              onEstados={setAlcance}
+              paginaActiva={paginaAlcance}
+              onPagina={setPaginaAlcance}
+              onCerrar={() => setAlcanceAbierto(false)}
+              accent={theme.accent}
+            />
+          )}
           {/* Las cuatro páginas viven abajo, fijas. Antes había marcas laterales de «atrás» y
               «adelante», que muestran solo la fase contigua: desde Documentación no había forma
               de saltar a Producción, así que no eran la estructura del espacio, eran un paso. */}
