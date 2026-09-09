@@ -15,6 +15,7 @@ import ForgeEdge from './ForgeEdge'
 import OrthogonalEdge, { type WayPoint } from './OrthogonalEdge'
 import MoodboardButton from '../moodboard/MoodboardButton'
 import ModelViewer from '@/components/shared/ModelViewer'
+import { Media } from '@/components/shared/Media'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
 import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName, stopNodeRun } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
@@ -371,7 +372,7 @@ function AssetPreviewOverlay({ asset, onClose }: { asset: LibraryAsset; onClose:
         <div style={{ flex: 1, overflow: isModel3d ? 'hidden' : 'auto', padding: isModel3d ? 0 : 14 }}>
           {isImage ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <Media
               src={asset.storage_url}
               alt={asset.display_name}
               style={{ width: '100%', borderRadius: 8, display: 'block' }}
@@ -2485,7 +2486,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                     ) : (
                       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                         {imgs.flatMap(item => item.variations.map((v, vi) => (
-                          <img
+                          <Media
                             key={`${item.index}-${vi}`}
                             src={v.url}
                             alt={activeOutKey}
@@ -2580,7 +2581,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                               <div style={{ position: 'absolute', inset: 0 }}>
                                 {item.imageUrl ? (
                                   <>
-                                    <img
+                                    <Media
                                       src={item.imageUrl} alt=""
                                       onClick={() => {
                                         // Navegar por las variaciones de esta card, no por el gallery completo
@@ -2669,7 +2670,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                             <div style={{ background: 'var(--bg-3)', minHeight: 80, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                               {item.imageUrl ? (
                                 <>
-                                  <img
+                                  <Media
                                     src={item.imageUrl} alt=""
                                     onClick={() => {
                                       const urls = item.allVariations.map(v => v.url)
@@ -2902,8 +2903,8 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               }}
               style={{ position: 'fixed', inset: 0, zIndex: 10002, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', cursor: imgScale > 1 ? 'grab' : 'zoom-out', userSelect: 'none' }}
             >
-              <img
-                src={src} alt="" draggable={false}
+              <Media
+                src={src} alt=""
                 style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: imgScale > 1 ? 4 : 10, boxShadow: '0 24px 80px rgba(0,0,0,0.7)', display: 'block', pointerEvents: 'none', transform: `translate(${imgOffset.x}px, ${imgOffset.y}px) scale(${imgScale})`, transformOrigin: 'center center', willChange: 'transform' }}
               />
               {hasPrev && <button onClick={e => { e.stopPropagation(); navPrev() }} style={{ ...btn, position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 22, padding: '10px 14px' }}>‹</button>}

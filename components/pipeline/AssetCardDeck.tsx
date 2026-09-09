@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm'
 import { BACKEND_URL, authHeaders } from '@/lib/api'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import { jsonToCards } from '@/lib/json-display'
+import { Media } from '@/components/shared/Media'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -342,9 +343,10 @@ export default function AssetCardDeck({
                   </div>
                 ) : (
                   // Imagen
-                  <img
+                  <Media
                     src={(card as ImageCard).url}
                     alt={(card as ImageCard).label}
+                    compact
                     style={{ width: '100%', flex: 1, objectFit: 'cover', objectPosition: 'top', display: 'block' }}
                   />
                 )}
@@ -423,7 +425,7 @@ export default function AssetCardDeck({
                   {expanded.body}
                 </ReactMarkdown>
               ) : (
-                <img
+                <Media
                   src={expanded.url}
                   alt={expanded.label}
                   style={{ maxWidth: '100%', borderRadius: 6, display: 'block' }}

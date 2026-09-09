@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { CopyButton } from '@/components/shared/CopyButton'
+import { Media } from '@/components/shared/Media'
 import { downloadTextFile, mdFilename } from '@/lib/download'
 import { unirOutputImages } from '@/lib/output-images'
 import { chatWithNode, getNodeContextInputs, checkHealth } from '@/lib/api'
@@ -623,7 +624,7 @@ export function VariationPanel({ item, onClose }: { item: InlineImageItem; onClo
             <div style={{ padding: '12px 16px 0', display: 'flex', gap: 8, overflowX: 'auto', flexShrink: 0 }}>
               {item.allVariations.map((v, i) => (
                 <div key={i} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <img src={v.url} alt={`Variation ${i + 1}`} onClick={e => { e.stopPropagation(); setInternalZoomUrl(v.url) }}
+                  <Media src={v.url} alt={`Variation ${i + 1}`} compact onClick={e => { e.stopPropagation(); setInternalZoomUrl(v.url) }}
                     style={{ width: 90, height: 90, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--line-2)', cursor: 'zoom-in', display: 'block' }} />
                   {v.condition && (
                     <span style={{ fontSize: 8, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.condition}>
@@ -679,7 +680,7 @@ export function VariationPanel({ item, onClose }: { item: InlineImageItem; onClo
       {/* Zoom interno */}
       {internalZoomUrl && (
         <div onClick={() => setInternalZoomUrl(null)} style={{ position: 'fixed', inset: 0, zIndex: 30000, background: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <img src={internalZoomUrl} onClick={e => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 10, display: 'block' }} />
+          <Media src={internalZoomUrl} onClick={e => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '85vh', borderRadius: 10, display: 'block' }} />
         </div>
       )}
     </>,
@@ -695,9 +696,10 @@ function InlineGenButton({ item }: { item: InlineImageItem }) {
     <>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 6, verticalAlign: 'middle' }}>
         {item.allVariations.map((v, i) => (
-          <img
+          <Media
             key={i}
             src={v.url}
+            compact
             onClick={e => { e.stopPropagation(); item.onZoom(v.url) }}
             title={v.condition ?? 'Click to view'}
             style={{ width: 22, height: 22, borderRadius: 3, objectFit: 'cover', cursor: 'zoom-in', border: '1px solid var(--line-2)', flexShrink: 0 }}
@@ -743,8 +745,8 @@ function ThumbnailCard({ item }: { item: InlineImageItem }) {
             key={i}
             style={{ width: S, height: S, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--line-2)', flexShrink: 0 }}
           >
-            <img
-              src={v.url} alt=""
+            <Media
+              src={v.url} alt="" compact
               onClick={() => item.onZoom(v.url)}
               style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
             />
@@ -2671,7 +2673,7 @@ export default function NodeChatWindow({
             padding: 32, cursor: 'zoom-out',
           }}
         >
-          <img
+          <Media
             src={zoomImageUrl}
             alt="Generated"
             onClick={e => e.stopPropagation()}
