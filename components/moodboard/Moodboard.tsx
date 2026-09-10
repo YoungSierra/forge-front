@@ -19,8 +19,9 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow } from '@/lib/api'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset } from '@/lib/api'
 
+import HerramientaModal from './HerramientaModal'
 import VerticalSliceScope from './VerticalSliceScope'
 import type { Estados } from './vs-scope'
 
@@ -287,6 +288,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // §8: la hoja sobre la que se pidió Run, esperando el recuadro de confirmación. Run avanza UN
   // paso y nada más — correr los dos de la cadena es apretarlo dos veces, no hay encadenado.
   const [corriendo, setCorriendo] = useState<UnifiedAsset | null>(null)
+  // La herramienta elegida en «Editar 2D» y sobre qué pieza. Vive acá y no en el radial: el menú
+  // se cierra al elegir, y el recuadro tiene que sobrevivirlo.
+  const [herram, setHerram] = useState<{ asset: UnifiedAsset; h: HerramientaDeAsset } | null>(null)
   // De qué hoja salió lo que se está generando. Se anota al despachar porque cuando el resultado
   // llega el menú ya se cerró, y sin origen no hay «a la derecha de» que valga (§9).
   const origenDeLaPublicacion = useRef<string | null>(null)
@@ -2125,7 +2129,28 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             // §8: Run nunca dispara de una. Primero el recuadro que dice QUÉ se va
                             // a generar y POR QUÉ hace falta para el vertical slice — es lo que
                             // separa ejecutar de entender qué estás ejecutando.
-                            onRun={a => { setMenu(null); setCorriendo(a) }} />}
+                            onRun={a => { setMenu(null); setCorriendo(a) }}
+                            projectId={projectId}
+                            // Segmentación y Nuevo Ángulo: producen pieza nueva, no editan la
+                            // página. Igual que Run, primero el recuadro.
+                            onHerramienta={(a, h) => { setMenu(null); setHerram({ asset: a, h }) }} />}
+
+      {herram && (
+        <HerramientaModal
+          asset={{ id: herram.asset.id, name: outputOf(herram.asset) ?? herram.asset.name, url: herram.asset.storage_url ?? null }}
+          projectId={projectId}
+          herramienta={herram.h}
+          accent={theme.accent}
+          onCancel={() => setHerram(null)}
+          onListo={ids => {
+            const origen = herram.asset.id
+            setHerram(null)
+            // §9: la pieza nueva va a la derecha de la que la produjo, y las vecinas se corren.
+            if (ids.length) publicarALaDerecha(origen, ids)
+            reload()
+          }}
+        />
+      )}
 
       {corriendo && (
         <AvisoRun
@@ -3224,15 +3249,17 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
 //   visual    — el menú radial de la referencia, con las cuatro acciones de la v.3.
 // Las acciones del radial todavía no hacen nada: se cablean en la Iteración 2 (contexto y
 // output) y en la 3 (edición). Se muestran apagadas en vez de simular que responden.
-function ContextMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdit, onRun }: {
+function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta }: {
   x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
   onRun: (a: UnifiedAsset) => void
+  projectId: string
+  onHerramienta: (a: UnifiedAsset, h: HerramientaDeAsset) => void
 }) {
   // La descarga directa es solo para documentos; lo visual abre el radial.
   return kindOf(asset) === 'doc'
     ? <DownloadMenu x={x} y={y} asset={asset} onDone={onDone} />
-    : <RadialMenu   x={x} y={y} asset={asset} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} />
+    : <RadialMenu   x={x} y={y} asset={asset} projectId={projectId} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} onHerramienta={onHerramienta} />
 }
 
 function DownloadMenu({ x, y, asset, onDone }: {
@@ -3325,6 +3352,13 @@ const SUBMENU: Record<string, { label: string; items: string[] }> = {
   audio: { label: 'Edit Audio', items: ['New Iteration', 'Trim', 'Transcribe', 'Replace track', 'Upload manual edits'] },
 }
 const submenuDe = (a: UnifiedAsset) => SUBMENU[kindOf(a) === 'doc' ? 'text' : kindOf(a)] ?? SUBMENU.image
+
+// Qué opción del submenú corre qué herramienta. Por ETIQUETA y no por índice: los cinco tipos
+// tienen su propia lista y la posición 2 de «Edit 3D» es «Retexture», que no es esto.
+const HERRAMIENTA_DE: Record<string, string> = {
+  'New angle': 'multiangle',
+  'Segmentation (masking)': 'segmentation',
+}
 
 // El radial principal son cuatro cuadrantes fijos; el submenú son cinco. Se calculan: un sector
 // es el centro más un arco, y el arco se aproxima con puntos porque `clip-path` no traza curvas.
@@ -4419,12 +4453,24 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
 // Submenú de «Edit»: cinco sectores, contextual por tipo. Solo la primera opción responde.
 // Vuelve al radial principal con Escape o con el botón del centro, para no dejar sin salida a
 // quien entró por error.
-function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewIteration, onDesignEdit }: {
-  x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
+function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone, onNewIteration, onDesignEdit, onHerramienta }: {
+  x: number; y: number; asset: UnifiedAsset; projectId: string; accent: string; colors: string[]
   onBack: () => void; onDone: () => void; onNewIteration: () => void; onDesignEdit: () => void
+  onHerramienta: (h: HerramientaDeAsset) => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<number | null>(null)
+  // Cuáles aplican sobre ESTA pieza lo decide el backend: Nuevo Ángulo solo aparece sobre lo que
+  // ya salió aislado sobre blanco. Mientras la respuesta no llega, los dos sectores se ven
+  // apagados — es lo mismo que verían si de verdad no aplicaran, y no hay parpadeo.
+  const [tools, setTools] = useState<HerramientaDeAsset[] | null>(null)
+  useEffect(() => {
+    let vivo = true
+    getAssetTools(projectId, asset.id)
+      .then(r => { if (vivo) setTools(r.herramientas.filter(h => h.disponible)) })
+      .catch(() => { if (vivo) setTools([]) })
+    return () => { vivo = false }
+  }, [projectId, asset.id])
   useEffect(() => { const r = requestAnimationFrame(() => setShown(true)); return () => cancelAnimationFrame(r) }, [])
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onBack() } }
@@ -4462,8 +4508,10 @@ function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewItera
       }} />
 
       {cfg.items.map((label, i) => {
-        // Nueva Iteración (0) y Design Edits (1). Las otras tres siguen sin camino detrás.
-        const activa = i === 0 || i === 1
+        // Nueva Iteración (0) y Design Edits (1) siempre. Nuevo Ángulo y Segmentación, solo si el
+        // backend dice que aplican sobre esta pieza. «Subir ajustes manuales» sigue sin camino.
+        const herr   = (tools || []).find(h => h.clave === HERRAMIENTA_DE[label])
+        const activa = i === 0 || i === 1 || !!herr
         const pos = sectorAt(i, N)
         return (
           <div key={label}>
@@ -4472,9 +4520,18 @@ function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewItera
               onMouseLeave={() => setHot(null)}
               // Siempre se corta la propagación: una opción bloqueada no hace nada, y menos
               // todavía cerrar el menú por el clic de fondo.
-              onClick={e => { e.stopPropagation(); if (i === 0) onNewIteration(); else if (i === 1) onDesignEdit() }}
+              onClick={e => {
+                e.stopPropagation()
+                if (i === 0) onNewIteration()
+                else if (i === 1) onDesignEdit()
+                else if (herr) onHerramienta(herr)
+              }}
               title={i === 0 ? 'Re-run this page through its workflow'
                    : i === 1 ? 'Describe a design change and re-generate the image'
+                   : herr ? (herr.pide_mascara
+                       ? 'Paint the part to isolate — it is published as a new piece to the right'
+                       : 'A new view of this asset — published as a new piece to the right')
+                   : HERRAMIENTA_DE[label] ? `${label} — only over an asset already isolated on white`
                    : `${label} — not available yet`}
               style={{
                 position: 'absolute', inset: 3, borderRadius: '50%',
@@ -4535,10 +4592,11 @@ function RadialSubmenu({ x, y, asset, accent, colors, onBack, onDone, onNewItera
   )
 }
 
-function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdit, onRun }: {
-  x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
+function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta }: {
+  x: number; y: number; asset: UnifiedAsset; projectId: string; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
   onRun: (a: UnifiedAsset) => void
+  onHerramienta: (a: UnifiedAsset, h: HerramientaDeAsset) => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<string | null>(null)
@@ -4555,11 +4613,12 @@ function RadialMenu({ x, y, asset, accent, colors, onDone, onIterar, onDesignEdi
   // no se leen, y el centro ya sirve de vuelta atrás.
   if (sub) return (
     <RadialSubmenu
-      x={x} y={y} asset={asset} accent={accent} colors={colors}
+      x={x} y={y} asset={asset} projectId={projectId} accent={accent} colors={colors}
       onBack={() => setSub(false)}
       onDone={onDone}
       onNewIteration={() => onIterar(asset)}
       onDesignEdit={() => onDesignEdit(asset)}
+      onHerramienta={h => onHerramienta(asset, h)}
     />
   )
 

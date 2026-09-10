@@ -2019,3 +2019,54 @@ export async function getWorkflowOptions(projectId: string, workflow: string) {
     `/api/projects/${projectId}/canvas/workflows/${encodeURIComponent(workflow)}/opciones`,
   )
 }
+
+/** Un control que el usuario puede tocar antes de correr una herramienta. Los rangos salen de lo
+ *  que declara el nodo en ComfyUI; los presets son la tabla del equipo de arte, y viajan con el
+ *  registro del workflow para que el front no tenga que conocer ninguna de las dos cosas. */
+export interface ControlHerramienta {
+  campo:    string
+  etiqueta: string
+  tipo:     'INT' | 'FLOAT' | string
+  min?:     number
+  max?:     number
+  step?:    number
+  defecto?: number
+  ayuda?:   string | null
+  presets:  { nombre: string; valor: number }[]
+}
+
+export interface HerramientaDeAsset {
+  clave:        string
+  workflow:     string
+  etiqueta:     string
+  pide_mascara: boolean
+  disponible:   boolean
+  controles:    { nodo: string; titulo: string | null; nota: string | null; campos: ControlHerramienta[] } | null
+}
+
+/** Qué herramientas se pueden correr sobre ESTA pieza. Lo decide el backend: la habilitación es
+ *  por procedencia —Nuevo Ángulo solo sobre lo que ya salió aislado sobre blanco— y si la regla
+ *  viviera acá, bastaría abrir el menú desde otro visor para saltársela. */
+export async function getAssetTools(projectId: string, assetId: string) {
+  return request<{ success: boolean; herramientas: HerramientaDeAsset[] }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/tools`,
+  )
+}
+
+export async function runAssetTool(
+  projectId: string, assetId: string,
+  opts: { herramienta: string; opciones?: Record<string, number> | null; imagenComfy?: string | null; memberId?: string | null },
+) {
+  return request<{ success: boolean; herramienta: string; creados: { id: string; name: string; storage_url: string; format: string }[] }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/tool`,
+    {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        herramienta: opts.herramienta,
+        opciones: opts.opciones ?? null,
+        imagen_comfy: opts.imagenComfy ?? null,
+        member_id: opts.memberId ?? null,
+      }),
+    },
+  )
+}
