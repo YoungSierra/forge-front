@@ -148,9 +148,9 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
 
 // ── Qué se puede producir hoy ────────────────────────────────────────────────
 //
-// El motor define tres cadenas de producción —`character_sheet`, `prop_sheet`, `environment_sheet`
-// en `chain.service.js`—. UI Component Sheet y VFX Sheet no tienen workflow; Audio Sheet tiene
-// workflow pero no tiene página. Para esas tres, `cadenaDe()` devuelve `null` a propósito.
+// El motor define las cadenas de producción en `chain.service.js`: `character_sheet`,
+// `prop_sheet`, `environment_sheet` y, desde el 11-09, `audio_sheet`. UI Component Sheet y VFX
+// Sheet siguen sin workflow, así que `cadenaDe()` devuelve `null` a propósito para esas dos.
 //
 // La guía TIENE que saberlo. Su regla —«la primera categoría con progreso < 100%»— recomendaría
 // VFX para siempre, porque nunca va a poder avanzar, y mandaría al equipo a una hoja donde no hay
@@ -159,7 +159,7 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
 // Vive acá y no en el motor porque es una pregunta de la interfaz: el motor ya responde «no hay
 // cadena»; esto decide qué hacer con esa respuesta. Cuando Migue defina los workflows que faltan,
 // se agregan a este conjunto y la guía los empieza a ofrecer sin tocar nada más.
-export const CATEGORIAS_PRODUCIBLES = new Set(['paleta', 'character', 'environment', 'prop'])
+export const CATEGORIAS_PRODUCIBLES = new Set(['paleta', 'character', 'environment', 'prop', 'audio'])
 
 export const esProducible = (c: CategoriaAlcance) =>
   c.grupo === 'gdd' || CATEGORIAS_PRODUCIBLES.has(c.id)
