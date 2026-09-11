@@ -153,7 +153,7 @@ export default function VerticalSliceScope ({
         <Anillo valor={global} accent={accent} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-0)' }}>Vertical Slice</div>
-          <div style={{ fontSize: 10, color: 'var(--text-3)' }}>Alcance de producción</div>
+          <div style={{ fontSize: 10, color: 'var(--text-3)' }}>Production scope</div>
         </div>
         <button
           onClick={() => setPlegado(p => !p)}
@@ -174,22 +174,22 @@ export default function VerticalSliceScope ({
           }}
         >
           <div style={{ fontSize: 9.5, letterSpacing: .5, color: 'var(--text-3)', textTransform: 'uppercase' }}>
-            Continúa por aquí
+            Continue here
           </div>
           <div style={{ fontSize: 12, fontWeight: 600, marginTop: 2, color: accent }}>
             {guia.categoria.nombre}
             {guia.categoria.grupo === 'gdd' && (
-              <span style={{ fontWeight: 400, color: 'var(--text-3)', fontSize: 10 }}> · vive en el GDD</span>
+              <span style={{ fontWeight: 400, color: 'var(--text-3)', fontSize: 10 }}> · lives in the GDD</span>
             )}
           </div>
           {guia.falta.length > 0 && (
             <div style={{ fontSize: 10.5, color: 'var(--text-2)', marginTop: 3 }}>
-              Falta: {guia.falta.map(e => e.nombre).join(' · ')}
+              Missing: {guia.falta.map(e => e.nombre).join(' · ')}
             </div>
           )}
           {guia.alternativas.length > 0 && (
             <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>
-              También:{' '}
+              Also:{' '}
               {guia.alternativas.map(c => (
                 <span
                   key={c.id}
@@ -206,7 +206,7 @@ export default function VerticalSliceScope ({
               hoja sin Run, pero callarlas las volvería invisibles y nadie las destrabaría. */}
           {guia.bloqueadas.length > 0 && (
             <div style={{ fontSize: 9.5, color: 'var(--text-3)', marginTop: 5, fontStyle: 'italic' }}>
-              Sin cadena de producción todavía: {guia.bloqueadas.map(c => c.nombre).join(', ')}
+              No production chain yet: {guia.bloqueadas.map(c => c.nombre).join(', ')}
             </div>
           )}
         </button>
@@ -221,7 +221,7 @@ export default function VerticalSliceScope ({
         <>
           {/* ── Lista de categorías ── */}
           <div style={{ overflowY: 'auto', flex: 1, padding: '6px 0' }}>
-            {[['Art Style Guide · páginas', asg], ['Diseño · GDD', gdd]].map(([titulo, cats]) => (
+            {[['Art Style Guide · pages', asg], ['Design · GDD', gdd]].map(([titulo, cats]) => (
               <div key={titulo as string}>
                 <div style={{
                   padding: '6px 12px 3px', fontSize: 9, letterSpacing: .6, textTransform: 'uppercase',
@@ -249,8 +249,8 @@ export default function VerticalSliceScope ({
                           <span style={{ fontSize: 8, color: 'var(--text-4)' }}>{abierta ? '▼' : '▶'}</span>
                           <span style={{ flex: 1, fontSize: 11.5 }}>{cat.nombre}</span>
                           {!esProducible(cat) && (
-                            <span title="Todavía no tiene cadena de producción"
-                              style={{ fontSize: 9, color: 'var(--text-4)' }}>sin cadena</span>
+                            <span title="No production chain yet"
+                              style={{ fontSize: 9, color: 'var(--text-4)' }}>no chain</span>
                           )}
                           <span style={{ fontSize: 9.5, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
                             {aprobados}/{cat.elementos.length}
@@ -299,11 +299,11 @@ export default function VerticalSliceScope ({
             display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
             borderTop: '1px solid var(--line-2)', fontSize: 9.5, color: 'var(--text-3)',
           }}>
-            <span style={{ color: COLOR.pendiente }}>○</span><span>pendiente</span>
-            <span style={{ color: COLOR.en_progreso }}>●</span><span>en progreso</span>
-            <span style={{ color: COLOR.aprobado }}>✓</span><span>aprobado</span>
+            <span style={{ color: COLOR.pendiente }}>○</span><span>pending</span>
+            <span style={{ color: COLOR.en_progreso }}>●</span><span>in progress</span>
+            <span style={{ color: COLOR.aprobado }}>✓</span><span>approved</span>
             <button onClick={() => setMinimos(m => !m)} style={{ ...botonIcono, marginLeft: 'auto', fontSize: 9.5, width: 'auto', padding: '2px 6px' }}>
-              {minimos ? 'Ocultar mínimos' : 'Mostrar mínimos'}
+              {minimos ? 'Hide minimums' : 'Show minimums'}
             </button>
           </div>
         </>
