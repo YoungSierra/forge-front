@@ -4143,13 +4143,15 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
   const [tamano,   setTamano]   = useState<{ imagenes: number; usd: number } | null>(null)
   const [elegidas, setElegidas] = useState<Record<string, unknown>>({})
   const [abierto,  setAbierto]  = useState(false)
+  // Qué cadenas existen. Las manda el backend junto con «no hay paso», porque es quien las define.
+  const [cadenas,  setCadenas]  = useState<string[] | null>(null)
 
   // El paso lo decide el BACKEND, que es quien conoce la cadena y en qué punto quedó la pieza.
   // Calcularlo acá obligaría a duplicar el mapa de workflows en el front y a mantenerlo al día.
   useEffect(() => {
     let vivo = true
     getNextChainStep(projectId, asset.id)
-      .then(r => { if (vivo) setPaso(r.paso) })
+      .then(r => { if (vivo) { setPaso(r.paso); setCadenas(r.cadenas ?? null) } })
       .catch(() => { if (vivo) setPaso(null) })
     return () => { vivo = false }
   }, [projectId, asset.id])
@@ -4259,7 +4261,9 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 18 }}>
               This page either has no production chain defined yet, or it already reached the last
-              step of its own. Character Sheet is the only chain defined so far.
+              step of its own.{cadenas?.length
+                ? ` The chains that exist today are: ${cadenas.join(', ')}.`
+                : ''}
             </div>
             <button onClick={onCancel} style={{
               width: '100%', padding: '9px 0', borderRadius: 8, cursor: 'pointer',
@@ -4526,10 +4530,15 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
       }} />
 
       {cfg.items.map((label, i) => {
-        // Nueva Iteración (0) y Design Edits (1) siempre. Nuevo Ángulo y Segmentación, solo si el
-        // backend dice que aplican sobre esta pieza. «Subir ajustes manuales» sigue sin camino.
+        // Todo se despacha por ETIQUETA, igual que las herramientas y por la misma razón: los
+        // cinco tipos tienen su propia lista y la posición no significa lo mismo en todas. La
+        // posición 1 era «Design edits» solo en Edit 2D — en Edit 3D es «3D viewer», en Audio y
+        // Video es «Trim», en Text es «Crop & extract»— y las cuatro abrían Design Edits.
+        // «Subir ajustes manuales» sigue sin camino, en los cinco.
         const herr   = (tools || []).find(h => h.clave === HERRAMIENTA_DE[label])
-        const activa = i === 0 || i === 1 || !!herr
+        const esIterar = label === 'New Iteration'
+        const esDesign = label === 'Design edits'
+        const activa = esIterar || esDesign || !!herr
         const pos = sectorAt(i, N)
         return (
           <div key={label}>
@@ -4540,12 +4549,12 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
               // todavía cerrar el menú por el clic de fondo.
               onClick={e => {
                 e.stopPropagation()
-                if (i === 0) onNewIteration()
-                else if (i === 1) onDesignEdit()
+                if (esIterar) onNewIteration()
+                else if (esDesign) onDesignEdit()
                 else if (herr) onHerramienta(herr)
               }}
-              title={i === 0 ? 'Re-run this page through its workflow'
-                   : i === 1 ? 'Describe a design change and re-generate the image'
+              title={esIterar ? 'Re-run this page through its workflow'
+                   : esDesign ? 'Describe a design change and re-generate the image'
                    : herr ? (herr.pide_mascara
                        ? 'Paint the part to isolate — it is published as a new piece to the right'
                        : 'A new view of this asset — published as a new piece to the right')

@@ -1972,7 +1972,10 @@ export type PasoDeCadena = {
 }
 
 export async function getNextChainStep(projectId: string, assetId: string) {
-  return request<{ success: boolean; paso: PasoDeCadena | null }>(
+  // `cadenas` solo viene cuando no hay paso: son las que existen, para poder nombrarlas en el
+  // aviso. Escritas a mano se quedaron diciendo que Character Sheet era la única cuando ya eran
+  // cinco, y quien lo leía se iba creyendo que su hoja no tenía workflow.
+  return request<{ success: boolean; paso: PasoDeCadena | null; cadenas?: string[] }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/next-step`,
   )
 }
