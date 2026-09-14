@@ -38,7 +38,7 @@ export default function LaboratoryButton({ projectId }: Props) {
   // El laboratorio abierto, con lo que contestó el empuje del TDD: el panel muestra con qué
   // documento abrió y cuántas mecánicas se le leyeron.
   const [abierto, setAbierto] = useState<
-    { url: string; documento: string; proyecto: string; mecanicas: number } | null>(null)
+    { url: string; slug: string; documento: string; proyecto: string; mecanicas: number } | null>(null)
   const moved  = useRef(false)
   const inicio = useRef({ x: 0, y: 0 })
   const offset = useRef({ x: 0, y: 0 })
@@ -106,7 +106,7 @@ export default function LaboratoryButton({ projectId }: Props) {
           'from. Open it anyway?')
         if (!seguir) { setYendo(false); return }
       }
-      setAbierto({ url: r.url, documento: r.documento, proyecto: r.proyecto, mecanicas: r.mecanicas })
+      setAbierto({ url: r.url, slug: r.slug, documento: r.documento, proyecto: r.proyecto, mecanicas: r.mecanicas })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -179,6 +179,8 @@ export default function LaboratoryButton({ projectId }: Props) {
 
       {abierto && (
         <LaboratoryPanel
+          projectId={projectId}
+          slug={abierto.slug}
           url={abierto.url}
           documento={abierto.documento}
           proyecto={abierto.proyecto}

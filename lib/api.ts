@@ -2066,6 +2066,17 @@ export async function abrirLaboratorio(projectId: string) {
   )
 }
 
+/** Publica el jugable que armó el Laboratory y devuelve la dirección con la que se juega.
+ *
+ *  Sube el ÁRBOL de la build a R2, no un comprimido: el navegador pide `index.html` y de ahí cada
+ *  módulo, así que un `.zip` no sería un enlace jugable. */
+export async function publicarJugable(projectId: string, slug?: string) {
+  return request<{ success: boolean; url: string; archivos: number; bytes: number; segundos: number }>(
+    `/api/projects/${projectId}/canvas/laboratory/publicar`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug: slug ?? null }) },
+  )
+}
+
 export interface EstadoDeMontaje {
   /** Si esta pieza es una hoja de entorno. Falso para casi todo el moodboard, y no es un error. */
   aplica:     boolean
