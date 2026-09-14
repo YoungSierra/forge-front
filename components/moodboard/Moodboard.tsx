@@ -268,6 +268,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const [alcance, setAlcance] = useState<Estados>({})
   // Qué página del ASG está señalada. Es lo que hace que el menú y el lienzo se sigan.
   const [paginaAlcance, setPaginaAlcance] = useState<string | null>(null)
+  // Y qué hoja quedó señalada por esa página, para dibujarle el aro. Se guarda aparte del nombre
+  // de página porque la hoja puede no existir todavía: la guía señala pasos que aún no se han
+  // producido, y en ese caso no hay nada que iluminar.
+  const [señalada, setSeñalada] = useState<string | null>(null)
   // Sobre qué hoja está el cursor. La barra de edición sale con el hover además de con la
   // selección: antes había que abrir la hoja y cerrarla para que apareciera (informe v4, punto 6).
   const [hoja,    setHoja]    = useState<string | null>(null)
@@ -874,6 +878,29 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       y: (caja.height - (y1 - y0) * z) / 2 - y0 * z,
     }))
   }, [posicionDe, setVista])
+
+  // «Continue here» del panel de alcance: llevar el lienzo a esa página y encenderla.
+  //
+  // El puntero ya se guardaba, pero no lo leía nadie: la guía decía el paso y no movía el lienzo
+  // ni marcaba la hoja (informe v5, punto 2). La página del alcance —«19_EnvironmentSheet»— es el
+  // último tramo del nombre de la hoja, así que se busca por ahí. Si todavía no se produjo, no se
+  // inventa nada: queda sin señalar, que es la verdad.
+  useEffect(() => {
+    if (!paginaAlcance) { setSeñalada(null); return }
+    const hoja = deLaFase.find(a => String(a.name).split(/\s+[—–]\s+/).pop()?.trim() === paginaAlcance)
+    if (!hoja) { setSeñalada(null); return }
+    setSeñalada(hoja.id)
+    setSel(hoja.id)
+    const caja = lienzoRef.current?.getBoundingClientRect()
+    if (!caja) return
+    const i = deLaFase.indexOf(hoja)
+    const p = posicionDe(hoja.id, i)
+    // Centrada, y con un zoom que deje leer la hoja: llegar a ella al 8 % no sirve de nada.
+    setVista(v => {
+      const z = Math.max(v.z, 0.55)
+      return { z, x: caja.width / 2 - (p.x + HOJA_W / 2) * z, y: caja.height / 2 - (p.y + HOJA_H / 2) * z }
+    })
+  }, [paginaAlcance, deLaFase, posicionDe, setVista])
 
   useEffect(() => { setPage(0) }, [tab, node, cols, query, view, faseIdx])
 
@@ -1980,6 +2007,16 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                         WebkitUserDrag: 'none',
                       } as React.CSSProperties}
                     >
+                      {/* El aro de «Continue here»: la guía señala el paso Y lo enseña en el
+                          lienzo. Va detrás de la tarjeta y no la tapa. */}
+                      {señalada === a.id && (
+                        <div style={{
+                          position: 'absolute', inset: -10, borderRadius: 12, pointerEvents: 'none',
+                          border: `2px solid ${theme.accent}`,
+                          boxShadow: `0 0 0 4px ${theme.accent}33, 0 0 26px ${theme.accent}88`,
+                          animation: 'mb-breathe 2.6s ease-in-out infinite',
+                        }} />
+                      )}
                       <Card asset={a} index={i} accent={theme.accent} colors={theme.colors}
                             selected={sel === a.id || seleccion.has(a.id)}
                             onSelect={() => setSel(a.id)}

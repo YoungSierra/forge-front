@@ -101,8 +101,19 @@ export default function ModelViewer({ url, style }: Props) {
 
     fetch(proxyUrl, { signal: controller.signal })
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
-      .then(blob => {
+      .then(async blob => {
         if (controller.signal.aborted) return
+        // Un `.glb` declara su tamaño total en su propia cabecera. Comprobarlo convierte un
+        // archivo a medias en un error legible: sin esto, model-viewer dibuja lo que haya —una
+        // cabecera sin malla se ve como fragmentos sueltos— y parece que el modelo salió mal.
+        const cab = new DataView(await blob.slice(0, 12).arrayBuffer())
+        if (blob.size >= 12 && cab.getUint32(0, true) === 0x46546c67) {
+          const declarado = cab.getUint32(8, true)
+          if (blob.size < declarado) {
+            setError(`Truncated model: ${blob.size} of ${declarado} bytes arrived`)
+            return
+          }
+        }
         const objUrl = URL.createObjectURL(blob)
         glbCache.set(proxyUrl, objUrl) // propiedad del cache, no se revoca
         setBlobUrl(objUrl)

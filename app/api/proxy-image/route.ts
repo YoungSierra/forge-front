@@ -24,9 +24,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: `Upstream ${upstream.status}` }, { status: 502 })
     }
     const contentType = upstream.headers.get('content-type') || 'application/octet-stream'
+    const parcial = upstream.status === 206
     const headers: Record<string, string> = {
-      'Content-Type':  contentType,
-      'Cache-Control': 'public, max-age=3600',
+      'Content-Type': contentType,
+      // Un trozo NO es el recurso. La miniatura de un `.glb` pide los primeros 64 KB y el visor
+      // pide el archivo entero — por la MISMA url de proxy, porque el parámetro es el mismo. Sin
+      // `Vary` el navegador puede darle al visor el trozo que guardó para la miniatura: un GLB con
+      // su cabecera y sin malla, que se dibuja como fragmentos sueltos (informe v5, punto 8).
+      // Un 206 no se guarda; el archivo completo sí, que es de donde venía la ganancia.
+      'Cache-Control': parcial ? 'no-store' : 'public, max-age=3600',
+      Vary: 'Range',
     }
     // El 206 solo sirve si viaja con su rango: quien pidió los bytes necesita saber cuáles llegaron.
     const contentRange = upstream.headers.get('content-range')
