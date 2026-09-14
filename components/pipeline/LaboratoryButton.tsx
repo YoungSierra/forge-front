@@ -9,8 +9,10 @@
 // Se distingue por el color y por el ícono: un matraz Erlenmeyer, que es lo que hay del otro lado
 // —un laboratorio donde se prueba si el diseño se sostiene jugándolo—.
 //
-// Solo aparece si hay a dónde ir. Sin `LAB_URL` configurada, o sin TDD ensamblado en el proyecto,
-// no se dibuja: un botón que solo sabe dar error no es mejor que ningún botón.
+// Se dibuja SIEMPRE, y apagado cuando no puede correr. Esconderlo era la idea original —un botón
+// que solo sabe dar error no ayuda— pero deja dos fallos distintos con la misma cara: sin `LAB_URL`
+// en el servidor y sin TDD en el proyecto se ve exactamente lo mismo que si el front no se hubiera
+// desplegado, y no hay forma de saber cuál de los tres es. Apagado y diciendo qué falta, sí.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getLaboratorio, abrirLaboratorio } from '@/lib/api'
@@ -26,7 +28,8 @@ interface Props {
 
 export default function LaboratoryButton({ projectId }: Props) {
   const [pos,   setPos]   = useState<{ x: number; y: number } | null>(null)
-  const [hay,   setHay]   = useState(false)
+  // Qué contestó el servidor sobre este proyecto. `null` mientras no contesta.
+  const [estado, setEstado] = useState<{ configurado: boolean; tiene_tdd: boolean } | null>(null)
   const [doc,   setDoc]   = useState<string | null>(null)
   const [yendo, setYendo] = useState(false)
   const [hover, setHover] = useState(false)
@@ -63,8 +66,8 @@ export default function LaboratoryButton({ projectId }: Props) {
   useEffect(() => {
     let vivo = true
     getLaboratorio(projectId)
-      .then(r => { if (vivo) { setHay(r.configurado && r.tiene_tdd); setDoc(r.documento ?? null) } })
-      .catch(() => { if (vivo) setHay(false) })
+      .then(r => { if (vivo) { setEstado({ configurado: r.configurado, tiene_tdd: r.tiene_tdd }); setDoc(r.documento ?? null) } })
+      .catch(() => { if (vivo) setEstado({ configurado: false, tiene_tdd: false }) })
     return () => { vivo = false }
   }, [projectId])
 
@@ -111,7 +114,14 @@ export default function LaboratoryButton({ projectId }: Props) {
     }
   }
 
-  if (!hay || !pos) return null
+  if (!pos) return null
+
+  const listo = Boolean(estado?.configurado && estado?.tiene_tdd)
+  const porQueNo = !estado
+    ? 'Checking…'
+    : !estado.configurado
+      ? 'The Laboratory is not configured on this server (LAB_URL).'
+      : 'This project has no assembled TDD yet — run node 3.12 first.'
 
   const ACENTO = '#c9a227'   // ámbar: la otra salida es turquesa, y se distinguen de un vistazo
 
@@ -124,31 +134,39 @@ export default function LaboratoryButton({ projectId }: Props) {
           offset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }
           setDrag(true)
         }}
-        onClick={() => { if (!moved.current && !yendo) lanzar() }}
+        onClick={() => {
+          if (moved.current || yendo) return
+          // Apagado, el clic explica en vez de no hacer nada: quedarse mudo es lo que hace que un
+          // botón parezca roto.
+          if (!listo) { setError(porQueNo); return }
+          lanzar()
+        }}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        title={doc
+        title={listo
           ? `Prototype Laboratory — opens with “${doc}” · drag to move`
-          : 'Prototype Laboratory · drag to move'}
+          : `Prototype Laboratory — ${porQueNo}`}
         style={{
           position: 'fixed', left: pos.x, top: pos.y, zIndex: 400,
           width: SIZE, height: SIZE, borderRadius: '50%',
           cursor: yendo ? 'wait' : drag ? 'grabbing' : 'pointer',
           background: 'radial-gradient(circle at 38% 32%, #2e2a1e 0%, #17140e 72%)',
-          border: `1px solid ${hover || drag ? ACENTO : 'rgba(201,162,39,0.35)'}`,
-          boxShadow: hover || drag
-            ? `0 0 0 1px ${ACENTO}, 0 0 34px rgba(201,162,39,0.42)`
-            : '0 0 20px rgba(201,162,39,0.16), 0 6px 22px rgba(0,0,0,0.45)',
+          border: `1px solid ${!listo ? 'rgba(255,255,255,0.14)' : hover || drag ? ACENTO : 'rgba(201,162,39,0.35)'}`,
+          boxShadow: !listo
+            ? '0 6px 22px rgba(0,0,0,0.45)'
+            : hover || drag
+              ? `0 0 0 1px ${ACENTO}, 0 0 34px rgba(201,162,39,0.42)`
+              : '0 0 20px rgba(201,162,39,0.16), 0 6px 22px rgba(0,0,0,0.45)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: drag ? 'none' : 'border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease',
           transform: hover && !drag ? 'translateY(-2px)' : 'none',
-          opacity: yendo ? 0.65 : 1,
+          opacity: yendo ? 0.65 : listo ? 1 : 0.45,
           touchAction: 'none',
         }}
       >
         {/* Matraz Erlenmeyer: cuello estrecho, hombros en diagonal, base ancha, y el líquido
             dentro para que se lea como lleno y no como un triángulo. */}
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke={ACENTO}
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke={listo ? ACENTO : '#7d8493'}
              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
              style={{ pointerEvents: 'none' }}>
           <path d="M9.5 3h5" />
