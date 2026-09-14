@@ -271,6 +271,24 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // Sobre qué hoja está el cursor. La barra de edición sale con el hover además de con la
   // selección: antes había que abrir la hoja y cerrarla para que apareciera (informe v4, punto 6).
   const [hoja,    setHoja]    = useState<string | null>(null)
+  // La barra de edición vive FUERA de la hoja, doce píxeles por encima. Al salir de la hoja para
+  // ir hacia ella, React la desmonta en el mismo tick y el ratón aterriza sobre algo que ya no
+  // está: su `onMouseEnter` no llega a dispararse nunca y no se alcanza a pulsar ningún botón
+  // (informe v5, punto 1). Por eso salir no apaga de inmediato: deja un respiro para cruzar el
+  // hueco, y entrar en la hoja o en la barra lo cancela.
+  const salidaHoja = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const entrarHoja = useCallback((id: string) => {
+    if (salidaHoja.current) { clearTimeout(salidaHoja.current); salidaHoja.current = null }
+    setHoja(id)
+  }, [])
+  const salirHoja = useCallback((id: string) => {
+    if (salidaHoja.current) clearTimeout(salidaHoja.current)
+    salidaHoja.current = setTimeout(() => {
+      setHoja(h => (h === id ? null : h))
+      salidaHoja.current = null
+    }, 180)
+  }, [])
+  useEffect(() => () => { if (salidaHoja.current) clearTimeout(salidaHoja.current) }, [])
   // Al abrir se guarda el rectángulo de la tarjeta: la imagen crece DESDE ahí, no aparece
   // centrada de golpe. Es el 'fluye al frente' de la referencia.
   const [detail,  setDetail]  = useState<{ asset: UnifiedAsset; from: DOMRect } | null>(null)
@@ -316,6 +334,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const [cols,    setCols]    = useState(COLS)
   const [query,   setQuery]   = useState('')
   const [view,    setView]    = useState<'grid' | 'table'>('grid')
+  // «Asset Library» del radial: la tabla acotada a UNA pieza y a todo lo que salió de ella
+  // (informe v5, punto 9 — el sector estaba y no llevaba a ninguna parte). Es el inventario de
+  // esa página: sus versiones y su descendencia, que es donde se busca lo que se borró del lienzo.
+  const [familia, setFamilia] = useState<{ id: string; nombre: string } | null>(null)
   // En la tabla el orden lo elige el usuario; en la grilla manda la agrupación por tipo.
   const [sort,    setSort]    = useState<{ by: 'name' | 'type' | 'origin' | 'date'; dir: 1 | -1 }>({ by: 'date', dir: -1 })
 
@@ -956,7 +978,12 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   }
 
   const filtered = useMemo(() => {
-    const conTab = tab === 'all' ? shownSet : shownSet.filter(a => tabOf(a) === tab)
+    // La familia manda sobre la pestaña: quien la abrió quiere ver ESA rama entera, no la parte
+    // de ella que cae en la categoría que estaba mirando.
+    const conFamilia = familia
+      ? shownSet.filter(a => conDescendientes([familia.id]).has(a.id))
+      : shownSet
+    const conTab = familia || tab === 'all' ? conFamilia : conFamilia.filter(a => tabOf(a) === tab)
     // Lo escondido se cae del LIENZO, no de la tabla: la tabla es donde se busca, y no encontrar
     // ahi algo que sigue existiendo es peor que verlo.
     const base = view === 'table' ? conTab : conTab.filter(a => !ocultos[a.id])
@@ -975,7 +1002,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
 
     if (tab !== 'all') return [...base].sort(porFechaYPagina)
     return [...base].sort((a, b) => rankOf(a) - rankOf(b) || porFechaYPagina(a, b))
-  }, [shownSet, tab, view, sort, fechaGrupo])
+  }, [shownSet, tab, view, sort, fechaGrupo, familia, conDescendientes])
 
   // La página es exactamente lo que entra en pantalla: 3 filas de `cols`. Así nunca hay que
   // scrollear dentro de una página — se pasa a la siguiente.
@@ -1406,8 +1433,28 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             )}
           </div>
 
+          {/* De qué pieza se está mirando el inventario, y cómo salir. Sin esto la tabla filtrada
+              no se distingue de una tabla vacía y no hay forma de volver a verlo todo. */}
+          {familia && (
+            <button
+              onClick={() => setFamilia(null)}
+              title="Show every asset again"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, marginRight: 6,
+                padding: '4px 8px', borderRadius: 999, cursor: 'pointer',
+                background: `${theme.accent}1f`, border: `1px solid ${theme.accent}66`,
+                color: 'var(--text-0)', fontSize: 11, fontFamily: 'var(--font-sans)',
+                maxWidth: 280, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}
+            >
+              <span style={{ opacity: 0.7 }}>Library of</span>
+              <b style={{ fontWeight: 600 }}>{familia.nombre}</b>
+              <span style={{ opacity: 0.7, fontSize: 13, lineHeight: 1 }}>×</span>
+            </button>
+          )}
+
           <div style={{ display: 'flex', gap: 2, marginRight: 4 }}>
-            <ViewBtn active={view === 'grid'}  onClick={() => setView('grid')}  kind="grid" />
+            <ViewBtn active={view === 'grid'}  onClick={() => { setView('grid'); setFamilia(null) }}  kind="grid" />
             <ViewBtn active={view === 'table'} onClick={() => setView('table')} kind="table" />
           </div>
 
@@ -1936,7 +1983,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                       <Card asset={a} index={i} accent={theme.accent} colors={theme.colors}
                             selected={sel === a.id || seleccion.has(a.id)}
                             onSelect={() => setSel(a.id)}
-                            onHover={dentro => setHoja(dentro ? a.id : h => (h === a.id ? null : h))}
+                            onHover={dentro => (dentro ? entrarHoja(a.id) : salirHoja(a.id))}
                             onOpen={(from) => { setSel(a.id); setDetail({ asset: a, from }) }}
                             onMenu={(x, y) => setMenu({ x, y, asset: a })} />
 
@@ -1947,7 +1994,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                       {a.opciones && Object.keys(a.opciones).length > 0 && (hoja === a.id || sel === a.id) && (
                         <div
                           onPointerDown={e => e.stopPropagation()}
-                          onMouseEnter={() => setHoja(a.id)}
+                          onMouseEnter={() => entrarHoja(a.id)}
+                          onMouseLeave={() => salirHoja(a.id)}
                           style={{
                             position: 'absolute', left: '50%', top: HOJA_H + 6,
                             transform: `translate(-50%, 0) scale(${1 / vista.z})`,
@@ -1975,7 +2023,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                         <div
                           // La barra también cuenta como «encima»: si no, moverse de la hoja a sus
                           // botones la hace desaparecer justo cuando uno va a pulsarlos.
-                          onMouseEnter={() => setHoja(a.id)}
+                          onMouseEnter={() => entrarHoja(a.id)}
+                          onMouseLeave={() => salirHoja(a.id)}
                           onPointerDown={e => e.stopPropagation()}
                           style={{
                             position: 'absolute', left: '50%', top: -12,
@@ -2157,7 +2206,14 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             projectId={projectId}
                             // Segmentación y Nuevo Ángulo: producen pieza nueva, no editan la
                             // página. Igual que Run, primero el recuadro.
-                            onHerramienta={(a, h) => { setMenu(null); setHerram({ asset: a, h }) }} />}
+                            onHerramienta={(a, h) => { setMenu(null); setHerram({ asset: a, h }) }}
+                            // §9 del informe v5: el sector existía y no llevaba a ninguna parte.
+                            // Abre la tabla acotada a esta pieza y a su descendencia.
+                            onLibreria={a => {
+                              setMenu(null)
+                              setFamilia({ id: a.id, nombre: outputOf(a) ?? a.name })
+                              setView('table')
+                            }} />}
 
       {herram && (
         <HerramientaModal
@@ -3273,17 +3329,18 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
 //   visual    — el menú radial de la referencia, con las cuatro acciones de la v.3.
 // Las acciones del radial todavía no hacen nada: se cablean en la Iteración 2 (contexto y
 // output) y en la 3 (edición). Se muestran apagadas en vez de simular que responden.
-function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta }: {
+function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria }: {
   x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
   onRun: (a: UnifiedAsset) => void
   projectId: string
   onHerramienta: (a: UnifiedAsset, h: HerramientaDeAsset) => void
+  onLibreria: (a: UnifiedAsset) => void
 }) {
   // La descarga directa es solo para documentos; lo visual abre el radial.
   return kindOf(asset) === 'doc'
     ? <DownloadMenu x={x} y={y} asset={asset} onDone={onDone} />
-    : <RadialMenu   x={x} y={y} asset={asset} projectId={projectId} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} onHerramienta={onHerramienta} />
+    : <RadialMenu   x={x} y={y} asset={asset} projectId={projectId} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} onHerramienta={onHerramienta} onLibreria={onLibreria} />
 }
 
 function DownloadMenu({ x, y, asset, onDone }: {
@@ -4643,11 +4700,12 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
   )
 }
 
-function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta }: {
+function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria }: {
   x: number; y: number; asset: UnifiedAsset; projectId: string; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
   onRun: (a: UnifiedAsset) => void
   onHerramienta: (a: UnifiedAsset, h: HerramientaDeAsset) => void
+  onLibreria: (a: UnifiedAsset) => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<string | null>(null)
@@ -4746,7 +4804,7 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
         // que ya hace es decir en qué estado está el proyecto —qué falta, o qué niveles usan este
         // entorno—, que es lo que pide la spec: «fallar de forma explícita señalando qué falta,
         // nunca generar con datos parciales». Por eso se muestra apagado en vez de esconderse.
-        const vivo = q.key === 'edit' || q.key === 'run'
+        const vivo = q.key === 'edit' || q.key === 'run' || q.key === 'library'
         return (
         <div key={q.key}>
           <div
@@ -4755,10 +4813,12 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
             onClick={e => {
               if (q.key === 'edit') { e.stopPropagation(); setSub(true) }
               if (q.key === 'run')  { e.stopPropagation(); onRun(asset) }
+              if (q.key === 'library') { e.stopPropagation(); onLibreria(asset) }
             }}
             title={
               q.key === 'edit' ? `${q.label} — open the editing menu`
               : q.key === 'run' ? 'Run — execute this page’s workflow and publish the result to the right'
+              : q.key === 'library' ? 'Asset Library — this page and everything produced from it, as a list'
               : q.key === 'montaje' ? tituloMontaje(montaje)
               : `${q.label} — coming in ${q.hint}`
             }

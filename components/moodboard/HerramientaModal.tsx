@@ -30,7 +30,7 @@ function blobABase64(blob: Blob): Promise<string> {
 // El fetch directo a R2 lo bloquea CORS, y sin poder leer los píxeles no hay máscara que componer.
 async function urlAArchivo(imageUrl: string): Promise<File> {
   const res = await fetch(`/api/proxy-image?url=${encodeURIComponent(imageUrl)}`)
-  if (!res.ok) throw new Error(`No se pudo cargar la imagen de origen (${res.status})`)
+  if (!res.ok) throw new Error(`The source image could not be loaded (${res.status})`)
   const blob = await res.blob()
   return new File([blob], `origen-${Date.now()}.png`, { type: blob.type || 'image/png' })
 }
@@ -85,7 +85,7 @@ export default function HerramientaModal({
       if (esMascara) {
         // Sin trazos no hay nada que aislar: el workflow devolvería la lámina entera recortada
         // contra una máscara vacía. Se corta acá, antes de pagar la corrida.
-        if (!mascaraRef.current?.hasStrokes()) throw new Error('Pintá la parte que querés aislar antes de correr.')
+        if (!mascaraRef.current?.hasStrokes()) throw new Error('Paint the part you want to isolate before running.')
         const trazos = await mascaraRef.current.getMaskBlob()
         if (!trazos) throw new Error('The mask could not be read.')
         mascaraBase64 = await blobABase64(trazos)
@@ -128,8 +128,8 @@ export default function HerramientaModal({
           <div style={{ fontSize: 14, color: 'var(--text-0, #e8eef7)', marginTop: 4 }}>{asset.name}</div>
           <div style={{ fontSize: 11.5, color: 'var(--text-2, #8a92a3)', marginTop: 6, lineHeight: 1.5 }}>
             {esMascara
-              ? 'Pintá la parte que querés aislar. Sale limpia sobre fondo blanco, como pieza nueva a la derecha de esta página — esta no se toca.'
-              : 'Una vista nueva del mismo asset, sin cambiar diseño, color ni proporciones. Se publica a la derecha, colgada de esta pieza.'}
+              ? 'Paint the part you want to isolate. It comes back clean on white, as a new piece to the right of this page — this one is left untouched.'
+              : 'A new view of the same asset, with its design, colour and proportions untouched. It is published to the right, hanging off this piece.'}
           </div>
         </div>
 
@@ -141,14 +141,14 @@ export default function HerramientaModal({
                 <>
                   <MaskPainter ref={mascaraRef} imageFile={archivo} brushSize={pincel} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
-                    <span style={{ ...mono, fontSize: 10, color: 'var(--text-2, #8a92a3)' }}>PINCEL</span>
+                    <span style={{ ...mono, fontSize: 10, color: 'var(--text-2, #8a92a3)' }}>BRUSH</span>
                     <input type="range" min={8} max={140} value={pincel}
                            onChange={e => setPincel(Number(e.target.value))} style={{ flex: 1 }} />
                     <span style={{ ...mono, fontSize: 10, color: 'var(--text-2, #8a92a3)', width: 28 }}>{pincel}</span>
                     <button onClick={() => mascaraRef.current?.clear()}
                             style={{ ...mono, fontSize: 10, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
                                      border: '1px solid var(--line-2, #232830)', background: 'transparent', color: 'var(--text-2, #8a92a3)' }}>
-                      LIMPIAR
+                      CLEAR
                     </button>
                   </div>
                 </>
@@ -214,14 +214,14 @@ export default function HerramientaModal({
                   style={{ ...mono, fontSize: 11, padding: '8px 14px', borderRadius: 7,
                            border: '1px solid var(--line-2, #232830)', background: 'transparent',
                            color: 'var(--text-2, #8a92a3)', cursor: corriendo ? 'not-allowed' : 'pointer' }}>
-            CANCELAR
+            CANCEL
           </button>
           <button onClick={correr} disabled={corriendo || (esMascara && !archivo)}
                   style={{ ...mono, fontSize: 11, padding: '8px 18px', borderRadius: 7,
                            border: `1px solid ${accent}`, background: `${accent}22`, color: accent,
                            cursor: corriendo || (esMascara && !archivo) ? 'not-allowed' : 'pointer',
                            opacity: corriendo || (esMascara && !archivo) ? 0.6 : 1 }}>
-            {corriendo ? 'GENERANDO…' : 'GENERAR'}
+            {corriendo ? 'GENERATING…' : 'GENERATE'}
           </button>
         </div>
       </div>
