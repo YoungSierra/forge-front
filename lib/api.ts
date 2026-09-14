@@ -2047,6 +2047,25 @@ export interface HerramientaDeAsset {
   controles:    { nodo: string; titulo: string | null; nota: string | null; campos: ControlHerramienta[] } | null
 }
 
+/** Si el botón del Laboratory tiene a dónde ir, sin empujar nada todavía. */
+export async function getLaboratorio(projectId: string) {
+  return request<{ success: boolean; configurado: boolean; tiene_tdd: boolean; documento?: string; chars?: number }>(
+    `/api/projects/${projectId}/canvas/laboratory`,
+  )
+}
+
+/** Empuja el TDD del proyecto al Laboratory y devuelve con qué dirección abrirlo.
+ *
+ *  Se empuja cada vez y no una sola: el disco de su despliegue es efímero, y el TDD cambia cuando
+ *  el 3.12 vuelve a correr. Abrirlo con una versión vieja es peor que no abrirlo. */
+export async function abrirLaboratorio(projectId: string) {
+  return request<{ success: boolean; url: string; slug: string; documento: string; proyecto: string
+                   mecanicas: number; usable: boolean }>(
+    `/api/projects/${projectId}/canvas/laboratory/abrir`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+  )
+}
+
 export interface EstadoDeMontaje {
   /** Si esta pieza es una hoja de entorno. Falso para casi todo el moodboard, y no es un error. */
   aplica:     boolean

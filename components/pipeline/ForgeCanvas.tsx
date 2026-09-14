@@ -14,6 +14,7 @@ import '@xyflow/react/dist/style.css'
 import ForgeEdge from './ForgeEdge'
 import OrthogonalEdge, { type WayPoint } from './OrthogonalEdge'
 import MoodboardButton from '../moodboard/MoodboardButton'
+import LaboratoryButton from './LaboratoryButton'
 import ModelViewer from '@/components/shared/ModelViewer'
 import { Media } from '@/components/shared/Media'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
@@ -6439,6 +6440,9 @@ export default function ForgeCanvas({ project, onRefresh }: { project: Project; 
       {/* Forgy: lanza el moodboard del proyecto. Fuera del ReactFlowProvider para que el
           overlay no quede atrapado por el z-index ni por el pan/zoom del canvas. */}
       <MoodboardButton projectId={project.id} projectName={project.name} />
+      {/* Y la salida hacia el Laboratory, con el TDD de este proyecto ya puesto. Se dibuja solo
+          si hay TDD y el despliegue está configurado. */}
+      <LaboratoryButton projectId={project.id} />
     </div>
   )
 }
