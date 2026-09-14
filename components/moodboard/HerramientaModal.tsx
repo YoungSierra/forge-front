@@ -3,7 +3,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import MaskPainter, { type MaskPainterHandle } from '@/components/shared/MaskPainter'
-import { runAssetTool, uploadToComfyUI, type HerramientaDeAsset } from '@/lib/api'
+import { runAssetTool, type HerramientaDeAsset } from '@/lib/api'
+
+/** El PNG de los trazos, en base64, para que el servidor lo componga contra la lámina. */
+function blobABase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader()
+    fr.onerror = () => reject(new Error('The mask could not be encoded.'))
+    // `readAsDataURL` devuelve «data:image/png;base64,AAAA…»; al servidor va solo la carga.
+    fr.onload = () => resolve(String(fr.result).split(',')[1] || '')
+    fr.readAsDataURL(blob)
+  })
+}
 
 // ─── Segmentación y Nuevo Ángulo ─────────────────────────────────────────────
 //
@@ -70,19 +81,19 @@ export default function HerramientaModal({
     setError(null)
     setCorriendo(true)
     try {
-      let imagenComfy: string | null = null
+      let mascaraBase64: string | null = null
       if (esMascara) {
         // Sin trazos no hay nada que aislar: el workflow devolvería la lámina entera recortada
         // contra una máscara vacía. Se corta acá, antes de pagar la corrida.
         if (!mascaraRef.current?.hasStrokes()) throw new Error('Pintá la parte que querés aislar antes de correr.')
-        const compuesta = await mascaraRef.current.getComposedBlob()
-        if (!compuesta) throw new Error('No se pudo componer la máscara.')
-        imagenComfy = await uploadToComfyUI(compuesta, `mask-${Date.now()}.png`)
+        const trazos = await mascaraRef.current.getMaskBlob()
+        if (!trazos) throw new Error('The mask could not be read.')
+        mascaraBase64 = await blobABase64(trazos)
       }
       const r = await runAssetTool(projectId, asset.id, {
         herramienta: herramienta.clave,
         opciones: campos.length ? valores : null,
-        imagenComfy,
+        mascaraBase64,
         memberId,
       })
       onListo((r.creados || []).map(c => c.id))

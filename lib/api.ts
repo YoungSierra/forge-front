@@ -2081,7 +2081,9 @@ export async function getAssetTools(projectId: string, assetId: string) {
 
 export async function runAssetTool(
   projectId: string, assetId: string,
-  opts: { herramienta: string; opciones?: Record<string, number> | null; imagenComfy?: string | null; memberId?: string | null },
+  opts: { herramienta: string; opciones?: Record<string, number> | null; imagenComfy?: string | null
+          /** Los trazos pintados, en base64. La lámina se compone en el servidor. */
+          mascaraBase64?: string | null; memberId?: string | null },
 ) {
   return request<{ success: boolean; herramienta: string; creados: { id: string; name: string; storage_url: string; format: string }[] }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/tool`,
@@ -2091,6 +2093,7 @@ export async function runAssetTool(
         herramienta: opts.herramienta,
         opciones: opts.opciones ?? null,
         imagen_comfy: opts.imagenComfy ?? null,
+        mascara_base64: opts.mascaraBase64 ?? null,
         member_id: opts.memberId ?? null,
       }),
     },

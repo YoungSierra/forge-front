@@ -4,6 +4,10 @@ import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 're
 
 export interface MaskPainterHandle {
   getComposedBlob: () => Promise<Blob | null>
+  /** Solo los trazos, del tamaño de la lámina. Lo que se pintó va opaco; el resto, transparente.
+   *  Se manda así para que la composición la haga el servidor: un canvas guarda el color
+   *  premultiplicado y con alfa 0 pierde el RGB, que era el agujero negro que llegaba a ComfyUI. */
+  getMaskBlob: () => Promise<Blob | null>
   clear: () => void
   hasStrokes: () => boolean
 }
@@ -45,6 +49,17 @@ const MaskPainter = forwardRef<MaskPainterHandle, Props>(({ imageFile, brushSize
       }
       ctx.putImageData(imgData, 0, 0)
 
+      return new Promise<Blob | null>(resolve => out.toBlob(resolve, 'image/png'))
+    },
+    async getMaskBlob() {
+      const maskCanvas = maskCanvasRef.current
+      const imgCanvas  = imgCanvasRef.current
+      if (!maskCanvas || !imgCanvas) return null
+      // Del tamaño de la lámina, que es contra lo que el servidor lo va a comparar.
+      const out = document.createElement('canvas')
+      out.width  = imgCanvas.width
+      out.height = imgCanvas.height
+      out.getContext('2d')!.drawImage(maskCanvas, 0, 0, out.width, out.height)
       return new Promise<Blob | null>(resolve => out.toBlob(resolve, 'image/png'))
     },
     clear() {
