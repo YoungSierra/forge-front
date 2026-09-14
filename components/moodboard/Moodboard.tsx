@@ -266,6 +266,22 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // panel enseñe un avance que nadie produjo. Cuando el evento esté definido, cambia de dónde
   // salen y el panel no se toca.
   const [alcance, setAlcance] = useState<Estados>({})
+  // …pero perderlos al recargar no es parte de esa decisión. Se guardan en ESTE navegador, que es
+  // exactamente lo que son hoy: la lista personal de quien mira, no el avance publicado del
+  // proyecto. Cuando el evento real exista, cambia de dónde salen y el panel no se entera.
+  const claveAlcance = `forge:alcance:${projectId}`
+  useEffect(() => {
+    try {
+      const guardado = window.localStorage.getItem(claveAlcance)
+      if (guardado) setAlcance(JSON.parse(guardado) as Estados)
+    } catch { /* sin almacenamiento se sigue en memoria, que es como estaba */ }
+  }, [claveAlcance])
+  useEffect(() => {
+    try {
+      if (Object.keys(alcance).length) window.localStorage.setItem(claveAlcance, JSON.stringify(alcance))
+      else window.localStorage.removeItem(claveAlcance)
+    } catch { /* idem */ }
+  }, [alcance, claveAlcance])
   // Qué página del ASG está señalada. Es lo que hace que el menú y el lienzo se sigan.
   const [paginaAlcance, setPaginaAlcance] = useState<string | null>(null)
   // Y qué hoja quedó señalada por esa página, para dibujarle el aro. Se guarda aparte del nombre
