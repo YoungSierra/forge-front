@@ -558,7 +558,16 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // bloque por documento (Art Style Guide, GDD Art Style, Art Bible, Refs), sus hojas en
   // cuadrícula adentro, y los bloques separados entre sí. Al encuadrar se ve la ESTRUCTURA —
   // cuántos documentos hay y qué tamaño tiene cada uno—, que es lo que una galería no dice.
-  const zonaDe = (a: UnifiedAsset) => {
+  //
+  // Y una pieza DERIVADA vive en el bloque de la hoja que la produjo, no en el que diga su nombre.
+  // Antes coincidían porque lo que salía de una cadena heredaba el nombre entero de su origen
+  // —«Art Style Guide — 25_VideoMarketingSheet — Key Art»—, y ese prefijo prestado hacía que
+  // cualquier búsqueda por nombre la confundiera con una página del documento. Ahora la pieza se
+  // llama por su cadena, y la zona se resuelve subiendo por `derived_from` hasta la hoja de la que
+  // colgó: es el mismo dato que ya dibuja el cable entre las dos.
+  const porId = useMemo(() => new Map(assets.map(a => [a.id, a])), [assets])
+
+  const zonaPorNombre = (a: UnifiedAsset) => {
     const t = a.node_title || (a.source === 'library' ? 'Refs' : 'Other')
     // Un nodo puede producir varios documentos: el 3.20 emite el Art Style Guide, el GDD Art
     // Style y el Art Bible, y agrupar por nodo los metía a los tres en el mismo bloque. La zona
@@ -572,6 +581,21 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     if (/^gdd\b/i.test(n) || /—\s*gdd/i.test(n)) return 'GDD'
     return t
   }
+
+  const zonaDe = useCallback((a: UnifiedAsset): string => {
+    // Se sube hasta la raíz, no un solo salto: en el Environment, el modelo 3D cuelga de su parte
+    // y la parte cuelga de la hoja. `vistos` corta un ciclo si alguna vez los datos lo tuvieran.
+    const vistos = new Set<string>()
+    let cur = a
+    while (cur.derived_from && !vistos.has(cur.id)) {
+      vistos.add(cur.id)
+      const madre = porId.get(cur.derived_from)
+      if (!madre) break
+      cur = madre
+    }
+    return zonaPorNombre(cur)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [porId])
 
   // Orden de lectura dentro de la etapa: primero el que se produce antes. Sin esto el orden lo
   // decidía el azar del recorrido y cambiaba entre cargas.
