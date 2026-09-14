@@ -19,7 +19,7 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset } from '@/lib/api'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import VerticalSliceScope from './VerticalSliceScope'
@@ -3337,6 +3337,24 @@ const RADIAL = [
   { key: 'run',     label: 'Run',            hint: 'Iteration 2' },
 ] as const
 
+// Un sexto sector que NO es fijo: solo existe sobre una hoja de entorno, y quien lo decide es el
+// backend. Va como sector propio y no dentro de «Edit 2D» porque no edita la lámina — monta un
+// nivel a partir de ella. Los seis sectores se reparten solos: la geometría siempre fue por N.
+const MONTAJE = { key: 'montaje', label: 'Assemble Level', hint: '' } as const
+
+// Lo que el sector dice al pasar por encima. Nombra el entorno que leyó y, o bien lo que falta,
+// o bien los niveles que lo usan — porque cuando son varios hay que elegir, y conviene verlo
+// antes de pulsar.
+function tituloMontaje(e: EstadoDeMontaje | null): string {
+  if (!e) return 'Assemble Level — checking…'
+  const titulo = e.entorno ? `Assemble Level · ${e.entorno}` : 'Assemble Level'
+  if (e.faltantes?.length) return `${titulo} — missing: ${e.faltantes.map(f => f.dice).join(' · ')}`
+  const n = e.niveles?.length || 0
+  if (n > 1) return `${titulo} — ${n} levels use this environment; you pick which one. Not wired yet`
+  if (n === 1) return `${titulo} — level ${e.niveles![0].nivel}. Not wired yet`
+  return `${titulo} — not wired yet`
+}
+
 // ── Submenú de «Edit», contextual por tipo de asset ──────────────────────────
 // Definición del documento de menús radiales del equipo. La primera opción es siempre Nueva
 // Iteración y la última Subir ajustes manuales, en los cinco tipos.
@@ -4603,6 +4621,24 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
   const [sub,   setSub]   = useState(false)
   useEffect(() => { const r = requestAnimationFrame(() => setShown(true)); return () => cancelAnimationFrame(r) }, [])
 
+  // Si esta pieza dispara el montaje de un nivel. Se pregunta siempre y contesta el backend: la
+  // alternativa era repetir acá la regla de qué es una hoja de entorno, que es justo lo que no se
+  // hace con las herramientas. Mientras no conteste, el radial tiene sus cinco sectores de
+  // siempre; el sexto entra si aplica, dentro de la propia animación de apertura.
+  const [montaje, setMontaje] = useState<EstadoDeMontaje | null>(null)
+  useEffect(() => {
+    let vivo = true
+    getMontajeDeAsset(projectId, asset.id)
+      .then(r => { if (vivo) setMontaje(r) })
+      .catch(() => { if (vivo) setMontaje({ aplica: false }) })
+    return () => { vivo = false }
+  }, [projectId, asset.id])
+
+  const sectores = useMemo(
+    () => (montaje?.aplica ? [...RADIAL, MONTAJE] : [...RADIAL]),
+    [montaje?.aplica],
+  )
+
   const R  = 152
   const cx = Math.min(Math.max(x, R + 12), window.innerWidth  - R - 12)
   const cy = Math.min(Math.max(y, R + 12), window.innerHeight - R - 12)
@@ -4658,21 +4694,25 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
 
       {/* Divisores: uno por frontera entre sectores. Eran dos diagonales fijas porque el radial
           tenía cuatro cuadrantes; con cinco, las fronteras ya no caen en 45°. */}
-      {RADIAL.map((_, i) => (
+      {sectores.map((_, i) => (
         <div key={i} style={{
           position: 'absolute', left: '50%', top: 12, bottom: '50%', width: 1,
           background: `linear-gradient(to top, transparent, ${accent}55 22%, ${accent}55 100%)`,
-          transform: `translateX(-0.5px) rotate(${(360 / RADIAL.length) * (i + 0.5)}deg)`,
+          transform: `translateX(-0.5px) rotate(${(360 / sectores.length) * (i + 0.5)}deg)`,
           transformOrigin: 'bottom center',
         }} />
       ))}
 
       {/* sectores + etiquetas */}
-      {RADIAL.map((q, i) => {
-        const n = RADIAL.length
+      {sectores.map((q, i) => {
+        const n = sectores.length
         // De dónde nace la etiqueta al abrir: del centro hacia SU sector. Antes era una tabla de
         // cuatro entradas; con N sectores sale del mismo ángulo que ya posiciona la etiqueta.
         const ang  = ((-90 + i * (360 / n)) * Math.PI) / 180
+        // El montaje todavía no responde al clic: falta elegir el nivel y disparar la cadena. Lo
+        // que ya hace es decir en qué estado está el proyecto —qué falta, o qué niveles usan este
+        // entorno—, que es lo que pide la spec: «fallar de forma explícita señalando qué falta,
+        // nunca generar con datos parciales». Por eso se muestra apagado en vez de esconderse.
         const vivo = q.key === 'edit' || q.key === 'run'
         return (
         <div key={q.key}>
@@ -4686,6 +4726,7 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
             title={
               q.key === 'edit' ? `${q.label} — open the editing menu`
               : q.key === 'run' ? 'Run — execute this page’s workflow and publish the result to the right'
+              : q.key === 'montaje' ? tituloMontaje(montaje)
               : `${q.label} — coming in ${q.hint}`
             }
             style={{
@@ -4747,6 +4788,8 @@ function RadialIcon({ kind }: { kind: string }) {
   if (kind === 'style')   return <svg {...p}><path d="M12 3a9 9 0 1 0 0 18 2.5 2.5 0 0 0 2-4 2.5 2.5 0 0 1 2-4h1a4 4 0 0 0 4-4 9 9 0 0 0-9-6z" /><path d="M7.5 10.5h.01" /><path d="M10.5 7.5h.01" /><path d="M14.5 7.5h.01" /></svg>
   // Play dentro de un nodo: Run es un nodo inicial que corre el workflow de atrás.
   if (kind === 'run')     return <svg {...p}><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M10 9.5l5 2.5-5 2.5z" /></svg>
+  // Volúmenes puestos sobre un suelo: el sector no edita la lámina, monta un nivel con ella.
+  if (kind === 'montaje') return <svg {...p}><path d="M3 21h18" /><rect x="4.5" y="12" width="6.5" height="6" rx="1" /><rect x="13" y="7.5" width="6.5" height="10.5" rx="1" /></svg>
   return <svg {...p}><path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" /><path d="M3 6h.01" /><path d="M3 12h.01" /><path d="M3 18h.01" /></svg>
 }
 

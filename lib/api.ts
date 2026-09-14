@@ -2044,6 +2044,29 @@ export interface HerramientaDeAsset {
   controles:    { nodo: string; titulo: string | null; nota: string | null; campos: ControlHerramienta[] } | null
 }
 
+export interface EstadoDeMontaje {
+  /** Si esta pieza es una hoja de entorno. Falso para casi todo el moodboard, y no es un error. */
+  aplica:     boolean
+  /** El entorno que retrata, leído de su propio nombre: «World Design — The Coral Shallows». */
+  entorno?:   string
+  /** Los niveles que usan ese entorno, según la tabla del level_map. Varios es lo normal. */
+  niveles?:   { nivel: string; entorno: string }[]
+  /** Lo que le falta al proyecto para poder montar, con nombre propio. */
+  faltantes?: { que: string; dice: string }[]
+  listo?:     boolean
+}
+
+/** Si esta pieza puede disparar el montaje de un nivel, y qué falta si no.
+ *
+ *  La spec pone el disparador «en el Environment Sheet», que en Forge no es un objeto sino un
+ *  conjunto de imágenes de tres nodos. Se resuelve colgándolo de la única que nombra su entorno.
+ *  Igual que con las herramientas, la regla vive en el backend y no acá. */
+export async function getMontajeDeAsset(projectId: string, assetId: string) {
+  return request<{ success: boolean } & EstadoDeMontaje>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/montaje`,
+  )
+}
+
 /** Qué herramientas se pueden correr sobre ESTA pieza. Lo decide el backend: la habilitación es
  *  por procedencia —Nuevo Ángulo solo sobre lo que ya salió aislado sobre blanco— y si la regla
  *  viviera acá, bastaría abrir el menú desde otro visor para saltársela. */
