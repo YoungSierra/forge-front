@@ -4542,7 +4542,9 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
   async function montar() {
     setBusy(true); setError(null)
     try {
-      const r = await montarNivel(projectId, asset.id, nivel)
+      // `!dado` = se llegó por el paso 3 del Run, sobre un modelo. El back necesita saberlo para
+      // no comprobar esa pieza como si fuera la imagen que nombra el entorno.
+      const r = await montarNivel(projectId, asset.id, nivel, !dado)
       // El backend contesta con la lista en vez de elegir por su cuenta.
       if (r.necesita_nivel) { setBusy(false); setError('Pick which level to assemble.'); return }
       setHecho(r)

@@ -2228,10 +2228,11 @@ export async function marcarPapelDeMontaje(projectId: string, assetId: string, p
 }
 
 /** Monta el nivel y devuelve el paquete que abre Blender. */
-export async function montarNivel(projectId: string, assetId: string, nivel?: string | null) {
+export async function montarNivel(projectId: string, assetId: string, nivel?: string | null, desdeCadena = false) {
   return request<{ success: boolean } & ResultadoDeMontaje>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/montaje`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nivel: nivel ?? null }) },
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nivel: nivel ?? null, cadena: desdeCadena }) },
   )
 }
 
