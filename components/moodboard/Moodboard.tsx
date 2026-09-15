@@ -19,7 +19,7 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje } from '@/lib/api'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import VerticalSliceScope from './VerticalSliceScope'
@@ -34,7 +34,9 @@ const TABS: { key: string; label: string; formats: string[] }[] = [
   { key: 'refs',    label: 'Refs',        formats: [] },   // ver ARTE: se decide por nodo, no por formato
   { key: 'docs',    label: 'Docs',        formats: ['document', 'docx', 'pdf', 'pptx', 'md', 'markdown'] },
   { key: 'concept', label: 'Concept Art', formats: ['image', 'png', 'jpg', 'jpeg'] },
-  { key: '3d',      label: '3D',          formats: ['model_3d', 'glb'] },
+  // El `.zip` es el paquete de montaje de un nivel: no es una imagen ni un documento, es material
+  // 3D. Sin ponerlo acá caía en Concept Art, que es donde va a parar todo formato desconocido.
+  { key: '3d',      label: '3D',          formats: ['model_3d', 'glb', 'zip'] },
   { key: 'audio',   label: 'Audio',       formats: ['audio'] },
   { key: 'video',   label: 'Video',       formats: ['video', 'mp4'] },
 ]
@@ -329,6 +331,19 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // La herramienta elegida en «Editar 2D» y sobre qué pieza. Vive acá y no en el radial: el menú
   // se cierra al elegir, y el recuadro tiene que sobrevivirlo.
   const [herram, setHerram] = useState<{ asset: UnifiedAsset; h: HerramientaDeAsset } | null>(null)
+  // El montaje de un nivel. Se guarda el estado que ya trajo el radial —los modelos, sus papeles y
+  // los niveles del entorno— para no volver a pedirlo al abrir la ventana.
+  const [montando, setMontando] = useState<{ asset: UnifiedAsset; estado: EstadoDeMontaje } | null>(null)
+  // Qué quedó desactualizado al aprobar una página, con su acción sugerida: [R] regenerar o [V]
+  // revalidar. Nada se regenera solo —generar cuesta y no es reproducible—, así que esto es una
+  // marca y el gate lo pasa una persona.
+  const [marcas, setMarcas] = useState<Record<string, MarcaDeActualizacion>>({})
+  const cargarMarcas = useCallback(() => {
+    getPendientesActualizacion(projectId)
+      .then(r => setMarcas(Object.fromEntries((r.pendientes || []).map(m => [m.id, m]))))
+      .catch(() => {})
+  }, [projectId])
+  useEffect(() => { cargarMarcas() }, [cargarMarcas])
   // De qué hoja salió lo que se está generando. Se anota al despachar porque cuando el resultado
   // llega el menú ya se cerró, y sin origen no hay «a la derecha de» que valga (§9).
   const origenDeLaPublicacion = useRef<string | null>(null)
@@ -2038,7 +2053,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             onSelect={() => setSel(a.id)}
                             onHover={dentro => (dentro ? entrarHoja(a.id) : salirHoja(a.id))}
                             onOpen={(from) => { setSel(a.id); setDetail({ asset: a, from }) }}
-                            onMenu={(x, y) => setMenu({ x, y, asset: a })} />
+                            onMenu={(x, y) => setMenu({ x, y, asset: a })}
+                            marca={marcas[a.id] ?? null} />
 
                       {/* Con qué opciones se generó la pieza, DEBAJO de ella (informe v4, punto 8).
                           La vista ampliada ya las mostraba; en el lienzo no, y ahí es donde uno
@@ -2266,7 +2282,29 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                               setMenu(null)
                               setFamilia({ id: a.id, nombre: outputOf(a) ?? a.name })
                               setView('table')
-                            }} />}
+                            }}
+                            // El montaje no genera imagen: arma el paquete que abre Blender. Igual
+                            // que Run, primero la ventana — acá además se marca qué papel juega
+                            // cada modelo, que es lo que le faltaba al disparador para responder.
+                            onMontaje={(a, estado) => { setMenu(null); setMontando({ asset: a, estado }) }} />}
+
+      {montando && (
+        <AvisoMontaje
+          asset={montando.asset}
+          projectId={projectId}
+          estado={montando.estado}
+          accent={theme.accent}
+          onCancel={() => setMontando(null)}
+          onListo={idNuevo => {
+            const origen = montando.asset.id
+            setMontando(null)
+            // El paquete es una pieza más del proyecto y se coloca a la derecha de su hoja, con el
+            // mismo criterio que todo lo que sale de una cadena (§9).
+            if (idNuevo) publicarALaDerecha(origen, [idNuevo])
+            reload()
+          }}
+        />
+      )}
 
       {herram && (
         <HerramientaModal
@@ -2376,7 +2414,16 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
         </div>
       )}
 
-      {detail && <Detail asset={detail.asset} from={detail.from} accent={theme.accent} onAprobado={reload}
+      {detail && <Detail asset={detail.asset} from={detail.from} accent={theme.accent}
+                         // Aprobar una versión es lo que dispara la cascada, así que al volver hay
+                         // marcas nuevas que pintar.
+                         onAprobado={() => { reload(); cargarMarcas() }}
+                         marca={marcas[detail.asset.id] ?? null}
+                         onRevalidar={() => {
+                           const id = detail.asset.id
+                           setMarcas(m => { const n = { ...m }; delete n[id]; return n })
+                           revalidarAsset(projectId, id).catch(() => cargarMarcas())
+                         }}
                          notas={notasPorHoja[detail.asset.id] ?? []}
                          onNota={() => setNotando(detail.asset)}
                          onDesignEdit={() => pedirDesignEdit(detail.asset)}
@@ -2683,11 +2730,13 @@ function useAudioThumb(url: string, id: string, accent: string) {
   return { data, cargando }
 }
 
-function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu }: {
+function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu, marca }: {
   asset: UnifiedAsset; index: number; accent: string; colors: string[]
   selected: boolean; onOpen: (from: DOMRect) => void
   onSelect?: () => void; onHover?: (dentro: boolean) => void
   onMenu: (x: number, y: number) => void
+  // Que esta página quedó desactualizada por un cambio aguas arriba, y qué acción se sugiere.
+  marca?: MarcaDeActualizacion | null
 }) {
   const [hover, setHover] = useState(false)
   const t    = tabOf(asset)
@@ -2740,6 +2789,23 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
           v{asset.versions.find(v => v.is_current)?.version_number ?? asset.versions.length}
           <span style={{ opacity: 0.5 }}>of {asset.versions.length}</span>
         </div>
+      )}
+
+      {/* Desactualizada. Va a la derecha para no pelearse con el sello de versión, y dice la
+          acción sugerida — no la ejecuta: regenerar cuesta y lo aprueba una persona. */}
+      {marca && (
+        <div title={
+          marca.accion === 'R'
+            ? `Outdated — regenerate. Page ${marca.por_pagina ?? ''} changed and this one depends on it. Regenerating is paid and not reproducible, so it waits for you.`
+            : `Outdated — revalidate. Page ${marca.por_pagina ?? ''} changed; this one probably still holds. Look at it and confirm.`
+        } style={{
+          position: 'absolute', top: 7, right: 7, zIndex: 2,
+          padding: '2px 7px', borderRadius: 5,
+          background: marca.accion === 'R' ? 'rgba(200,80,66,0.86)' : 'rgba(232,181,98,0.86)',
+          border: '1px solid rgba(255,255,255,0.22)', backdropFilter: 'blur(3px)',
+          fontSize: 9.5, fontFamily: 'var(--font-mono)', color: '#0b0c0e', fontWeight: 700,
+          letterSpacing: '.06em',
+        }}>[{marca.accion}]</div>
       )}
 
       {kind === 'image' && url ? (
@@ -2865,7 +2931,7 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
 // grilla, como en la referencia. La grilla sigue visible detrás, atenuada, así no se pierde
 // el contexto de dónde estaba la imagen. Al cerrar vuelve exactamente a su celda.
 function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNota, onDesignEdit,
-                 onQuitar, escondidas, onDevolver }: {
+                 onQuitar, escondidas, onDevolver, marca, onRevalidar }: {
   asset: UnifiedAsset; from: DOMRect; accent: string
   onMenu: (x: number, y: number) => void; onClose: () => void; onAprobado: () => void
   // Las mismas acciones que en el lienzo. Al abrir la hoja no se pierden: es la misma pieza,
@@ -2874,6 +2940,8 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
   // «La misma barra» lo decía el comentario pero no el código: faltaba quitar del lienzo, que en
   // el informe v4 es el punto 12 — la acción estaba a la vista y no hacía nada.
   notas: AssetNote[]; onNota: () => void; onDesignEdit: () => void; onQuitar: () => void
+  // Si quedó desactualizada por un cambio aguas arriba, y el gate para darla por buena.
+  marca?: MarcaDeActualizacion | null; onRevalidar?: () => void
   // Lo que salió de ESTA página y está escondido del lienzo. El informe v3 es explícito sobre
   // dónde se recupera: en el historial de la página madre, no en la Librería, que conserva su
   // función de insertar o reutilizar piezas en un slot.
@@ -3103,6 +3171,30 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
           {asset.node_title || asset.source}
           {' · '}{new Date(asset.created_at).toLocaleDateString()}
         </div>
+
+        {/* El gate del §2.1: revalidar es MIRARLA y confirmar, y acá es donde se la está mirando.
+            Regenerar no vive en este botón — eso es Run o iterar, y cuesta. */}
+        {marca && (
+          <div style={{ pointerEvents: 'auto', marginTop: 9, display: 'inline-flex', alignItems: 'center', gap: 9 }}>
+            <span style={{
+              padding: '3px 8px', borderRadius: 6, fontSize: 10.5, fontFamily: 'var(--font-mono)',
+              background: marca.accion === 'R' ? 'rgba(200,80,66,0.2)' : 'rgba(232,181,98,0.2)',
+              border: `1px solid ${marca.accion === 'R' ? 'rgba(200,80,66,0.6)' : 'rgba(232,181,98,0.6)'}`,
+              color: 'var(--text-1)',
+            }}>
+              Outdated · {marca.accion === 'R' ? 'regenerate' : 'revalidate'}
+              {marca.por_pagina ? ` · page ${marca.por_pagina} changed` : ''}
+            </span>
+            <button
+              onClick={e => { e.stopPropagation(); onRevalidar?.() }}
+              style={{
+                padding: '3px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 10.5,
+                background: 'transparent', border: '1px solid var(--line-2)', color: 'var(--text-2)',
+                fontFamily: 'var(--font-sans)',
+              }}
+            >Still valid</button>
+          </div>
+        )}
       </div>
 
       {/* Versiones: fuera del marco, debajo de la X. Adentro tapaba parte de la imagen. */}
@@ -3382,18 +3474,19 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
 //   visual    — el menú radial de la referencia, con las cuatro acciones de la v.3.
 // Las acciones del radial todavía no hacen nada: se cablean en la Iteración 2 (contexto y
 // output) y en la 3 (edición). Se muestran apagadas en vez de simular que responden.
-function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria }: {
+function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria, onMontaje }: {
   x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
   onRun: (a: UnifiedAsset) => void
   projectId: string
   onHerramienta: (a: UnifiedAsset, h: HerramientaDeAsset) => void
   onLibreria: (a: UnifiedAsset) => void
+  onMontaje: (a: UnifiedAsset, estado: EstadoDeMontaje) => void
 }) {
   // La descarga directa es solo para documentos; lo visual abre el radial.
   return kindOf(asset) === 'doc'
     ? <DownloadMenu x={x} y={y} asset={asset} onDone={onDone} />
-    : <RadialMenu   x={x} y={y} asset={asset} projectId={projectId} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} onHerramienta={onHerramienta} onLibreria={onLibreria} />
+    : <RadialMenu   x={x} y={y} asset={asset} projectId={projectId} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} onHerramienta={onHerramienta} onLibreria={onLibreria} onMontaje={onMontaje} />
 }
 
 function DownloadMenu({ x, y, asset, onDone }: {
@@ -3484,9 +3577,9 @@ function tituloMontaje(e: EstadoDeMontaje | null): string {
   const titulo = e.entorno ? `Assemble Level · ${e.entorno}` : 'Assemble Level'
   if (e.faltantes?.length) return `${titulo} — missing: ${e.faltantes.map(f => f.dice).join(' · ')}`
   const n = e.niveles?.length || 0
-  if (n > 1) return `${titulo} — ${n} levels use this environment; you pick which one. Not wired yet`
-  if (n === 1) return `${titulo} — level ${e.niveles![0].nivel}. Not wired yet`
-  return `${titulo} — not wired yet`
+  if (n > 1) return `${titulo} — ${n} levels use this environment; you pick which one`
+  if (n === 1) return `${titulo} — level ${e.niveles![0].nivel}`
+  return titulo
 }
 
 // ── Submenú de «Edit», contextual por tipo de asset ──────────────────────────
@@ -4258,6 +4351,214 @@ function NoDisponible({ que, accent, onClose }: { que: string; accent: string; o
 // diferencia de que acá el motivo es tan importante como el costo.
 //
 // Cancel y Run van separados y el que gasta no queda debajo del cursor.
+// ── El montaje de un nivel, del sector del radial ────────────────────────────
+//
+// Dos cosas en una ventana porque son la misma decisión: qué papel juega cada modelo, y qué nivel
+// se monta. El papel no sale de ninguna medición —nada en una caja envolvente dice cuál muro es el
+// exterior— y sin él el montaje termina «bien» y coloca cero objetos, así que el botón no se
+// habilita hasta que hay uno marcado.
+//
+// El nivel tampoco se adivina: si el entorno lo usan varios, se elige. Es el guarda de la spec —
+// fallar señalando qué falta antes que generar con datos parciales.
+function AvisoMontaje({ asset, projectId, estado, accent, onCancel, onListo }: {
+  asset: UnifiedAsset
+  projectId: string
+  estado: EstadoDeMontaje
+  accent: string
+  onCancel: () => void
+  onListo: (idNuevo: string | null) => void
+}) {
+  const [modelos, setModelos] = useState(estado.modelos ?? [])
+  const niveles = estado.niveles ?? []
+  const [nivel, setNivel] = useState<string | null>(niveles.length === 1 ? niveles[0].nivel : null)
+  const [busy,  setBusy]  = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [hecho, setHecho] = useState<ResultadoDeMontaje | null>(null)
+
+  const papeles   = estado.papeles ?? []
+  const exterior  = modelos.find(m => m.papel === 'muro_exterior')
+  const marcados  = modelos.filter(m => m.papel).length
+
+  // Se pinta el papel nuevo antes de que conteste el servidor: marcar veinte piezas con una espera
+  // por cada una convierte cinco minutos de trabajo en veinte. Si falla, se revierte y se dice.
+  async function marcar(id: string, papel: string | null) {
+    const antes = modelos
+    setModelos(ms => ms.map(m => (m.id === id ? { ...m, papel } : m)))
+    try { await marcarPapelDeMontaje(projectId, id, papel) }
+    catch (e) { setModelos(antes); setError(e instanceof Error ? e.message : 'could not save that role') }
+  }
+
+  async function montar() {
+    setBusy(true); setError(null)
+    try {
+      const r = await montarNivel(projectId, asset.id, nivel)
+      // El backend contesta con la lista en vez de elegir por su cuenta.
+      if (r.necesita_nivel) { setBusy(false); setError('Pick which level to assemble.'); return }
+      setHecho(r)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'the assembly failed')
+    } finally { setBusy(false) }
+  }
+
+  const cerrable = !busy
+  return (
+    <div
+      onClick={() => cerrable && onCancel()}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 12200, display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(6,7,9,0.5)', backdropFilter: 'blur(3px)',
+      }}
+    >
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 520, maxHeight: '82vh', overflowY: 'auto', padding: '22px 24px', borderRadius: 13,
+        background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+        boxShadow: '0 22px 64px rgba(0,0,0,0.6)', animation: 'mb-in 180ms ease',
+      }}>
+        <div style={{
+          fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '.08em',
+          color: accent, marginBottom: 9,
+        }}>
+          ASSEMBLE LEVEL{estado.entorno ? ` · ${estado.entorno.toUpperCase()}` : ''}
+        </div>
+
+        {hecho ? (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 10 }}>
+              Level {hecho.nivel} is packed
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 12 }}>
+              {Math.round((hecho.bytes ?? 0) / 1024)} KB · {hecho.bundle_id}. Open it with the
+              LoopForge add-on in Blender: it scales, recentres and instances from here.
+              {hecho.grafo?.generado ? ' The floor plan for this level was generated now.' : ' It reuses the floor plan this level already had.'}
+            </div>
+            <a href={hecho.url} target="_blank" rel="noreferrer" style={{
+              display: 'block', textAlign: 'center', padding: '9px 0', borderRadius: 8,
+              background: accent, color: '#0b0c0e', fontSize: 12, fontWeight: 600,
+              textDecoration: 'none', marginBottom: 10,
+            }}>Download the bundle</a>
+            {!!hecho.avisos?.length && (
+              <ul style={{ margin: '0 0 12px', paddingLeft: 16, fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                {hecho.avisos.map((a, i) => <li key={i}>{a}</li>)}
+              </ul>
+            )}
+            <button onClick={() => onListo(hecho.asset?.id ?? null)} style={{
+              width: '100%', padding: '9px 0', borderRadius: 8, cursor: 'pointer',
+              background: 'transparent', border: `1px solid ${accent}66`, color: accent,
+              fontSize: 12, fontFamily: 'var(--font-sans)',
+            }}>Done</button>
+          </>
+        ) : estado.faltantes?.length ? (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 9 }}>
+              This level cannot be assembled yet
+            </div>
+            <ul style={{ margin: '0 0 16px', paddingLeft: 16, fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.7 }}>
+              {estado.faltantes.map(f => <li key={f.que}>{f.dice}</li>)}
+            </ul>
+            <button onClick={onCancel} style={{
+              width: '100%', padding: '9px 0', borderRadius: 8, cursor: 'pointer',
+              background: 'transparent', border: `1px solid ${accent}66`, color: accent,
+              fontSize: 12, fontFamily: 'var(--font-sans)',
+            }}>Got it</button>
+          </>
+        ) : (
+          <>
+            {niveles.length > 1 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12.5, color: 'var(--text-1)', marginBottom: 7 }}>
+                  <strong>Which level.</strong> {niveles.length} of them use this environment.
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {niveles.map(n => (
+                    <button key={n.nivel} onClick={() => setNivel(n.nivel)} style={{
+                      padding: '5px 10px', borderRadius: 999, cursor: 'pointer', fontSize: 11.5,
+                      background: nivel === n.nivel ? `${accent}26` : 'transparent',
+                      border: `1px solid ${nivel === n.nivel ? accent : 'var(--line-2)'}`,
+                      color: nivel === n.nivel ? 'var(--text-0)' : 'var(--text-2)',
+                      fontFamily: 'var(--font-sans)',
+                    }}>{n.nivel}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 10 }}>
+              <strong style={{ color: 'var(--text-1)' }}>What each model plays.</strong> Nothing in a
+              bounding box says which wall is the exterior one, so it is marked here. A model with no
+              role stays out of the level — it is not placed by default.
+            </div>
+
+            <div style={{ maxHeight: 260, overflowY: 'auto', marginBottom: 12, border: '1px solid var(--line-2)', borderRadius: 9 }}>
+              {modelos.length === 0 && (
+                <div style={{ padding: '12px 13px', fontSize: 12, color: 'var(--text-3)' }}>
+                  This project has no measured 3D models yet.
+                </div>
+              )}
+              {modelos.map((m, i) => (
+                <div key={m.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '7px 11px',
+                  borderTop: i ? '1px solid var(--line-1)' : 'none',
+                }}>
+                  <span title={m.nombre} style={{
+                    flex: 1, minWidth: 0, fontSize: 11.5, color: 'var(--text-1)',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>{m.nombre}</span>
+                  <select
+                    value={m.papel ?? ''}
+                    onChange={e => marcar(m.id, e.target.value || null)}
+                    style={{
+                      width: 176, padding: '4px 6px', borderRadius: 7, fontSize: 11,
+                      background: 'var(--bg-2)', border: `1px solid ${m.papel ? `${accent}66` : 'var(--line-2)'}`,
+                      color: m.papel ? 'var(--text-0)' : 'var(--text-3)', fontFamily: 'var(--font-sans)',
+                    }}
+                  >
+                    <option value="">— no role —</option>
+                    {papeles.map(p => (
+                      <option key={p.clave} value={p.clave}>{p.etiqueta}{p.estructural ? '' : ' (prop)'}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            {!exterior && modelos.length > 0 && (
+              <div style={{ fontSize: 11.5, color: '#e8b562', lineHeight: 1.6, marginBottom: 12 }}>
+                Mark one model as the exterior wall: every wall of the level is built from that one,
+                and without it the assembly finishes with zero objects.
+              </div>
+            )}
+
+            {error && (
+              <div style={{ fontSize: 11.5, color: '#e8736a', lineHeight: 1.6, marginBottom: 12 }}>{error}</div>
+            )}
+
+            <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6, marginBottom: 12 }}>
+              {marcados} of {modelos.length} models have a role. If this level has no floor plan yet,
+              one is generated first — that costs a call and fixes the plan for later runs.
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={onCancel} disabled={busy} style={{
+                flex: 1, padding: '9px 0', borderRadius: 8, cursor: busy ? 'default' : 'pointer',
+                background: 'transparent', border: '1px solid var(--line-2)', color: 'var(--text-2)',
+                fontSize: 12, fontFamily: 'var(--font-sans)',
+              }}>Cancel</button>
+              <button onClick={montar} disabled={busy || !exterior || !nivel} style={{
+                flex: 2, padding: '9px 0', borderRadius: 8,
+                cursor: busy || !exterior || !nivel ? 'default' : 'pointer',
+                background: busy || !exterior || !nivel ? 'var(--bg-2)' : accent,
+                border: 'none', color: busy || !exterior || !nivel ? 'var(--text-3)' : '#0b0c0e',
+                fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-sans)',
+              }}>{busy ? 'Assembling…' : 'Assemble the level'}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
   asset: UnifiedAsset
   projectId: string
@@ -4753,12 +5054,13 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
   )
 }
 
-function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria }: {
+function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria, onMontaje }: {
   x: number; y: number; asset: UnifiedAsset; projectId: string; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
   onRun: (a: UnifiedAsset) => void
   onHerramienta: (a: UnifiedAsset, h: HerramientaDeAsset) => void
   onLibreria: (a: UnifiedAsset) => void
+  onMontaje: (a: UnifiedAsset, estado: EstadoDeMontaje) => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<string | null>(null)
@@ -4853,11 +5155,11 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
         // De dónde nace la etiqueta al abrir: del centro hacia SU sector. Antes era una tabla de
         // cuatro entradas; con N sectores sale del mismo ángulo que ya posiciona la etiqueta.
         const ang  = ((-90 + i * (360 / n)) * Math.PI) / 180
-        // El montaje todavía no responde al clic: falta elegir el nivel y disparar la cadena. Lo
-        // que ya hace es decir en qué estado está el proyecto —qué falta, o qué niveles usan este
-        // entorno—, que es lo que pide la spec: «fallar de forma explícita señalando qué falta,
-        // nunca generar con datos parciales». Por eso se muestra apagado en vez de esconderse.
+        // El montaje responde siempre que exista el sector, incluso con cosas por resolver: la
+        // ventana es donde se marca el papel de cada modelo y donde se elige el nivel, y es también
+        // donde se lee qué falta. Un sector apagado dejaba el estado en un tooltip.
         const vivo = q.key === 'edit' || q.key === 'run' || q.key === 'library'
+                  || (q.key === 'montaje' && Boolean(montaje?.aplica))
         return (
         <div key={q.key}>
           <div
@@ -4867,6 +5169,7 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
               if (q.key === 'edit') { e.stopPropagation(); setSub(true) }
               if (q.key === 'run')  { e.stopPropagation(); onRun(asset) }
               if (q.key === 'library') { e.stopPropagation(); onLibreria(asset) }
+              if (q.key === 'montaje' && montaje?.aplica) { e.stopPropagation(); onMontaje(asset, montaje) }
             }}
             title={
               q.key === 'edit' ? `${q.label} — open the editing menu`

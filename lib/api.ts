@@ -2087,6 +2087,73 @@ export interface EstadoDeMontaje {
   /** Lo que le falta al proyecto para poder montar, con nombre propio. */
   faltantes?: { que: string; dice: string }[]
   listo?:     boolean
+  /** Los modelos del proyecto y el papel que tiene puesto cada uno. Viene con el estado porque
+   *  quien abre el radial es quien va a marcarlos. */
+  modelos?:   { id: string; nombre: string; papel: string | null }[]
+  /** El vocabulario de papeles, tal como lo declara el kit de Maps_App. */
+  papeles?:   { clave: string; etiqueta: string; estructural: boolean }[]
+}
+
+export interface ResultadoDeMontaje {
+  /** Cuando el entorno lo usan varios niveles: no se monta ninguno, se pregunta cuál. */
+  necesita_nivel?: boolean
+  niveles?:  { nivel: string; entorno: string }[]
+  url?:      string
+  bundle_id?: string
+  bytes?:    number
+  nivel?:    string
+  entorno?:  string
+  /** Si el grafo del nivel se reusó o se generó ahora (generarlo cuesta y cambia la planta). */
+  grafo?:    { id: string; generado: boolean }
+  resumen?:  unknown
+  avisos?:   string[]
+  asset?:    { id: string; name: string; storage_url: string } | null
+}
+
+export interface MarcaDeActualizacion {
+  id:          string
+  nombre:      string
+  url:         string | null
+  /** `R` regenerar (pago, irreversible) · `V` revalidar (mirarla y confirmar, no cuesta). */
+  accion:      'R' | 'V'
+  desde:       string
+  por_pagina:  string | null
+  origenes:    string[]
+}
+
+/** Lo que quedó desactualizado en el proyecto. Nada se regenera solo: esto son marcas, y el gate
+ *  lo pasa una persona una por una (§2.1 del sistema de actualización conectada). */
+export async function getPendientesActualizacion(projectId: string) {
+  return request<{ success: boolean; pendientes: MarcaDeActualizacion[] }>(
+    `/api/projects/${projectId}/canvas/actualizacion`,
+  )
+}
+
+/** El gate humano: la página se miró y sigue valiendo. Levanta la marca y deja el rastro. */
+export async function revalidarAsset(projectId: string, assetId: string) {
+  return request<{ success: boolean; id: string; nombre: string; accion_previa?: 'R' | 'V' }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/revalidar`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) },
+  )
+}
+
+/** Marca qué papel juega un modelo en el montaje — o lo borra con `papel: null`.
+ *
+ *  Qué pieza es el muro exterior no sale de la geometría: es la única decisión de arte que el
+ *  nivel necesita, y sin ella el montaje termina «bien» con cero objetos. */
+export async function marcarPapelDeMontaje(projectId: string, assetId: string, papel: string | null) {
+  return request<{ success: boolean; id: string; nombre: string; papel: string | null }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/montaje/papel`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ papel }) },
+  )
+}
+
+/** Monta el nivel y devuelve el paquete que abre Blender. */
+export async function montarNivel(projectId: string, assetId: string, nivel?: string | null) {
+  return request<{ success: boolean } & ResultadoDeMontaje>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/montaje`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nivel: nivel ?? null }) },
+  )
 }
 
 /** Si esta pieza puede disparar el montaje de un nivel, y qué falta si no.

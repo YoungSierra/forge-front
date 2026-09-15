@@ -1,6 +1,7 @@
 // El alcance del Vertical Slice, tal como lo define la spec de Migue del 08-09.
 //
-// Nueve categorías y veintidós elementos. La agrupación NO es por disciplina —el documento de
+// Once categorías y veintitrés elementos —nueve del ASG y dos del GDD—, tras separar la Animation
+// Sheet de la de personaje y añadir la de Video Marketing el 15-09. La agrupación NO es por disciplina —el documento de
 // alcance ponía VFX, props y paleta todos bajo «Arte · Personajes»— sino por la página del ASG que
 // produce cada cosa, para que el menú y las hojas del moodboard hablen el mismo idioma. Lo que no
 // sale de una página visual —mecánicas, controles, narrativa— se agrupa aparte como GDD y no lleva
@@ -34,7 +35,14 @@ export type CategoriaAlcance = {
 
 export const ALCANCE_VS: CategoriaAlcance[] = [
   {
-    id: 'paleta', nombre: 'Style · Palette', grupo: 'asg', pagina: '02_VisualDNA', orden: 1,
+    // La paleta vive en Color System (p.08) y no en Visual DNA. Lo dice la propia spec de alcance
+    // —«Paleta / materiales quedó en su página propia Color System (p.08), por ser la base que se
+    // aprueba primero»— y la matriz de disparo la trata igual.
+    //
+    // Apuntar a la página equivocada no era un detalle: «Continue here» iluminaba Visual DNA
+    // mientras la guía decía «Style · Palette». Es el punto 11 del informe v5 — el recuadro no
+    // estaba desfasado, estaba en otra hoja.
+    id: 'paleta', nombre: 'Color System · Palette', grupo: 'asg', pagina: '08_ColorSystem', orden: 1,
     elementos: [
       { id: 'paleta_materiales', nombre: 'Palette / materials',
         regla: 'ALL of it (100%) — visual identity',
@@ -53,6 +61,13 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
       { id: 'rigs', nombre: 'Rigs + skinning',
         regla: '1 per model that moves',
         minimo: 'One rig for every character animated in the slice.' },
+    ],
+  },
+  {
+    // Los clips estaban dentro de Character Sheet, así que la guía mandaba a la p.18 a producir
+    // algo que se produce en la 24. En la tabla de alcance son filas de hojas distintas.
+    id: 'animation', nombre: 'Animation Sheet', grupo: 'asg', pagina: '24_AnimationSheet', orden: 8,
+    elementos: [
       { id: 'clips', nombre: 'Animation clips',
         regla: 'counted by listing, clip by clip',
         minimo: 'Idle + movement clips + 1 clip per loop action.' },
@@ -117,7 +132,15 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
     ],
   },
   {
-    id: 'sistemas', nombre: 'Systems and gameplay', grupo: 'gdd', pagina: null, orden: 8,
+    id: 'video_marketing', nombre: 'Video Marketing Sheet', grupo: 'asg', pagina: '25_VideoMarketingSheet', orden: 9,
+    elementos: [
+      { id: 'video_promocional', nombre: 'Promotional video',
+        regla: '1 per promotional video (conditional: only if the game declares promo)',
+        minimo: 'If the scope declares promotional content: at least 1 video.' },
+    ],
+  },
+  {
+    id: 'sistemas', nombre: 'Systems and gameplay', grupo: 'gdd', pagina: null, orden: 10,
     elementos: [
       { id: 'mecanicas', nombre: 'Mechanics',
         regla: 'ALL of the chosen environment (100%)',
@@ -134,7 +157,7 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
     ],
   },
   {
-    id: 'narrativa', nombre: 'Narrative', grupo: 'gdd', pagina: null, orden: 9,
+    id: 'narrativa', nombre: 'Narrative', grupo: 'gdd', pagina: null, orden: 11,
     elementos: [
       { id: 'historia', nombre: 'Story / scenes',
         regla: 'the environment beat',
@@ -159,7 +182,13 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
 // Vive acá y no en el motor porque es una pregunta de la interfaz: el motor ya responde «no hay
 // cadena»; esto decide qué hacer con esa respuesta. Cuando Migue defina los workflows que faltan,
 // se agregan a este conjunto y la guía los empieza a ofrecer sin tocar nada más.
-export const CATEGORIAS_PRODUCIBLES = new Set(['paleta', 'character', 'environment', 'prop', 'audio'])
+export const CATEGORIAS_PRODUCIBLES = new Set([
+  'paleta', 'character', 'environment', 'prop', 'audio',
+  // Desde el 15-09 la UI Component Sheet y la VFX Sheet tienen cadena, el teaser sale de la hoja
+  // de Video Marketing y la pose sheet de la de Animation. Las cuatro dejan de ser callejones
+  // sin salida para la guía.
+  'ui', 'vfx', 'video_marketing', 'animation',
+])
 
 export const esProducible = (c: CategoriaAlcance) =>
   c.grupo === 'gdd' || CATEGORIAS_PRODUCIBLES.has(c.id)
