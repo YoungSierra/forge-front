@@ -34,7 +34,10 @@ import type { Estados } from './vs-scope'
 // consulta a lo que se produce.
 const TABS: { key: string; label: string; formats: string[] }[] = [
   { key: 'refs',    label: 'Refs',        formats: [] },   // ver ARTE: se decide por nodo, no por formato
-  { key: 'docs',    label: 'Docs',        formats: ['document', 'docx', 'pdf', 'pptx', 'md', 'markdown'] },
+  // `json` es un documento a efectos de quien mira: el `<clip>_beats.json` que se lleva a
+  // Cascadeur, el grafo de un nivel. Sin declararlo caía en Concept Art, que es donde va a parar
+  // todo formato desconocido.
+  { key: 'docs',    label: 'Docs',        formats: ['document', 'docx', 'pdf', 'pptx', 'md', 'markdown', 'json'] },
   { key: 'concept', label: 'Concept Art', formats: ['image', 'png', 'jpg', 'jpeg'] },
   // El `.zip` es el paquete de montaje de un nivel: no es una imagen ni un documento, es material
   // 3D. Sin ponerlo acá caía en Concept Art, que es donde va a parar todo formato desconocido.
