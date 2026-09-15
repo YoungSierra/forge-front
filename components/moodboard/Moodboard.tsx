@@ -4493,6 +4493,12 @@ function AvisoModal({ aviso, accent, onClose }: {
 //
 // El nivel tampoco se adivina: si el entorno lo usan varios, se elige. Es el guarda de la spec —
 // fallar señalando qué falta antes que generar con datos parciales.
+/** La cola del nombre, que es lo que diferencia a dos piezas hermanas. */
+const colaDeNombre = (n: string) => {
+  const partes = String(n).split(/\s+[—–]\s+/).filter(Boolean)
+  return partes.length > 2 ? partes.slice(-2).join(' — ') : n
+}
+
 function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onListo }: {
   asset: UnifiedAsset
   projectId: string
@@ -4622,7 +4628,10 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
             {niveles.length > 1 && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 12.5, color: 'var(--text-1)', marginBottom: 7 }}>
-                  <strong>Which level.</strong> {niveles.length} of them use this environment.
+                  <strong>Which level.</strong>{' '}
+                  {estado?.entorno
+                    ? `${niveles.length} of them use this environment.`
+                    : `${niveles.length} in the level map. Pick the one to assemble.`}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {niveles.map(n => (
@@ -4655,10 +4664,24 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
                   display: 'flex', alignItems: 'center', gap: 10, padding: '7px 11px',
                   borderTop: i ? '1px solid var(--line-1)' : 'none',
                 }}>
+                  {/* Lo que distingue a estos modelos vive al FINAL del nombre —«… — parte_07 — 3D
+                      production»— y el recorte por delante los dejaba a los siete idénticos:
+                      «Environment Sheet — 29_EnvironmentSheet …». Se enseña la cola, y el nombre
+                      entero queda en el tooltip. */}
+                  {/* De qué cadena viene. En la primera prueba una vista FRONTAL de personaje
+                      acabó marcada como muro exterior: la lista los ofrecía a todos por igual. Los
+                      del entorno van primero y cada uno dice de dónde sale. */}
+                  <span style={{
+                    flexShrink: 0, fontSize: 8.5, fontFamily: 'var(--font-mono)',
+                    padding: '2px 5px', borderRadius: 4,
+                    background: m.cadena === 'environment_sheet' ? `${accent}22` : 'var(--bg-2)',
+                    color: m.cadena === 'environment_sheet' ? 'var(--text-1)' : 'var(--text-4)',
+                  }}>{m.cadena === 'environment_sheet' ? 'ENV' : m.cadena === 'prop_sheet' ? 'PROP' : 'OTHER'}</span>
                   <span title={m.nombre} style={{
-                    flex: 1, minWidth: 0, fontSize: 11.5, color: 'var(--text-1)',
+                    flex: 1, minWidth: 0, fontSize: 11.5,
+                    color: m.papel ? 'var(--text-1)' : 'var(--text-3)',
                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}>{m.nombre}</span>
+                  }}>{colaDeNombre(m.nombre)}</span>
                   <select
                     value={m.papel ?? ''}
                     onChange={e => marcar(m.id, e.target.value || null)}
@@ -4676,6 +4699,14 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
                 </div>
               ))}
             </div>
+
+            {/* Cuántos se quedan fuera. Un modelo sin papel no se coloca, y con siete filas casi
+                iguales es fácil dejarse uno sin querer. */}
+            {modelos.length > marcados && (
+              <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6, marginBottom: 8 }}>
+                {modelos.length - marcados} model(s) without a role stay out of the level.
+              </div>
+            )}
 
             {!exterior && modelos.length > 0 && (
               <div style={{ fontSize: 11.5, color: '#e8b562', lineHeight: 1.6, marginBottom: 12 }}>

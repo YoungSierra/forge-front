@@ -2093,7 +2093,7 @@ export interface EstadoDeMontaje {
   listo?:     boolean
   /** Los modelos del proyecto y el papel que tiene puesto cada uno. Viene con el estado porque
    *  quien abre el radial es quien va a marcarlos. */
-  modelos?:   { id: string; nombre: string; papel: string | null }[]
+  modelos?:   { id: string; nombre: string; papel: string | null; cadena?: string | null }[]
   /** El vocabulario de papeles, tal como lo declara el kit de Maps_App. */
   papeles?:   { clave: string; etiqueta: string; estructural: boolean }[]
 }
