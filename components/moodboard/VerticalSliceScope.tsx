@@ -28,6 +28,12 @@ type Props = {
   onCerrar?:  () => void
   /** Color de identidad del proyecto; el moodboard ya lo resuelve desde el 3.9. */
   accent?:    string
+  /** Abre el recuadro que crea una hoja por ítem del alcance. Sin este callback el botón no sale:
+   *  cada instancia es un despacho pago y no puede depender de que la pantalla lo suponga. */
+  onInstanciar?: () => void
+  /** Elementos que Forge no puede medir, y por qué. Los demás vienen de lo publicado, así que
+   *  marcarlos a mano ya no tiene sentido: lo medido los pisa en la próxima carga. */
+  sinMedida?: Record<string, string>
 }
 
 const SIGUIENTE: Record<EstadoElemento, EstadoElemento> = {
@@ -75,7 +81,7 @@ function Barra ({ valor, accent }: { valor: number; accent: string }) {
 }
 
 export default function VerticalSliceScope ({
-  estados, onEstados, paginaActiva, onPagina, onCerrar, accent = '#7d8493',
+  estados, onEstados, paginaActiva, onPagina, onCerrar, accent = '#7d8493', sinMedida, onInstanciar,
 }: Props) {
   const [abiertas,  setAbiertas]  = useState<Set<string>>(() => new Set())
   const [minimos,   setMinimos]   = useState(false)
@@ -274,6 +280,14 @@ export default function VerticalSliceScope ({
                                 >
                                   <span style={{ color: COLOR[est], fontSize: 10, width: 10 }}>{MARCA[est]}</span>
                                   <span style={{ flex: 1, fontSize: 11, color: 'var(--text-1)' }}>{el.nombre}</span>
+                                  {/* Que un elemento se lleve a mano no es un detalle: distingue
+                                      «nadie lo ha hecho» de «Forge no puede saberlo». */}
+                                  {sinMedida?.[claveDe(cat.id, el.id)] && (
+                                    <span title={sinMedida[claveDe(cat.id, el.id)]}
+                                      style={{ fontSize: 8.5, color: 'var(--text-4)', fontFamily: 'var(--font-mono)' }}>
+                                      by hand
+                                    </span>
+                                  )}
                                 </div>
                                 <div style={{ fontSize: 9.5, color: 'var(--text-3)', marginLeft: 16 }}>{el.regla}</div>
                                 {minimos && (
@@ -302,7 +316,15 @@ export default function VerticalSliceScope ({
             <span style={{ color: COLOR.pendiente }}>○</span><span>pending</span>
             <span style={{ color: COLOR.en_progreso }}>●</span><span>in progress</span>
             <span style={{ color: COLOR.aprobado }}>✓</span><span>approved</span>
-            <button onClick={() => setMinimos(m => !m)} style={{ ...botonIcono, marginLeft: 'auto', fontSize: 9.5, width: 'auto', padding: '2px 6px' }}>
+            {onInstanciar && (
+              <button
+                onClick={onInstanciar}
+                title="Create one sheet per item of the scope. Every instance is a paid run, so it asks first."
+                style={{ ...botonIcono, marginLeft: 'auto', fontSize: 9.5, width: 'auto', padding: '2px 6px',
+                         borderColor: `${accent}66`, color: accent }}
+              >Create the sheets</button>
+            )}
+            <button onClick={() => setMinimos(m => !m)} style={{ ...botonIcono, marginLeft: onInstanciar ? 0 : 'auto', fontSize: 9.5, width: 'auto', padding: '2px 6px' }}>
               {minimos ? 'Hide minimums' : 'Show minimums'}
             </button>
           </div>

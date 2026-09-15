@@ -1968,6 +1968,9 @@ export type PasoDeCadena = {
    *  tantos como partes haya — veinte en el escenario. Cada despacho es pago y no se repite, así
    *  que el recuadro lo dice antes de que alguien apriete. */
   despachos?: number
+  /** Las animaciones que produciría este paso, para poder elegir cuáles correr (informe de JuanK,
+   *  punto 1). Vacío = todavía no se han leído del ADI; el Run las lee al correr. */
+  clips?: { nombre: string; etiqueta: string }[]
   por_cada_salida_de?: string | null
 }
 
@@ -1983,7 +1986,7 @@ export async function getNextChainStep(projectId: string, assetId: string) {
 export async function advanceAsset(
   projectId: string, assetId: string,
   opts: { pasos?: number; prompt?: string | null; memberId?: string | null; limitePorCada?: number
-          opciones?: Record<string, unknown> | null } = {},
+          opciones?: Record<string, unknown> | null; clips?: string[] | null } = {},
 ) {
   return request<{ success: boolean; cadena: string; creados: { id: string; name: string; storage_url: string; format: string }[] }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/advance`,
@@ -1993,6 +1996,7 @@ export async function advanceAsset(
         pasos: opts.pasos ?? 1, prompt: opts.prompt ?? null, member_id: opts.memberId ?? null,
         limite_por_cada: opts.limitePorCada ?? 0,
         opciones: opts.opciones ?? null,
+        clips: opts.clips ?? null,
       }),
     },
   )
@@ -2119,6 +2123,81 @@ export interface MarcaDeActualizacion {
   desde:       string
   por_pagina:  string | null
   origenes:    string[]
+}
+
+export interface PlanDeInstancias {
+  hay:      boolean
+  motivo?:  string
+  paginas:  { pagina: string; indice: number; kind: string
+              items: { nombre: string; de: string; cuenta: number }[] }[]
+  /** Cuántos despachos son en total. Cada uno se paga. */
+  despachos: number
+  ausentes?:       string[]
+  sin_clasificar?: { nombre: string; cuenta: number; de: string }[]
+  no_son_laminas?: { nombre: string; cuenta: number }[]
+  avisos?:         string[]
+}
+
+/** Qué hojas pide el alcance y cuántas corridas son. No despacha nada: es lo que el recuadro
+ *  enseña antes de cobrar. */
+export async function getPlanDeInstancias(projectId: string) {
+  return request<{ success: boolean } & PlanDeInstancias>(
+    `/api/projects/${projectId}/canvas/alcance/plan`)
+}
+
+/** Y el que gasta. Las páginas las nombra quien llama, nunca por defecto. */
+export async function instanciarHojas(projectId: string, paginas: PlanDeInstancias['paginas'], limite = 0) {
+  return request<{ success: boolean; creados: { id: string; name: string }[]
+                   fallos: { pagina: string; item: { nombre: string }; motivo: string }[]
+                   pedidos: number; de: number }>(
+    `/api/projects/${projectId}/canvas/alcance/instanciar`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paginas, limite }) })
+}
+
+export interface DestinoDeContexto {
+  clave:      string
+  titulo:     string
+  adi?:       string | null
+  pagina?:    string | null
+  /** `directa` = entra en el hueco REF_* de la página · `indirecta` = influye vía su §ADI. */
+  inyeccion:  'directa' | 'indirecta' | 'ninguna'
+  porque?:    string
+}
+
+/** Paso 3 de «Agregar contexto»: a dónde iría esto. No escribe nada — el destino lo confirma una
+ *  persona, que es lo que pide el handoff. */
+export async function destinoDeContexto(projectId: string, body: {
+  rol: string; ambito: string; cual?: string | null; formato?: 'imagen' | 'texto'
+}) {
+  return request<{
+    success: boolean; rol: string; ambito: string; estado: string; formato: string
+    principal: DestinoDeContexto; alternativas: DestinoDeContexto[]; avisos: string[]
+    roles: { clave: string; etiqueta: string }[]
+  }>(`/api/projects/${projectId}/canvas/contexto/destino`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+}
+
+/** Paso 4: aprobar. Guarda el contexto con sus metadatos y dispara la cascada si cae en una
+ *  página concreta. */
+export async function guardarContexto(projectId: string, body: {
+  nombre: string; url?: string | null; texto?: string | null
+  destino: DestinoDeContexto; rol: string; ambito: string; estado?: string; primary?: boolean
+}) {
+  return request<{ success: boolean; activo: { id: string; name: string } | null
+                   cascada: { marcadas?: { nombre: string; accion: string }[] } | null
+                   alimenta_3_9: boolean }>(
+    `/api/projects/${projectId}/canvas/contexto`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+}
+
+/** El progreso del alcance medido contra lo publicado: qué elementos produjo de verdad una cadena.
+ *  Lo que Forge no puede medir no viene en `estados` y `sin_medida` dice por qué — ahí el panel
+ *  conserva lo que marcó una persona. */
+export async function getEstadosDelAlcance(projectId: string) {
+  return request<{ success: boolean; estados: Record<string, 'pendiente' | 'en_progreso' | 'aprobado'>; sin_medida: Record<string, string> }>(
+    `/api/projects/${projectId}/canvas/alcance/estados`,
+  )
 }
 
 /** Lo que quedó desactualizado en el proyecto. Nada se regenera solo: esto son marcas, y el gate

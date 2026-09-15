@@ -19,7 +19,9 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion } from '@/lib/api'
+import ContextoModal from './ContextoModal'
+import InstanciarModal from './InstanciarModal'
+import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import VerticalSliceScope from './VerticalSliceScope'
@@ -278,6 +280,27 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       if (guardado) setAlcance(JSON.parse(guardado) as Estados)
     } catch { /* sin almacenamiento se sigue en memoria, que es como estaba */ }
   }, [claveAlcance])
+
+  // Y encima de lo marcado a mano, lo MEDIDO: qué produjo de verdad cada cadena. Un panel que
+  // avanza solo con clics enseña un progreso que nadie produjo, y el Frente 8 del plan de QA pide
+  // validar justamente el progreso por categoría.
+  //
+  // Lo medido gana donde existe, porque es un hecho y lo otro es una intención. Donde Forge no
+  // puede medir —los rigs se hacen en Cascadeur, los encuentros son una decisión de diseño— no
+  // llega nada y se conserva lo que marcó la persona, que ahí sigue siendo el mejor dato.
+  const [sinMedida, setSinMedida] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let vivo = true
+    getEstadosDelAlcance(projectId)
+      .then(r => {
+        if (!vivo) return
+        setSinMedida(r.sin_medida || {})
+        const medidos = r.estados || {}
+        if (Object.keys(medidos).length) setAlcance(a => ({ ...a, ...medidos }))
+      })
+      .catch(() => { /* sin medida, el panel sigue con lo marcado a mano */ })
+    return () => { vivo = false }
+  }, [projectId])
   useEffect(() => {
     try {
       if (Object.keys(alcance).length) window.localStorage.setItem(claveAlcance, JSON.stringify(alcance))
@@ -334,6 +357,13 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // El montaje de un nivel. Se guarda el estado que ya trajo el radial —los modelos, sus papeles y
   // los niveles del entorno— para no volver a pedirlo al abrir la ventana.
   const [montando, setMontando] = useState<{ asset: UnifiedAsset; estado: EstadoDeMontaje } | null>(null)
+  // «Agregar contexto»: el sector existía en el radial desde el principio y no llevaba a ningún
+  // sitio. La ventana son los cuatro pasos del handoff; las reglas de a dónde va cada archivo las
+  // resuelve el backend, no esta pantalla.
+  const [contexto, setContexto] = useState<UnifiedAsset | null>(null)
+  // El recuadro que crea una hoja por ítem del alcance. Vive en el panel y no en el radial porque
+  // no es una acción sobre UNA pieza: es sobre lo que el slice pide entero.
+  const [instanciando, setInstanciando] = useState(false)
   // Qué quedó desactualizado al aprobar una página, con su acción sugerida: [R] regenerar o [V]
   // revalidar. Nada se regenera solo —generar cuesta y no es reproducible—, así que esto es una
   // marca y el gate lo pasa una persona.
@@ -1577,6 +1607,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
               onPagina={setPaginaAlcance}
               onCerrar={() => setAlcanceAbierto(false)}
               accent={theme.accent}
+              sinMedida={sinMedida}
+              onInstanciar={() => setInstanciando(true)}
             />
           )}
           {/* Las cuatro páginas viven abajo, fijas. Antes había marcas laterales de «atrás» y
@@ -2286,7 +2318,37 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             // El montaje no genera imagen: arma el paquete que abre Blender. Igual
                             // que Run, primero la ventana — acá además se marca qué papel juega
                             // cada modelo, que es lo que le faltaba al disparador para responder.
-                            onMontaje={(a, estado) => { setMenu(null); setMontando({ asset: a, estado }) }} />}
+                            onMontaje={(a, estado) => { setMenu(null); setMontando({ asset: a, estado }) }}
+                            onContexto={a => { setMenu(null); setContexto(a) }} />}
+
+      {instanciando && (
+        <InstanciarModal
+          projectId={projectId}
+          accent={theme.accent}
+          onCerrar={() => setInstanciando(false)}
+          onListo={r => {
+            setInstanciando(false)
+            setAviso(`${r.creados} sheet(s) created${r.fallos ? ` · ${r.fallos} did not come out` : ''}`)
+            reload()
+          }}
+        />
+      )}
+
+      {contexto && (
+        <ContextoModal
+          projectId={projectId}
+          paginas={assets}
+          accent={theme.accent}
+          onCerrar={() => setContexto(null)}
+          onListo={r => {
+            setContexto(null)
+            setAviso(`"${r.nombre}" added to ${r.destino}`
+              + (r.marcadas ? ` · ${r.marcadas} page(s) marked for review` : ''))
+            cargarMarcas()
+            reload()
+          }}
+        />
+      )}
 
       {montando && (
         <AvisoMontaje
@@ -3474,7 +3536,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
 //   visual    — el menú radial de la referencia, con las cuatro acciones de la v.3.
 // Las acciones del radial todavía no hacen nada: se cablean en la Iteración 2 (contexto y
 // output) y en la 3 (edición). Se muestran apagadas en vez de simular que responden.
-function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria, onMontaje }: {
+function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria, onMontaje, onContexto }: {
   x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
   onRun: (a: UnifiedAsset) => void
@@ -3482,11 +3544,12 @@ function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar,
   onHerramienta: (a: UnifiedAsset, h: HerramientaDeAsset) => void
   onLibreria: (a: UnifiedAsset) => void
   onMontaje: (a: UnifiedAsset, estado: EstadoDeMontaje) => void
+  onContexto: (a: UnifiedAsset) => void
 }) {
   // La descarga directa es solo para documentos; lo visual abre el radial.
   return kindOf(asset) === 'doc'
     ? <DownloadMenu x={x} y={y} asset={asset} onDone={onDone} />
-    : <RadialMenu   x={x} y={y} asset={asset} projectId={projectId} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} onHerramienta={onHerramienta} onLibreria={onLibreria} onMontaje={onMontaje} />
+    : <RadialMenu   x={x} y={y} asset={asset} projectId={projectId} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} onHerramienta={onHerramienta} onLibreria={onLibreria} onMontaje={onMontaje} onContexto={onContexto} />
 }
 
 function DownloadMenu({ x, y, asset, onDone }: {
@@ -4574,6 +4637,10 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
   // Las opciones de generación del workflow (informe v3, punto 12). Se piden al backend, que las
   // descubre preguntándole a ComfyUI: escribirlas acá envejecería en silencio y el valor inválido
   // se descubriría recién al pagar la corrida.
+  // Las animaciones que se dejan fuera de ESTA corrida. Lo que no se elige no se pierde: sigue
+  // disponible para otra. Es el punto 1 del informe de JuanK — hasta ahora Run producía el set
+  // entero y cada lámina se paga.
+  const [fuera,    setFuera]    = useState<Set<string>>(() => new Set())
   const [ops,      setOps]      = useState<OpcionWorkflow[] | null>(null)
   const [tamano,   setTamano]   = useState<{ imagenes: number; usd: number } | null>(null)
   const [elegidas, setElegidas] = useState<Record<string, unknown>>({})
@@ -4638,12 +4705,19 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
     return (o.sube_costo ?? []).includes(String(v))
   })
 
+  // Lo que se va a despachar DE VERDAD, que con una selección ya no es lo que declara el paso.
+  // Un aviso que dice ocho cuando van tres es peor que no avisar.
+  const despachosReales = paso?.clips?.length ? paso.clips.length - fuera.size : (paso?.despachos ?? 1)
+
   const correr = async (limitePorCada = 0) => {
     if (!paso || busy) return
     setBusy(true); setError(null)
     try {
       const r = await advanceAsset(projectId, asset.id, {
         pasos: 1, prompt: paso.pide_prompt ? texto : null, limitePorCada,
+        // Qué animaciones correr. Null = todas, que es como venía funcionando; la selección solo
+        // existe cuando el paso las enumera.
+        clips: paso.clips?.length && fuera.size ? paso.clips.filter(c => !fuera.has(c.nombre)).map(c => c.nombre) : null,
         // Solo lo que el usuario CAMBIÓ. Mandar el catálogo entero reescribiría cada nodo con lo
         // que ya tenía y convertiría cualquier futuro cambio del workflow en letra muerta.
         opciones: Object.keys(cambiadas).length ? cambiadas : null,
@@ -4828,14 +4902,47 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
               </div>
             )}
 
+            {/* Qué animaciones correr. Solo aparece cuando el paso las enumera — hoy, la hoja de
+                poses. Sin esto el Run producía siempre el set completo. */}
+            {!!paso.clips?.length && (
+              <div style={{ marginBottom: 14, border: '1px solid var(--line-2)', borderRadius: 9, padding: '8px 11px' }}>
+                <div style={{ fontSize: 11.5, color: 'var(--text-1)', marginBottom: 6 }}>
+                  Which animations to produce
+                  <span style={{ float: 'right', fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-3)' }}>
+                    {paso.clips.length - fuera.size}/{paso.clips.length}
+                  </span>
+                </div>
+                {paso.clips.map(c => {
+                  const dentro = !fuera.has(c.nombre)
+                  return (
+                    <div key={c.nombre}
+                      onClick={() => setFuera(f => {
+                        const n = new Set(f)
+                        if (n.has(c.nombre)) n.delete(c.nombre)
+                        // Dejar la corrida en cero no es elegir: es cancelarla, y para eso está Cancel.
+                        else if (paso.clips!.length - n.size > 1) n.add(c.nombre)
+                        return n
+                      })}
+                      style={{ display: 'flex', gap: 7, alignItems: 'baseline', padding: '3px 0', cursor: 'pointer' }}>
+                      <span style={{ fontSize: 10, width: 11, color: dentro ? accent : 'var(--text-4)' }}>{dentro ? '●' : '○'}</span>
+                      <span style={{
+                        fontSize: 11.5, color: dentro ? 'var(--text-1)' : 'var(--text-4)',
+                        textDecoration: dentro ? 'none' : 'line-through',
+                      }}>{c.etiqueta}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
             <div style={{
               fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.55, marginBottom: 18,
               padding: '9px 11px', borderRadius: 8,
               background: 'color-mix(in srgb, #F59E0B 7%, transparent)',
               border: '1px solid color-mix(in srgb, #F59E0B 22%, var(--line-2))',
             }}>
-              {(paso.despachos ?? 1) > 1
-                ? `This runs ${paso.despachos} separate jobs — one per part. Each one is paid and
+              {(despachosReales ?? 1) > 1
+                ? `This runs ${despachosReales} separate jobs — one per part. Each one is paid and
                    none of them can be reproduced.`
                 : 'Spends credit, and running it again never returns the same result.'}
               {' '}The output is published to the right of this page, connected to it.
@@ -4885,10 +4992,10 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
                   fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-sans)',
                   opacity: busy || (paso.pide_prompt && !texto.trim()) ? 0.55 : 1,
                 }}
-              >{busy ? 'Running…' : (paso.despachos ?? 1) > 1 ? `Run all ${paso.despachos}` : 'Run'}</button>
+              >{busy ? 'Running…' : despachosReales > 1 ? `Run all ${despachosReales}` : 'Run'}</button>
             </div>
 
-            {(paso.despachos ?? 1) > 1 && !busy && (
+            {despachosReales > 1 && !busy && (
               // Mirar una antes de comprometer veinte. Las que no corras siguen ahí: cada parte
               // arranca desde sí misma, así que avanzarlas después no pierde nada.
               <button
@@ -4898,7 +5005,7 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
                   background: 'transparent', border: '1px dashed var(--line-2)',
                   color: 'var(--text-3)', fontSize: 11, fontFamily: 'var(--font-sans)',
                 }}
-              >Run just the first one — check before committing to {paso.despachos}</button>
+              >Run just the first one — check before committing to {despachosReales}</button>
             )}
           </>
         )}
@@ -5054,13 +5161,14 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
   )
 }
 
-function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria, onMontaje }: {
+function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria, onMontaje, onContexto }: {
   x: number; y: number; asset: UnifiedAsset; projectId: string; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
   onRun: (a: UnifiedAsset) => void
   onHerramienta: (a: UnifiedAsset, h: HerramientaDeAsset) => void
   onLibreria: (a: UnifiedAsset) => void
   onMontaje: (a: UnifiedAsset, estado: EstadoDeMontaje) => void
+  onContexto: (a: UnifiedAsset) => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<string | null>(null)
@@ -5158,7 +5266,7 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
         // El montaje responde siempre que exista el sector, incluso con cosas por resolver: la
         // ventana es donde se marca el papel de cada modelo y donde se elige el nivel, y es también
         // donde se lee qué falta. Un sector apagado dejaba el estado en un tooltip.
-        const vivo = q.key === 'edit' || q.key === 'run' || q.key === 'library'
+        const vivo = q.key === 'edit' || q.key === 'run' || q.key === 'library' || q.key === 'context'
                   || (q.key === 'montaje' && Boolean(montaje?.aplica))
         return (
         <div key={q.key}>
@@ -5170,6 +5278,7 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
               if (q.key === 'run')  { e.stopPropagation(); onRun(asset) }
               if (q.key === 'library') { e.stopPropagation(); onLibreria(asset) }
               if (q.key === 'montaje' && montaje?.aplica) { e.stopPropagation(); onMontaje(asset, montaje) }
+              if (q.key === 'context') { e.stopPropagation(); onContexto(asset) }
             }}
             title={
               q.key === 'edit' ? `${q.label} — open the editing menu`
