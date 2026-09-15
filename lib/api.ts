@@ -2240,9 +2240,9 @@ export async function montarNivel(projectId: string, assetId: string, nivel?: st
  *  La spec pone el disparador «en el Environment Sheet», que en Forge no es un objeto sino un
  *  conjunto de imágenes de tres nodos. Se resuelve colgándolo de la única que nombra su entorno.
  *  Igual que con las herramientas, la regla vive en el backend y no acá. */
-export async function getMontajeDeAsset(projectId: string, assetId: string) {
+export async function getMontajeDeAsset(projectId: string, assetId: string, desdeCadena = false) {
   return request<{ success: boolean } & EstadoDeMontaje>(
-    `/api/projects/${projectId}/canvas/assets/${assetId}/montaje`,
+    `/api/projects/${projectId}/canvas/assets/${assetId}/montaje${desdeCadena ? '?cadena=1' : ''}`,
   )
 }
 

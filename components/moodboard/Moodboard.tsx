@@ -359,7 +359,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const [herram, setHerram] = useState<{ asset: UnifiedAsset; h: HerramientaDeAsset } | null>(null)
   // El montaje de un nivel. Se guarda el estado que ya trajo el radial —los modelos, sus papeles y
   // los niveles del entorno— para no volver a pedirlo al abrir la ventana.
-  const [montando, setMontando] = useState<{ asset: UnifiedAsset; estado: EstadoDeMontaje } | null>(null)
+  const [montando, setMontando] = useState<{ asset: UnifiedAsset; estado: EstadoDeMontaje | null } | null>(null)
   // «Agregar contexto»: el sector existía en el radial desde el principio y no llevaba a ningún
   // sitio. La ventana son los cuatro pasos del handoff; las reglas de a dónde va cada archivo las
   // resuelve el backend, no esta pantalla.
@@ -2412,6 +2412,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           projectId={projectId}
           accent={theme.accent}
           onCancel={() => setCorriendo(null)}
+          onMontaje={a => { setCorriendo(null); setMontando({ asset: a, estado: null }) }}
           onListo={ids => {
             setCorriendo(null)
             // Los ids vienen del propio despacho, así que no hay que adivinar qué es nuevo:
@@ -4492,22 +4493,40 @@ function AvisoModal({ aviso, accent, onClose }: {
 //
 // El nivel tampoco se adivina: si el entorno lo usan varios, se elige. Es el guarda de la spec —
 // fallar señalando qué falta antes que generar con datos parciales.
-function AvisoMontaje({ asset, projectId, estado, accent, onCancel, onListo }: {
+function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onListo }: {
   asset: UnifiedAsset
   projectId: string
-  estado: EstadoDeMontaje
+  /** El estado que ya traía el radial. Sin él —cuando se llega desde el paso 3 del Run— la ventana
+   *  lo pide ella misma por el camino de la cadena, donde los niveles salen del level_map entero. */
+  estado: EstadoDeMontaje | null
   accent: string
   onCancel: () => void
   onListo: (idNuevo: string | null) => void
 }) {
-  const [modelos, setModelos] = useState(estado.modelos ?? [])
-  const niveles = estado.niveles ?? []
+  const [estado, setEstado] = useState<EstadoDeMontaje | null>(dado)
+  useEffect(() => {
+    if (dado) return
+    let vivo = true
+    getMontajeDeAsset(projectId, asset.id, true)
+      .then(r => { if (vivo) { setEstado(r); setModelos(r.modelos ?? []) } })
+      .catch(() => { if (vivo) setEstado({ aplica: true, faltantes: [{ que: 'estado', dice: 'Could not read what this level needs' }] }) })
+    return () => { vivo = false }
+  }, [dado, projectId, asset.id])
+
+  const [modelos, setModelos] = useState(dado?.modelos ?? [])
+  const niveles = estado?.niveles ?? []
   const [nivel, setNivel] = useState<string | null>(niveles.length === 1 ? niveles[0].nivel : null)
   const [busy,  setBusy]  = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hecho, setHecho] = useState<ResultadoDeMontaje | null>(null)
 
-  const papeles   = estado.papeles ?? []
+  const papeles   = estado?.papeles ?? []
+  // «Ningún modelo tiene su papel asignado» NO es un bloqueo: es exactamente lo que esta ventana
+  // sirve para arreglar. Tratarlo como los demás faltantes dejaba un callejón sin salida — el
+  // aviso decía qué falta y el único botón era «Got it». Lo que de verdad bloquea es lo que no se
+  // puede resolver desde aquí: que no haya level_map, que los modelos no estén medidos, o que el
+  // generador no esté configurado.
+  const bloqueantes = (estado?.faltantes ?? []).filter(f => f.que !== 'gramatica')
   const exterior  = modelos.find(m => m.papel === 'muro_exterior')
   const marcados  = modelos.filter(m => m.papel).length
 
@@ -4551,7 +4570,7 @@ function AvisoMontaje({ asset, projectId, estado, accent, onCancel, onListo }: {
           fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '.08em',
           color: accent, marginBottom: 9,
         }}>
-          ASSEMBLE LEVEL{estado.entorno ? ` · ${estado.entorno.toUpperCase()}` : ''}
+          ASSEMBLE LEVEL{estado?.entorno ? ` · ${estado.entorno.toUpperCase()}` : ''}
         </div>
 
         {hecho ? (
@@ -4580,13 +4599,15 @@ function AvisoMontaje({ asset, projectId, estado, accent, onCancel, onListo }: {
               fontSize: 12, fontFamily: 'var(--font-sans)',
             }}>Done</button>
           </>
-        ) : estado.faltantes?.length ? (
+        ) : !estado ? (
+          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Working out what this level needs…</div>
+        ) : bloqueantes.length ? (
           <>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 9 }}>
               This level cannot be assembled yet
             </div>
             <ul style={{ margin: '0 0 16px', paddingLeft: 16, fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.7 }}>
-              {estado.faltantes.map(f => <li key={f.que}>{f.dice}</li>)}
+              {bloqueantes.map(f => <li key={f.que}>{f.dice}</li>)}
             </ul>
             <button onClick={onCancel} style={{
               width: '100%', padding: '9px 0', borderRadius: 8, cursor: 'pointer',
@@ -4691,12 +4712,15 @@ function AvisoMontaje({ asset, projectId, estado, accent, onCancel, onListo }: {
   )
 }
 
-function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
+function AvisoRun({ asset, projectId, accent, onCancel, onListo, onMontaje }: {
   asset: UnifiedAsset
   projectId: string
   accent: string
   onCancel: () => void
   onListo: (idsNuevos: string[]) => void
+  /** El paso de montaje no se despacha como los demás: necesita que alguien marque el papel de
+   *  cada modelo y elija nivel. Se cede a la ventana que ya hace eso, en vez de duplicarla acá. */
+  onMontaje: (a: UnifiedAsset) => void
 }) {
   const [paso,  setPaso]  = useState<PasoDeCadena | null | undefined>(undefined)
   const [texto, setTexto] = useState('')
@@ -4727,6 +4751,12 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
       .catch(() => { if (vivo) setPaso(null) })
     return () => { vivo = false }
   }, [projectId, asset.id])
+
+  // Montaje: no hay workflow que configurar ni imágenes que estimar. Se cede en cuanto se sabe.
+  useEffect(() => {
+    if (paso?.clave === 'montaje') onMontaje(asset)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paso?.clave])
 
   // Las opciones dependen del workflow del paso, así que se piden recién cuando el paso se conoce.
   useEffect(() => {
