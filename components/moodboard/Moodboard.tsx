@@ -378,7 +378,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // llega el menú ya se cerró, y sin origen no hay «a la derecha de» que valga (§9).
   const origenDeLaPublicacion = useRef<string | null>(null)
   const [editando, setEditando] = useState<UnifiedAsset | null>(null)
-  const [aviso,    setAviso]    = useState<string | null>(null)
+  // Un aviso no siempre es un «no se puede». Se reusó el modal de «Not available yet» —con su
+  // candado y su explicación de Iteration— para anunciar que un contexto se había añadido bien, y
+  // en pantalla quedó un éxito disfrazado de bloqueo. Miguel preguntó qué era eso, con razón.
+  const [aviso,    setAviso]    = useState<{ titulo: string; cuerpo: string; tono: 'bloqueo' | 'hecho' } | null>(null)
 
   useEffect(() => {
     if (!menu) return
@@ -2295,7 +2298,12 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                               setMenu(null)
                               const pg = paginaASG(a)
                               if (pg) setIterando({ asset: a, pagina: pg })
-                              else setAviso(`"${outputOf(a) ?? a.name}" is not one of them.`)
+                              else setAviso({
+                                titulo: 'Not available yet',
+                                tono: 'bloqueo',
+                                cuerpo: 'Iteration currently runs on Art Style Guide pages, where a single page can be '
+                                      + `re-rendered on its own. "${outputOf(a) ?? a.name}" is not one of them.`,
+                              })
                             }}
                             // Design Edits no exige que el activo sea una página de un deck: edita
                             // la imagen que haya, sea de donde sea.
@@ -2328,7 +2336,13 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           onCerrar={() => setInstanciando(false)}
           onListo={r => {
             setInstanciando(false)
-            setAviso(`${r.creados} sheet(s) created${r.fallos ? ` · ${r.fallos} did not come out` : ''}`)
+            setAviso({
+              titulo: `${r.creados} sheet${r.creados === 1 ? '' : 's'} created`,
+              tono: 'hecho',
+              cuerpo: r.fallos
+                ? `${r.fallos} did not come out. What was produced is published; those can be run again.`
+                : 'They are published to the right of their page, ready to run.',
+            })
             reload()
           }}
         />
@@ -2342,8 +2356,12 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           onCerrar={() => setContexto(null)}
           onListo={r => {
             setContexto(null)
-            setAviso(`"${r.nombre}" added to ${r.destino}`
-              + (r.marcadas ? ` · ${r.marcadas} page(s) marked for review` : ''))
+            setAviso({
+              titulo: 'Context added',
+              tono: 'hecho',
+              cuerpo: `"${r.nombre}" went to ${r.destino}.`
+                + (r.marcadas ? ` ${r.marcadas} page(s) that depend on it are marked for review.` : ''),
+            })
             cargarMarcas()
             reload()
           }}
@@ -2433,7 +2451,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           onListo={recargarYPublicar}
         />
       )}
-      {aviso    && <NoDisponible  que={aviso}      accent={theme.accent} onClose={() => setAviso(null)} />}
+      {aviso    && <AvisoModal    aviso={aviso}    accent={theme.accent} onClose={() => setAviso(null)} />}
 
       {/* Menú del documento. Una sola opción hoy; existe como menú y no como botón porque el
           informe pide el gesto de clic derecho sobre la sección. */}
@@ -2808,6 +2826,8 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
   const v    = useVideoThumb(kind === 'video' ? url : '', asset.id)
   const a    = useAudioThumb(kind === 'audio' ? url : '', asset.id, vivido(colors, accent))
   const glb = g.data, vid = v.data, aud = a.data
+  // Si esta tarjeta está mostrando el modelo vivo en vez de su silueta.
+  const [vivo3d, setVivo3d] = useState(false)
   // El ícono es el marcador de posición mientras se calcula la miniatura; late para que se lea
   // como "trabajando" y no como resultado final, y la miniatura entra fundida en vez de saltar.
   const calculando = g.cargando || v.cargando || a.cargando
@@ -2870,6 +2890,24 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
         }}>[{marca.accion}]</div>
       )}
 
+      {/* Encender el modelo en la propia tarjeta. Solo en las de 3D, y solo cuando el cursor está
+          encima o está seleccionada: un botón permanente en veinte tarjetas es ruido. */}
+      {kind === '3d' && url && (hover || selected || vivo3d) && (
+        <button
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); setVivo3d(v => !v) }}
+          title={vivo3d ? 'Back to the still thumbnail' : 'Turn the model here — drag to orbit it'}
+          style={{
+            position: 'absolute', right: 7, bottom: 7, zIndex: 3,
+            padding: '3px 8px', borderRadius: 999, cursor: 'pointer',
+            background: vivo3d ? accent : 'rgba(6,7,9,0.72)',
+            border: `1px solid ${vivo3d ? accent : 'rgba(255,255,255,0.18)'}`,
+            color: vivo3d ? '#0b0c0e' : '#fff', backdropFilter: 'blur(3px)',
+            fontSize: 9.5, fontFamily: 'var(--font-mono)', letterSpacing: '.04em',
+          }}
+        >{vivo3d ? 'STILL' : 'TURN'}</button>
+      )}
+
       {kind === 'image' && url ? (
         // `contain` y no `cover`: una hoja de guía de estilo recortada pierde justo lo que hay
         // que leer, y estas páginas tienen que verse enteras. Se pide en tamaño grande porque el
@@ -2899,6 +2937,23 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={aud.img} alt=""
                style={{ flex: 1, minWidth: 0, opacity: aud.real ? 1 : 0.6, animation: 'mb-aparece 420ms ease' }} />
+        </div>
+      ) : kind === '3d' && vivo3d ? (
+        // El modelo, girable SIN abrir la hoja en grande. Pedido de Miguel el 15-09: la tarjeta
+        // enseñaba una silueta quieta y había que ampliar para poder mirarlo por detrás.
+        //
+        // No va encendido de fábrica: cada visor abre un contexto WebGL y carga un módulo de casi
+        // un mega. Con veinte modelos en el lienzo, encenderlos todos tumba la pestaña — así que
+        // se enciende el que se pide, de a uno.
+        //
+        // `stopPropagation` en el puntero es lo que hace que arrastrar gire el modelo en vez de
+        // mover la tarjeta por el lienzo: ese arrastre lo escucha el contenedor de arriba.
+        <div
+          onPointerDown={e => e.stopPropagation()}
+          onDoubleClick={e => e.stopPropagation()}
+          style={{ width: '100%', height: '100%' }}
+        >
+          <ModelViewer url={url} style={{ width: '100%', height: '100%' }} />
         </div>
       ) : kind === '3d' && glb ? (
         // Silueta de la geometría real del modelo, no un ícono. Ver lib/glb-thumb.
@@ -4361,8 +4416,17 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
   )
 }
 
-// Aviso para lo que todavía no se puede iterar. No se disfraza de error: dice qué falta.
-function NoDisponible({ que, accent, onClose }: { que: string; accent: string; onClose: () => void }) {
+// Un aviso, con su propio título y su propio tono. Antes esto era SOLO el «no se puede iterar»,
+// con el candado y la explicación de Iteration escritos dentro, y cualquier otro mensaje que
+// pasara por aquí heredaba ese marco: un contexto añadido correctamente aparecía bajo un candado
+// que decía «Not available yet». Lo que bloquea y lo que salió bien no pueden verse igual.
+function AvisoModal({ aviso, accent, onClose }: {
+  aviso: { titulo: string; cuerpo: string; tono: 'bloqueo' | 'hecho' }
+  accent: string
+  onClose: () => void
+}) {
+  const hecho = aviso.tono === 'hecho'
+  const color = hecho ? '#3fb950' : accent
   return (
     <div
       onClick={onClose}
@@ -4380,25 +4444,26 @@ function NoDisponible({ que, accent, onClose }: { que: string; accent: string; o
         <div style={{
           width: 40, height: 40, borderRadius: '50%', margin: '0 auto 12px',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: `${accent}14`, border: `1px solid ${accent}44`,
+          background: `${color}14`, border: `1px solid ${color}44`,
         }}>
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={accent}
-               strokeWidth="1.8" strokeLinecap="round">
-            <rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={color}
+               strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            {hecho
+              ? <path d="M20 6 9 17l-5-5" />
+              : <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>}
           </svg>
         </div>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-0)', marginBottom: 6 }}>
-          Not available yet
+          {aviso.titulo}
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.55, marginBottom: 16 }}>
-          Iteration currently runs on <strong style={{ color: 'var(--text-1)' }}>Art Style Guide</strong> pages,
-          where a single page can be re-rendered on its own. {que}
+          {aviso.cuerpo}
         </div>
         <button
           onClick={onClose}
           style={{
             width: '100%', padding: '8px 0', borderRadius: 8, cursor: 'pointer',
-            background: 'transparent', border: `1px solid ${accent}66`, color: accent,
+            background: 'transparent', border: `1px solid ${color}66`, color,
             fontSize: 12, fontFamily: 'var(--font-sans)',
           }}
         >Got it</button>
@@ -4406,6 +4471,7 @@ function NoDisponible({ que, accent, onClose }: { que: string; accent: string; o
     </div>
   )
 }
+
 
 // ── Recuadro previo a Run (§8) ───────────────────────────────────────────────
 // Run no dispara de una. Antes dice QUÉ se va a generar y POR QUÉ hace falta para el vertical
@@ -4641,6 +4707,7 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
   // disponible para otra. Es el punto 1 del informe de JuanK — hasta ahora Run producía el set
   // entero y cada lámina se paga.
   const [fuera,    setFuera]    = useState<Set<string>>(() => new Set())
+  const [leyendo,  setLeyendo]  = useState(false)
   const [ops,      setOps]      = useState<OpcionWorkflow[] | null>(null)
   const [tamano,   setTamano]   = useState<{ imagenes: number; usd: number } | null>(null)
   const [elegidas, setElegidas] = useState<Record<string, unknown>>({})
@@ -4900,6 +4967,26 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo }: {
                   </div>
                 )}
               </div>
+            )}
+
+            {/* La lista de movimientos todavía no se ha leído. Leerla es una llamada al modelo, así
+                que la pide quien está mirando el recuadro: hacerlo al abrir cobraría por mirar. */}
+            {paso.clips?.length === 0 && (
+              <button
+                onClick={async () => {
+                  setLeyendo(true)
+                  try { const r = await getNextChainStep(projectId, asset.id, true); setPaso(r.paso) }
+                  catch (e) { setError(e instanceof Error ? e.message : 'could not read the movement list') }
+                  finally { setLeyendo(false) }
+                }}
+                disabled={leyendo}
+                style={{
+                  width: '100%', marginBottom: 14, padding: '8px 0', borderRadius: 8,
+                  cursor: leyendo ? 'default' : 'pointer', background: 'transparent',
+                  border: '1px dashed var(--line-2)', color: 'var(--text-2)',
+                  fontSize: 11.5, fontFamily: 'var(--font-sans)',
+                }}
+              >{leyendo ? 'Reading the movement list…' : 'Choose which animations to produce — reads the list from the ADI'}</button>
             )}
 
             {/* Qué animaciones correr. Solo aparece cuando el paso las enumera — hoy, la hoja de

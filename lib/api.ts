@@ -1974,12 +1974,12 @@ export type PasoDeCadena = {
   por_cada_salida_de?: string | null
 }
 
-export async function getNextChainStep(projectId: string, assetId: string) {
+export async function getNextChainStep(projectId: string, assetId: string, leerClips = false) {
   // `cadenas` solo viene cuando no hay paso: son las que existen, para poder nombrarlas en el
   // aviso. Escritas a mano se quedaron diciendo que Character Sheet era la única cuando ya eran
   // cinco, y quien lo leía se iba creyendo que su hoja no tenía workflow.
   return request<{ success: boolean; paso: PasoDeCadena | null; cadenas?: string[] }>(
-    `/api/projects/${projectId}/canvas/assets/${assetId}/next-step`,
+    `/api/projects/${projectId}/canvas/assets/${assetId}/next-step${leerClips ? '?leer_clips=1' : ''}`,
   )
 }
 
