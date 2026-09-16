@@ -136,8 +136,9 @@ export default function VerticalSliceScope ({
     }
   })
 
-  const asg = ALCANCE_VS.filter(c => c.grupo === 'asg').sort((a, b) => a.orden - b.orden)
-  const gdd = ALCANCE_VS.filter(c => c.grupo === 'gdd').sort((a, b) => a.orden - b.orden)
+  // Las nueve páginas, en orden de producción. Ya no hay dos familias: lo que no es una página
+  // del ASG no se rastrea acá (spec §11.3).
+  const paginas = [...ALCANCE_VS].sort((a, b) => a.orden - b.orden)
 
   return (
     <div
@@ -184,9 +185,6 @@ export default function VerticalSliceScope ({
           </div>
           <div style={{ fontSize: 12, fontWeight: 600, marginTop: 2, color: accent }}>
             {guia.categoria.nombre}
-            {guia.categoria.grupo === 'gdd' && (
-              <span style={{ fontWeight: 400, color: 'var(--text-3)', fontSize: 10 }}> · lives in the GDD</span>
-            )}
           </div>
           {guia.falta.length > 0 && (
             <div style={{ fontSize: 10.5, color: 'var(--text-2)', marginTop: 3 }}>
@@ -208,13 +206,9 @@ export default function VerticalSliceScope ({
               ))}
             </div>
           )}
-          {/* Lo que no se puede producir se NOMBRA. La guía las salta para no mandar a nadie a una
-              hoja sin Run, pero callarlas las volvería invisibles y nadie las destrabaría. */}
-          {guia.bloqueadas.length > 0 && (
-            <div style={{ fontSize: 9.5, color: 'var(--text-3)', marginTop: 5, fontStyle: 'italic' }}>
-              No production chain yet: {guia.bloqueadas.map(c => c.nombre).join(', ')}
-            </div>
-          )}
+          {/* La línea de «sin cadena todavía» salió de acá: la guía ya no salta ninguna página,
+              así que no hay una lista aparte que explicar. La marca sigue estando en la propia
+              fila de la página, que es donde se va a mirar. */}
         </button>
       )}
       {!guia && !plegado && (
@@ -227,7 +221,7 @@ export default function VerticalSliceScope ({
         <>
           {/* ── Lista de categorías ── */}
           <div style={{ overflowY: 'auto', flex: 1, padding: '6px 0' }}>
-            {[['Art Style Guide · pages', asg], ['Design · GDD', gdd]].map(([titulo, cats]) => (
+            {[['Art Style Guide · pages', paginas]].map(([titulo, cats]) => (
               <div key={titulo as string}>
                 <div style={{
                   padding: '6px 12px 3px', fontSize: 9, letterSpacing: .6, textTransform: 'uppercase',

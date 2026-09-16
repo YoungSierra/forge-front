@@ -24,7 +24,7 @@ import { getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedi
 
 import HerramientaModal from './HerramientaModal'
 import VerticalSliceScope from './VerticalSliceScope'
-import type { Estados } from './vs-scope'
+import { ALCANCE_VS, progresoCategoria, type Estados } from './vs-scope'
 
 // ── Pestañas ─────────────────────────────────────────────────────────────────
 // El juego es el de la referencia. Las que no tienen activos se muestran apagadas en vez de
@@ -1037,6 +1037,35 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     }))
   }, [posicionDe, setVista])
 
+  // La página de una hoja, comparable entre maestros. El alcance habla del maestro de 25
+  // —«19_EnvironmentSheet»— y los proyectos vivos corren el de 34, donde esa misma página es la
+  // 29. El número cambia, el nombre no: es la misma trampa que rompió la cascada.
+  const soloNombre = (s: string) => s.replace(/^\d+[_\s-]*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+
+  // Cuánto lleva cada página del ASG, para pintar su tarjeta. Es el mismo promedio que enseña la
+  // barra del panel: una sola cuenta, en un solo sitio.
+  const progresoDePagina = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const c of ALCANCE_VS) m.set(soloNombre(c.pagina), progresoCategoria(c, alcance))
+    return m
+  }, [alcance])
+
+  // El sentido que faltaba: clic en una tarjeta abre su sección en el menú. Lo pide la spec
+  // —«funciona en ambos sentidos»— y sin él el vínculo era de ida y había que buscar a mano.
+  //
+  // La bandera existe porque el mismo estado dispara el vuelo del lienzo hacia la página: al
+  // venir DEL lienzo eso sobra —ya estás ahí— y reencuadrar bajo el cursor se siente como que la
+  // interfaz te quita la hoja de las manos.
+  const alcanceDesdeLienzo = useRef(false)
+  const abrirSeccionDeAlcance = useCallback((a: UnifiedAsset) => {
+    const cola = String(a.name).split(/\s+[—–]\s+/).pop()?.trim()
+    if (!cola) return
+    const cat = ALCANCE_VS.find(c => soloNombre(c.pagina) === soloNombre(cola))
+    if (!cat) return
+    alcanceDesdeLienzo.current = true
+    setPaginaAlcance(cat.pagina)
+  }, [])
+
   // «Continue here» del panel de alcance: llevar el lienzo a esa página y encenderla.
   //
   // El puntero ya se guardaba, pero no lo leía nadie: la guía decía el paso y no movía el lienzo
@@ -1045,10 +1074,13 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // inventa nada: queda sin señalar, que es la verdad.
   useEffect(() => {
     if (!paginaAlcance) { setSeñalada(null); return }
-    const hoja = deLaFase.find(a => String(a.name).split(/\s+[—–]\s+/).pop()?.trim() === paginaAlcance)
+    const hoja = deLaFase.find(a =>
+      soloNombre(String(a.name).split(/\s+[—–]\s+/).pop()?.trim() || '') === soloNombre(paginaAlcance))
     if (!hoja) { setSeñalada(null); return }
     setSeñalada(hoja.id)
     setSel(hoja.id)
+    // Si el gesto vino del lienzo, la hoja ya está donde el usuario la puso: solo se enciende.
+    if (alcanceDesdeLienzo.current) { alcanceDesdeLienzo.current = false; return }
     const caja = lienzoRef.current?.getBoundingClientRect()
     if (!caja) return
     const i = deLaFase.indexOf(hoja)
@@ -2206,7 +2238,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                       )}
                       <Card asset={a} index={i} accent={theme.accent} colors={theme.colors}
                             selected={sel === a.id || seleccion.has(a.id)}
-                            onSelect={() => setSel(a.id)}
+                            onSelect={() => { setSel(a.id); abrirSeccionDeAlcance(a) }}
+                            progreso={progresoDePagina.get(soloNombre(String(a.name).split(/\s+[—–]\s+/).pop()?.trim() || '')) ?? null}
                             onHover={dentro => (dentro ? entrarHoja(a.id) : salirHoja(a.id))}
                             onOpen={(from) => { setSel(a.id); setDetail({ asset: a, from }) }}
                             onMenu={(x, y) => setMenu({ x, y, asset: a })}
@@ -2932,7 +2965,7 @@ function useAudioThumb(url: string, id: string, accent: string) {
   return { data, cargando }
 }
 
-function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu, marca, escala }: {
+function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu, marca, escala, progreso }: {
   asset: UnifiedAsset; index: number; accent: string; colors: string[]
   selected: boolean; onOpen: (from: DOMRect) => void
   onSelect?: () => void; onHover?: (dentro: boolean) => void
@@ -2941,6 +2974,9 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
   marca?: MarcaDeActualizacion | null
   /** El zoom del lienzo. Decide con qué resolución se pide la miniatura. */
   escala?: number
+  /** Cuánto lleva la categoría del alcance que produce esta página, de 0 a 1. `null` en las
+   *  hojas que no son una de las nueve páginas del alcance. */
+  progreso?: number | null
 }) {
   const [hover, setHover] = useState(false)
   const t    = tabOf(asset)
@@ -2985,6 +3021,26 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
         animation: `mb-in 320ms ease ${index * 32}ms backwards`,
       }}
     >
+      {/* El progreso de su categoría del alcance, al pie (spec del menú de Alcance, §12).
+
+          Una franja y no un tinte sobre la hoja: teñir una lámina de arte cambia el color que
+          alguien está juzgando, que es justo lo que este panel no puede hacer. Los tres estados
+          son los del menú —vacío, en progreso, aprobado— y usan sus mismos colores.
+
+          Solo en las nueve páginas del alcance: en el resto no hay categoría que reflejar. */}
+      {typeof progreso === 'number' && (
+        <div title={`Vertical Slice scope — ${Math.round(progreso * 100)}% of this page`} style={{
+          position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, zIndex: 2,
+          background: 'rgba(255,255,255,0.10)',
+        }}>
+          <div style={{
+            width: `${Math.round(progreso * 100)}%`, height: '100%',
+            background: progreso >= 1 ? '#5aa469' : progreso > 0 ? '#5b8def' : 'transparent',
+            transition: 'width 320ms ease',
+          }} />
+        </div>
+      )}
+
       {/* Marca de versión: solo aparece cuando hay historial de verdad. El endpoint ya devuelve
           `versions`; hoy la tabla está vacía, así que no se ve nada — y eso es lo correcto. */}
       {asset.versions?.length > 1 && (
@@ -3874,17 +3930,24 @@ const submenuDe = (a: UnifiedAsset) => SUBMENU[kindOf(a) === 'doc' ? 'text' : ki
 // La otra mitad del arreglo está en el backend: esa consulta leía los 28 workflows enteros
 // (752 KB) para usar 2,8 KB. Ver getWorkflowLite en config.service.js.
 const HERRAMIENTAS_DE_PIEZA = new Map<string, HerramientaDeAsset[]>()
-const PREGUNTANDO = new Map<string, Promise<HerramientaDeAsset[]>>()
+const PREGUNTANDO = new Map<string, Promise<HerramientaDeAsset[] | null>>()
 
-function herramientasDePieza(projectId: string, assetId: string): Promise<HerramientaDeAsset[]> {
+function herramientasDePieza(projectId: string, assetId: string): Promise<HerramientaDeAsset[] | null> {
   const guardadas = HERRAMIENTAS_DE_PIEZA.get(assetId)
   if (guardadas) return Promise.resolve(guardadas)
   const enCurso = PREGUNTANDO.get(assetId)
   if (enCurso) return enCurso
   const p = getAssetTools(projectId, assetId)
-    .then(r => r.herramientas.filter(h => h.disponible))
-    .catch(() => [] as HerramientaDeAsset[])
-    .then(l => { HERRAMIENTAS_DE_PIEZA.set(assetId, l); PREGUNTANDO.delete(assetId); return l })
+    .then(r => {
+      const l = r.herramientas.filter(h => h.disponible)
+      HERRAMIENTAS_DE_PIEZA.set(assetId, l)
+      return l
+    })
+    // Un fallo NO se guarda. Guardarlo dejaba las dos herramientas fuera del menú para el resto
+    // de la sesión por un tropiezo de red — y desde fuera se lee como que Segmentación se rompió.
+    // Se devuelve `null`: «no se sabe», que es distinto de «no hay ninguna».
+    .catch(() => null)
+    .then(l => { PREGUNTANDO.delete(assetId); return l })
   PREGUNTANDO.set(assetId, p)
   return p
 }
@@ -5392,7 +5455,9 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
   useEffect(() => {
     if (tools) return
     let vivo = true
-    herramientasDePieza(projectId, asset.id).then(l => { if (vivo) setTools(l) })
+    // `null` de vuelta significa que no se pudo preguntar. No se fuerza una lista vacía: los
+    // sectores se quedan a la vista, que es mejor que esconder una herramienta que sí aplica.
+    herramientasDePieza(projectId, asset.id).then(l => { if (vivo && l) setTools(l) })
     return () => { vivo = false }
   }, [projectId, asset.id, tools])
   useEffect(() => { const r = requestAnimationFrame(() => setShown(true)); return () => cancelAnimationFrame(r) }, [])
@@ -5410,11 +5475,14 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
   // todavía no existen —Recortar, Subir ajustes manuales— sí siguen a la vista y apagadas: esas
   // van a llegar, y verlas dice qué va a venir.
   //
-  // Mientras no se sepa cuáles aplican no se dibujan sectores de herramienta: entrar con cinco y
-  // quedarse en cuatro movería todo el aro bajo el cursor. Casi nunca se ve, porque la respuesta
-  // se pidió al abrir el radial principal.
+  // MIENTRAS NO SE SABE, NO SE OCULTA NADA. Ocultar por no tener aún la respuesta —o por un
+  // fallo de red— hacía desaparecer Segmentación, que aplica SIEMPRE, y eso se lee como que la
+  // herramienta se rompió. Hasta que llegue la lista, los sectores están y esperan: es lo que
+  // hacían antes, y el aro solo se recompone si de verdad alguna no aplica.
   const items = useMemo(
-    () => cfg.items.filter(l => !HERRAMIENTA_DE[l] || (tools ?? []).some(h => h.clave === HERRAMIENTA_DE[l])),
+    () => (tools === null
+      ? cfg.items
+      : cfg.items.filter(l => !HERRAMIENTA_DE[l] || tools.some(h => h.clave === HERRAMIENTA_DE[l]))),
     [cfg, tools],
   )
   const N = items.length

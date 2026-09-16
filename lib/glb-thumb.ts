@@ -18,6 +18,11 @@
 // v5: Y siempre en vertical. Hay que subir la versión o las miniaturas acostadas que ya se
 // cachearon en cada navegador se siguen mostrando: el cache es por modelo, no por código.
 const CACHE_PREFIX = 'forge_glb_thumb5:'
+
+// Igual que en las miniaturas de video y audio: un acierto no caduca, un fallo sí. Un modelo
+// que no se pudo leer una vez —R2 frío, rango rechazado— dejaba la tarjeta con el ícono para
+// siempre en ese navegador, y no había forma de pedirle que lo reintentara.
+const OLVIDA_FALLO_MS = 6 * 60 * 60 * 1000
 const SIZE   = 320    // lado del PNG que se genera
 const HEAD   = 65536  // bytes iniciales para leer el chunk JSON
 
@@ -181,7 +186,13 @@ const claveDe = (id: string, r: Rampa) => `${CACHE_PREFIX}${id}@${r.sombra}${r.l
 export function glbThumbCached(id: string, rampa: Rampa = RAMPA_NEUTRA): string | null | undefined {
   try {
     const hit = localStorage.getItem(claveDe(id, rampa))
-    return hit === null ? undefined : hit === 'x' ? null : hit
+    if (hit === null) return undefined
+    if (hit === 'x') return undefined          // marca vieja sin fecha: se reintenta una vez
+    if (hit.startsWith('x:')) {
+      const cuando = Number(hit.slice(2))
+      return Date.now() - cuando < OLVIDA_FALLO_MS ? null : undefined
+    }
+    return hit
   } catch { return undefined }
 }
 
@@ -216,7 +227,7 @@ export async function glbThumb(url: string, id: string, rampa: Rampa = RAMPA_NEU
     try { localStorage.setItem(key, data) } catch { /* se pasó la cuota */ }
     return data
   } catch {
-    try { localStorage.setItem(key, 'x') } catch { /* nada */ }
+    try { localStorage.setItem(key, `x:${Date.now()}`) } catch { /* nada */ }
     return null
   }
 }

@@ -1,11 +1,12 @@
 // El alcance del Vertical Slice, tal como lo define la spec de Migue del 08-09.
 //
-// Once categorías y veintitrés elementos —nueve del ASG y dos del GDD—, tras separar la Animation
-// Sheet de la de personaje y añadir la de Video Marketing el 15-09. La agrupación NO es por disciplina —el documento de
-// alcance ponía VFX, props y paleta todos bajo «Arte · Personajes»— sino por la página del ASG que
-// produce cada cosa, para que el menú y las hojas del moodboard hablen el mismo idioma. Lo que no
-// sale de una página visual —mecánicas, controles, narrativa— se agrupa aparte como GDD y no lleva
-// tarjeta en el lienzo.
+// Las NUEVE páginas del ASG: Color System (p.08) y las ocho hojas Sheet. Es el número que fijan
+// los criterios de aceptación de la spec, y la agrupación NO es por disciplina —el documento de
+// alcance ponía VFX, props y paleta todos bajo «Arte · Personajes»— sino por la página del ASG
+// que produce cada cosa, para que el menú y las hojas del moodboard hablen el mismo idioma.
+//
+// Lo que no sale de una página visual —mecánicas, controles, narrativa— vive en el GDD y no se
+// rastrea acá (spec §11.3).
 //
 // `regla` y `minimo` son texto literal del documento de alcance: no se resumen ni se reescriben
 // acá. Cuando el equipo cambie el alcance, cambian ahí y se copian; inventarlos de nuestro lado
@@ -25,9 +26,9 @@ export type ElementoAlcance = {
 export type CategoriaAlcance = {
   id:     string
   nombre: string
-  grupo:  'asg' | 'gdd'
-  /** La página del ASG que la produce. `null` en las categorías GDD. */
-  pagina: string | null
+  /** La página del ASG que la produce. Toda categoría del menú tiene una: lo que no sale de una
+   *  página visual vive en el GDD y no se rastrea acá (spec §11.3). */
+  pagina: string
   /** Orden de producción. Es lo único que ordena la guía. */
   orden:  number
   elementos: ElementoAlcance[]
@@ -42,7 +43,7 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
     // Apuntar a la página equivocada no era un detalle: «Continue here» iluminaba Visual DNA
     // mientras la guía decía «Style · Palette». Es el punto 11 del informe v5 — el recuadro no
     // estaba desfasado, estaba en otra hoja.
-    id: 'paleta', nombre: 'Color System · Palette', grupo: 'asg', pagina: '08_ColorSystem', orden: 1,
+    id: 'paleta', nombre: 'Color System · Palette', pagina: '08_ColorSystem', orden: 1,
     elementos: [
       { id: 'paleta_materiales', nombre: 'Palette / materials',
         regla: 'ALL of it (100%) — visual identity',
@@ -50,7 +51,7 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
     ],
   },
   {
-    id: 'character', nombre: 'Character Sheet', grupo: 'asg', pagina: '18_CharacterSheet', orden: 2,
+    id: 'character', nombre: 'Character Sheet', pagina: '18_CharacterSheet', orden: 2,
     elementos: [
       { id: 'personajes', nombre: 'Characters / actors',
         regla: 'a chosen number, with a reason',
@@ -66,7 +67,7 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
   {
     // Los clips estaban dentro de Character Sheet, así que la guía mandaba a la p.18 a producir
     // algo que se produce en la 24. En la tabla de alcance son filas de hojas distintas.
-    id: 'animation', nombre: 'Animation Sheet', grupo: 'asg', pagina: '24_AnimationSheet', orden: 8,
+    id: 'animation', nombre: 'Animation Sheet', pagina: '24_AnimationSheet', orden: 8,
     elementos: [
       { id: 'clips', nombre: 'Animation clips',
         regla: 'counted by listing, clip by clip',
@@ -74,7 +75,7 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
     ],
   },
   {
-    id: 'environment', nombre: 'Environment Sheet', grupo: 'asg', pagina: '19_EnvironmentSheet', orden: 3,
+    id: 'environment', nombre: 'Environment Sheet', pagina: '19_EnvironmentSheet', orden: 3,
     elementos: [
       { id: 'entornos', nombre: 'Environments / scenes',
         regla: '1 of 4 (25%)',
@@ -91,7 +92,7 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
     ],
   },
   {
-    id: 'prop', nombre: 'Prop Sheet', grupo: 'asg', pagina: '20_PropSheet', orden: 4,
+    id: 'prop', nombre: 'Prop Sheet', pagina: '20_PropSheet', orden: 4,
     elementos: [
       { id: 'props', nombre: 'Props / scene objects',
         regla: 'a share of the game (max. 25%)',
@@ -102,7 +103,7 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
     ],
   },
   {
-    id: 'vfx', nombre: 'VFX Sheet', grupo: 'asg', pagina: '22_VFXSheet', orden: 5,
+    id: 'vfx', nombre: 'VFX Sheet', pagina: '22_VFXSheet', orden: 5,
     elementos: [
       { id: 'vfx', nombre: 'VFX (visual effects)',
         regla: 'counted by listing',
@@ -110,7 +111,7 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
     ],
   },
   {
-    id: 'ui', nombre: 'UI Component Sheet', grupo: 'asg', pagina: '21_UIComponentSheet', orden: 6,
+    id: 'ui', nombre: 'UI Component Sheet', pagina: '21_UIComponentSheet', orden: 6,
     elementos: [
       { id: 'pantallas', nombre: 'Screens',
         regla: 'a share of the game (max. 25%)',
@@ -118,7 +119,7 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
     ],
   },
   {
-    id: 'audio', nombre: 'Audio Sheet', grupo: 'asg', pagina: '23_AudioSheet', orden: 7,
+    id: 'audio', nombre: 'Audio Sheet', pagina: '23_AudioSheet', orden: 7,
     elementos: [
       { id: 'sfx', nombre: 'SFX',
         regla: 'a share of the game (max. 25%)',
@@ -132,41 +133,22 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
     ],
   },
   {
-    id: 'video_marketing', nombre: 'Video Marketing Sheet', grupo: 'asg', pagina: '25_VideoMarketingSheet', orden: 9,
+    id: 'video_marketing', nombre: 'Video Marketing Sheet', pagina: '25_VideoMarketingSheet', orden: 9,
     elementos: [
       { id: 'video_promocional', nombre: 'Promotional video',
         regla: '1 per promotional video (conditional: only if the game declares promo)',
         minimo: 'If the scope declares promotional content: at least 1 video.' },
     ],
   },
-  {
-    id: 'sistemas', nombre: 'Systems and gameplay', grupo: 'gdd', pagina: null, orden: 10,
-    elementos: [
-      { id: 'mecanicas', nombre: 'Mechanics',
-        regla: 'ALL of the chosen environment (100%)',
-        minimo: 'Every mechanic that environment uses, without exception.' },
-      { id: 'controles', nombre: 'Controls',
-        regla: 'The whole verb (100%)',
-        minimo: 'Every button of the main loop works.' },
-      { id: 'feedback', nombre: 'Feedback',
-        regla: 'counted by listing',
-        minimo: 'The game ANSWERS (visually or with sound) to the main action and to damage.' },
-      { id: 'progresion', nombre: 'Progression / economy',
-        regla: "the slice's stretch, with numbers",
-        minimo: 'The difficulty ramp of those levels, written with numbers.' },
-    ],
-  },
-  {
-    id: 'narrativa', nombre: 'Narrative', grupo: 'gdd', pagina: null, orden: 11,
-    elementos: [
-      { id: 'historia', nombre: 'Story / scenes',
-        regla: 'the environment beat',
-        minimo: 'The least story that makes the slice stand on its own.' },
-      { id: 'dialogo', nombre: 'Dialogue',
-        regla: 'a share of the game (max. 25%)',
-        minimo: 'Only the conversations of that stretch.' },
-    ],
-  },
+  // Systems and gameplay, y Narrative, estaban acá y SALIERON del menú.
+  //
+  // No es que no importen: es que no se rastrean en esta pieza. La spec lo decide en su §11,
+  // punto 3: «el menú solo lista páginas del ASG (cada una con tarjeta en el canvas);
+  // jugabilidad y narrativa se gestionan en el GDD y no se rastrean aquí». Y sus criterios de
+  // aceptación cuentan nueve categorías, no once.
+  //
+  // Tenerlas acá además falseaba el anillo global: seis elementos que este menú nunca puede
+  // mover contaban dentro del porcentaje del slice.
 ]
 
 // ── Qué se puede producir hoy ────────────────────────────────────────────────
@@ -182,16 +164,20 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
 // Vive acá y no en el motor porque es una pregunta de la interfaz: el motor ya responde «no hay
 // cadena»; esto decide qué hacer con esa respuesta. Cuando Migue defina los workflows que faltan,
 // se agregan a este conjunto y la guía los empieza a ofrecer sin tocar nada más.
+/** Qué categorías tienen hoy una cadena de producción que se pueda correr desde el lienzo.
+ *
+ *  Ya no decide la guía —la spec §6 dice «la primera página con progreso < 100% en ese orden»,
+ *  y saltarse una era una regla nuestra que el documento no pide—. Se conserva para la marca
+ *  que avisa, dentro de la lista, cuál todavía no se puede correr: eso informa sin desviar.
+ *
+ *  Hoy están las nueve, así que la marca no se ve en ninguna. Se queda porque el día que entre
+ *  una página nueva al alcance vuelve a hacer falta. */
 export const CATEGORIAS_PRODUCIBLES = new Set([
   'paleta', 'character', 'environment', 'prop', 'audio',
-  // Desde el 15-09 la UI Component Sheet y la VFX Sheet tienen cadena, el teaser sale de la hoja
-  // de Video Marketing y la pose sheet de la de Animation. Las cuatro dejan de ser callejones
-  // sin salida para la guía.
   'ui', 'vfx', 'video_marketing', 'animation',
 ])
 
-export const esProducible = (c: CategoriaAlcance) =>
-  c.grupo === 'gdd' || CATEGORIAS_PRODUCIBLES.has(c.id)
+export const esProducible = (c: CategoriaAlcance) => CATEGORIAS_PRODUCIBLES.has(c.id)
 
 // ── Progreso ─────────────────────────────────────────────────────────────────
 const PESO: Record<EstadoElemento, number> = { pendiente: 0, en_progreso: 0.5, aprobado: 1 }
@@ -226,15 +212,20 @@ export type Guia = {
   categoria:    CategoriaAlcance
   falta:        ElementoAlcance[]
   alternativas: CategoriaAlcance[]
-  /** Categorías incompletas que hoy no se pueden producir. Se nombran para que el equipo sepa
-   *  que existen y por qué no se ofrecen — callarlas las volvería invisibles. */
-  bloqueadas:   CategoriaAlcance[]
 }
 
 /**
- * Por dónde seguir: la primera categoría incompleta en orden de producción, saltando las que no
- * pueden producirse todavía. `falta` son sus dos primeros elementos sin aprobar; `alternativas`,
- * las siguientes tres incompletas que sí se pueden correr.
+ * Por dónde seguir. Es la §6 de la spec, al pie de la letra:
+ *
+ *   «Orden de producción = el orden de las páginas del ASG (campo order).
+ *    Recomendación = la primera página con progreso < 100% en ese orden.
+ *    Falta = las primeras 2 instancias no aprobadas de esa página.
+ *    Alternativas = las siguientes 2–3 páginas incompletas.»
+ *
+ * Antes se saltaba las que todavía no tienen cadena que correr. Sonaba razonable —no mandar a
+ * nadie a una hoja sin Run— pero el documento no lo pide y cambiaba el orden de producción, que
+ * es lo único que la guía define. Si una página incompleta va antes, es la que toca: quien la
+ * mire verá en la lista que todavía no se puede correr.
  *
  * Devuelve `null` cuando todo está aprobado.
  */
@@ -244,21 +235,12 @@ export function calcularGuia (estados: Estados): Guia | null {
     .filter(c => progresoCategoria(c, estados) < 1)
   if (!incompletas.length) return null
 
-  const disponibles = incompletas.filter(esProducible)
-  const bloqueadas  = incompletas.filter(c => !esProducible(c))
-  // Todo lo que queda está bloqueado: no se inventa una recomendación. La franja lo dice y nombra
-  // qué falta destrabar, que es la información que sí sirve.
-  if (!disponibles.length) {
-    return { categoria: bloqueadas[0], falta: [], alternativas: [], bloqueadas }
-  }
-
-  const categoria = disponibles[0]
+  const categoria = incompletas[0]
   return {
     categoria,
     falta: categoria.elementos
       .filter(e => estadoDe(estados, categoria.id, e.id) !== 'aprobado')
       .slice(0, 2),
-    alternativas: disponibles.slice(1, 4),
-    bloqueadas,
+    alternativas: incompletas.slice(1, 4),
   }
 }

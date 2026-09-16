@@ -16,14 +16,26 @@ const proxy = (url: string) => `/api/proxy-image?url=${encodeURIComponent(url)}`
 
 // La clave lleva el color: sin eso, una miniatura pintada con el tema viejo se sirve para
 // siempre y el cambio de paleta no se ve nunca. Fue justo lo que pasó con la onda blanca.
+// Cuánto se recuerda un FALLO. Los aciertos no caducan —la miniatura de un archivo que no cambia
+// sirve para siempre—, pero un «no se pudo» sí: casi siempre es pasajero (el almacenamiento frío,
+// el archivo aún subiendo, el proxy reiniciándose) y recordarlo sin fecha dejaba la tarjeta vacía
+// para siempre en ese navegador. Pasó con el teaser de 13_lives_kitten.
+const OLVIDA_FALLO_MS = 6 * 60 * 60 * 1000
+
 function leerCache(id: string): string | null | undefined {
   try {
     const v = localStorage.getItem(PREFIX + id)
-    return v === null ? undefined : v === 'x' ? null : v
+    if (v === null) return undefined
+    if (v === 'x') return undefined            // marca vieja sin fecha: se reintenta una vez
+    if (v.startsWith('x:')) {
+      const cuando = Number(v.slice(2))
+      return Date.now() - cuando < OLVIDA_FALLO_MS ? null : undefined
+    }
+    return v
   } catch { return undefined }
 }
 function guardarCache(id: string, data: string | null) {
-  try { localStorage.setItem(PREFIX + id, data ?? 'x') } catch { /* cuota llena o modo privado */ }
+  try { localStorage.setItem(PREFIX + id, data ?? `x:${Date.now()}`) } catch { /* cuota llena o modo privado */ }
 }
 
 // ── Video ────────────────────────────────────────────────────────────────────
