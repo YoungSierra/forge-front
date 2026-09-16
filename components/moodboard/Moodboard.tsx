@@ -3833,14 +3833,14 @@ const RADIAL = [
 // Un sexto sector que NO es fijo: solo existe sobre una hoja de entorno, y quien lo decide es el
 // backend. Va como sector propio y no dentro de «Edit 2D» porque no edita la lámina — monta un
 // nivel a partir de ella. Los seis sectores se reparten solos: la geometría siempre fue por N.
-const MONTAJE = { key: 'montaje', label: 'Assemble Level', hint: '' } as const
+const MONTAJE = { key: 'montaje', label: 'Level package', hint: '' } as const
 
 // Lo que el sector dice al pasar por encima. Nombra el entorno que leyó y, o bien lo que falta,
 // o bien los niveles que lo usan — porque cuando son varios hay que elegir, y conviene verlo
 // antes de pulsar.
 function tituloMontaje(e: EstadoDeMontaje | null): string {
-  if (!e) return 'Assemble Level — checking…'
-  const titulo = e.entorno ? `Assemble Level · ${e.entorno}` : 'Assemble Level'
+  if (!e) return 'Level package — checking…'
+  const titulo = e.entorno ? `Level package · ${e.entorno}` : 'Level package'
   if (e.faltantes?.length) return `${titulo} — missing: ${e.faltantes.map(f => f.dice).join(' · ')}`
   const n = e.niveles?.length || 0
   if (n > 1) return `${titulo} — ${n} levels use this environment; you pick which one`
@@ -4747,7 +4747,7 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
           fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '.08em',
           color: accent, marginBottom: 9,
         }}>
-          ASSEMBLE LEVEL{estado?.entorno ? ` · ${estado.entorno.toUpperCase()}` : ''}
+          LEVEL PACKAGE{estado?.entorno ? ` · ${estado.entorno.toUpperCase()}` : ''}
         </div>
 
         {hecho ? (
@@ -4756,15 +4756,23 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
               Level {hecho.nivel} is packed
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 12 }}>
-              {Math.round((hecho.bytes ?? 0) / 1024)} KB · {hecho.bundle_id}. Open it with the
-              LoopForge add-on in Blender: it scales, recentres and instances from here.
-              {hecho.grafo?.generado ? ' The floor plan for this level was generated now.' : ' It reuses the floor plan this level already had.'}
+              {((hecho.bytes ?? 0) / 1048576).toFixed(1)} MB · {hecho.modelos} model{hecho.modelos === 1 ? '' : 's'},{' '}
+              {hecho.imagenes} reference image{hecho.imagenes === 1 ? '' : 's'}. Upload it whole to Claude with
+              Blender connected: the scale, the layout and the assembly are worked out there, from what is inside.
             </div>
+            {/* Lo que el paquete NO trae, con su motivo. El contrato lo exige —«lo que entra,
+                entra completo o no entra»— y esconderlo haría creer que el nivel está cubierto
+                cuando le falta una referencia entera. */}
+            {!!hecho.ausencias?.length && (
+              <ul style={{ margin: '0 0 12px', paddingLeft: 16, fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                {hecho.ausencias.map((a, i) => <li key={i}>{a}</li>)}
+              </ul>
+            )}
             <a href={hecho.url} target="_blank" rel="noreferrer" style={{
               display: 'block', textAlign: 'center', padding: '9px 0', borderRadius: 8,
               background: accent, color: '#0b0c0e', fontSize: 12, fontWeight: 600,
               textDecoration: 'none', marginBottom: 10,
-            }}>Download the bundle</a>
+            }}>Download the package</a>
             {!!hecho.avisos?.length && (
               <ul style={{ margin: '0 0 12px', paddingLeft: 16, fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.6 }}>
                 {hecho.avisos.map((a, i) => <li key={i}>{a}</li>)}
@@ -4899,13 +4907,18 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
                 background: 'transparent', border: '1px solid var(--line-2)', color: 'var(--text-2)',
                 fontSize: 12, fontFamily: 'var(--font-sans)',
               }}>Cancel</button>
-              <button onClick={montar} disabled={busy || !exterior || !nivel} style={{
+              {/* El muro exterior era obligatorio cuando Forge montaba el nivel: sin él el
+                  montaje terminaba «bien» con cero objetos. Desde el contrato del 16-09 Forge
+                  exporta y el montaje corre en Blender, así que los papeles son un extra que
+                  viaja declarado en el manifiesto — útiles, no obligatorios. Lo único que sigue
+                  haciendo falta es saber de qué nivel es el paquete. */}
+              <button onClick={montar} disabled={busy || !nivel} style={{
                 flex: 2, padding: '9px 0', borderRadius: 8,
-                cursor: busy || !exterior || !nivel ? 'default' : 'pointer',
-                background: busy || !exterior || !nivel ? 'var(--bg-2)' : accent,
-                border: 'none', color: busy || !exterior || !nivel ? 'var(--text-3)' : '#0b0c0e',
+                cursor: busy || !nivel ? 'default' : 'pointer',
+                background: busy || !nivel ? 'var(--bg-2)' : accent,
+                border: 'none', color: busy || !nivel ? 'var(--text-3)' : '#0b0c0e',
                 fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-sans)',
-              }}>{busy ? 'Assembling…' : 'Assemble the level'}</button>
+              }}>{busy ? 'Packing…' : 'Export the package'}</button>
             </div>
           </>
         )}

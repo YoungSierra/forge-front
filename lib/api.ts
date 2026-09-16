@@ -2173,13 +2173,17 @@ export interface ResultadoDeMontaje {
   necesita_nivel?: boolean
   niveles?:  { nivel: string; entorno: string }[]
   url?:      string
-  bundle_id?: string
+  /** `forge_input_package/1.0`: identifica el paquete exportado. */
+  package_id?: string
+  level_id?: string
   bytes?:    number
   nivel?:    string
-  entorno?:  string
-  /** Si el grafo del nivel se reusó o se generó ahora (generarlo cuesta y cambia la planta). */
-  grafo?:    { id: string; generado: boolean }
-  resumen?:  unknown
+  entorno?:  string | null
+  /** Cuántos `.glb` y cuántas imágenes de referencia lleva el paquete. */
+  modelos?:  number
+  imagenes?: number
+  /** Lo que el paquete declara ausente, con su motivo. El contrato exige decirlo. */
+  ausencias?: string[]
   avisos?:   string[]
   asset?:    { id: string; name: string; storage_url: string } | null
 }
