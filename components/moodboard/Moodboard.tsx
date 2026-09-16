@@ -139,6 +139,15 @@ const outputOf = (a: UnifiedAsset) => {
 // las de un nodo de arte son Concept Art y el resto es referencia. La procedencia SIGUE siendo
 // el otro eje (de qué nodo vino), y este corte no la reemplaza: una imagen del 1.1 se ve en
 // `Ref` y en el origen `1.1` a la vez.
+// Un `.json` no es prosa: renderizarlo como markdown lo deja en un párrafo corrido donde no se
+// distingue una clave de un valor. Se sangra y se enseña en monoespaciada, que es como se lee.
+// Si el texto viene cortado —el asomo de la tarjeta lo está— no parsea, y entonces se muestra tal
+// cual en vez de perderlo.
+const esJson = (a: UnifiedAsset) => String(a.format).toLowerCase() === 'json'
+const sangrarJson = (t: string) => {
+  try { return JSON.stringify(JSON.parse(t), null, 2) } catch { return t }
+}
+
 const tabOf = (a: UnifiedAsset) => {
   const f = String(a.format).toLowerCase()
   if (ES_IMAGEN.includes(f)) return a.node_key && ARTE.has(a.node_key) ? 'concept' : 'refs'
@@ -2998,9 +3007,16 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
                 width: '161%',                       // 1/0.62: recupera el ancho que quita la escala
                 fontSize: 12, lineHeight: 1.6, color: 'var(--text-2)',
               }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                  {asset.preview}
-                </ReactMarkdown>
+                {esJson(asset) ? (
+                  <pre style={{
+                    margin: 0, fontFamily: 'var(--font-mono)', fontSize: 10.5, lineHeight: 1.45,
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-3)',
+                  }}>{sangrarJson(asset.preview)}</pre>
+                ) : (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                    {asset.preview}
+                  </ReactMarkdown>
+                )}
               </div>
             </div>
           )}
@@ -3243,9 +3259,16 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
                   entero. Si el asomo se pintara como texto plano se vería el markdown crudo y
                   al llegar el contenido habría un salto de formato — que es justo lo que no
                   queremos. Acá lo único que cambia es cuánto texto hay. */}
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                {texto ?? asset.preview ?? ''}
-              </ReactMarkdown>
+              {esJson(asset) ? (
+                <pre style={{
+                  margin: 0, fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.55,
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-1)',
+                }}>{sangrarJson(texto ?? asset.preview ?? '')}</pre>
+              ) : (
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                  {texto ?? asset.preview ?? ''}
+                </ReactMarkdown>
+              )}
             </div>
 
             {url && (
