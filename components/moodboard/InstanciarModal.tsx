@@ -133,9 +133,25 @@ export default function InstanciarModal({ projectId, accent, onCerrar, onListo }
               </span>
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.6, marginBottom: 14 }}>
-              Read from this project&apos;s Vertical Slice Specification. Untick anything you do not
-              want produced now — what you leave out stays available later.
+              {/* De dónde salió la cuenta. Desde la v2.9.35 la fuente correcta es el manifiesto de
+                  instancias del nodo 3.20 —un mapa declarado—; la prosa del VS Spec queda de
+                  respaldo para los proyectos que no lo hayan producido todavía. Es un número que
+                  se paga: tiene que decir quién lo dijo. */}
+              {plan.fuente === 'manifest'
+                ? 'Read from the sheet instance manifest of node 3.20.'
+                : 'Counted from this project\u2019s Vertical Slice Specification.'}{' '}
+              Untick anything you do not want produced now — what you leave out stays available later.
             </div>
+
+            {/* Lo que el manifiesto no puede garantizar: páginas que todavía no tienen su propia
+                spec, instancias fuera del slice, o una cuenta declarada que no coincide con su
+                lista —que su propia especificación llama conformance failure—. Callarlo haría
+                pagar despachos creyendo que la lista está completa. */}
+            {!!plan.avisos?.length && (
+              <ul style={{ margin: '0 0 14px', paddingLeft: 16, fontSize: 11, color: 'var(--text-3)', lineHeight: 1.7 }}>
+                {plan.avisos.map((a, i) => <li key={i}>{a}</li>)}
+              </ul>
+            )}
 
             {plan.paginas.map(p => {
               const dentro = p.items.filter(i => !fuera.has(clave(p.pagina, i.nombre))).length

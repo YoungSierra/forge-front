@@ -32,6 +32,7 @@ let _token: string | null = null
 let _tokenExp = 0
 let _enVuelo: Promise<string | null> | null = null
 let _suscrito = false
+let _renovando: Promise<string | null> | null = null
 
 const MARGEN_MS = 30_000
 
@@ -62,6 +63,27 @@ async function tokenActual(): Promise<string | null> {
   return _enVuelo
 }
 
+/** Renueva la sesión y devuelve el token nuevo, o null si tampoco hay.
+ *
+ *  Es el último recurso cuando `getSession()` no devuelve nada: la sesión puede estar viva en
+ *  la cookie y todavía no cargada en esta pestaña —recién abierta, recién restaurada, o después
+ *  de vaciar el almacenamiento del sitio—. Sin esto la petición sale sin cabecera y el back
+ *  contesta «Not authenticated», que es lo que reportó Miguel en la etapa 3 de Add Context. */
+async function renovarSesion(): Promise<string | null> {
+  const client = sbClient()
+  if (!client) return null
+  if (_renovando) return _renovando
+  _renovando = client.auth.refreshSession()
+    .then(({ data }) => {
+      _token    = data.session?.access_token ?? null
+      _tokenExp = data.session?.expires_at ? data.session.expires_at * 1000 : 0
+      return _token
+    })
+    .catch(() => null)
+    .finally(() => { _renovando = null })
+  return _renovando
+}
+
 export async function authHeaders(): Promise<Record<string, string>> {
   const h: Record<string, string> = {}
   if (typeof window !== 'undefined') {
@@ -75,7 +97,7 @@ export async function authHeaders(): Promise<Record<string, string>> {
   return h
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestInit, reintento = false): Promise<T> {
   const auth = await authHeaders()
   const res = await fetch(`${BACKEND_URL}${path}`, {
     ...options,
@@ -87,12 +109,24 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     let message = `Request failed: ${res.status} ${res.statusText}`
+    let code = ''
     try {
       const body = await res.json()
+      code = body.code || ''
       if (body.detail) message = body.detail
       else if (body.message) message = body.message
       else if (body.error) message = body.error
     } catch {}
+
+    // Sesión: se renueva y se repite UNA vez. Un cuerpo de FormData no se puede volver a
+    // enviar —el stream ya se consumió—, así que ahí solo se mejora el mensaje.
+    if (res.status === 401 && !reintento && (code === 'NO_TOKEN' || code === 'BAD_TOKEN')) {
+      const fresco = await renovarSesion()
+      if (fresco && !(options?.body instanceof FormData)) return request<T>(path, options, true)
+    }
+    if (res.status === 401) {
+      message = 'Your session is not loaded in this tab. Reload the page — if it keeps happening, sign in again.'
+    }
     throw new Error(message)
   }
   return res.json()
@@ -408,6 +442,17 @@ export async function uploadLibraryAsset(
   const data = await res.json()
   return data.asset
 }
+
+/** La lámina reducida al tamaño de una tarjeta del lienzo.
+ *
+ *  La reducción la hace nuestro servidor y la sirve R2. Antes la hacía `next/image`, hasta que
+ *  el optimizador de Vercel se quedó sin cuota y empezó a contestar 402 a toda imagen que no
+ *  tuviera ya cacheada: las páginas recién generadas salían como un marco vacío y parecía que el
+ *  workflow no publicaba nada. Ver forge-back/src/services/miniatura.service.js.
+ *
+ *  Contesta con un redirect a R2, así que el `<img>` termina bajando de R2 y no de acá. */
+export const miniaturaUrl = (url: string, ancho = 600) =>
+  `${BACKEND_URL}/api/assets/thumb?w=${ancho}&url=${encodeURIComponent(url)}`
 
 // Moodboard: solo activos que se ven, y sin el campo `content`. El listado completo de un
 // proyecto son ~1,5 MB de texto que la galería no muestra; así viaja el metadato y la URL.
@@ -1972,6 +2017,9 @@ export type PasoDeCadena = {
    *  punto 1). Vacío = todavía no se han leído del ADI; el Run las lee al correr. */
   clips?: { nombre: string; etiqueta: string }[]
   por_cada_salida_de?: string | null
+  /** La cadena entera, para dibujarla antes de correr: solo pasos de producción, con sus
+   *  nombres llanos. Las herramientas de edición no entran — no son pasos de la cadena. */
+  pasos?: { clave: string; etiqueta: string; estado: 'hecho' | 'siguiente' | 'despues' }[]
 }
 
 export async function getNextChainStep(projectId: string, assetId: string, leerClips = false) {
@@ -1980,6 +2028,24 @@ export async function getNextChainStep(projectId: string, assetId: string, leerC
   // cinco, y quien lo leía se iba creyendo que su hoja no tenía workflow.
   return request<{ success: boolean; paso: PasoDeCadena | null; cadenas?: string[] }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/next-step${leerClips ? '?leer_clips=1' : ''}`,
+  )
+}
+
+/** Una corrida en marcha: qué paso, en qué despacho va y qué está haciendo ahora mismo. */
+export type CorridaEnMarcha = {
+  asset_id: string; cadena: string; paso: string; etiqueta: string
+  hecho: number; de: number
+  estado: 'arrancando' | 'preparando' | 'generando' | 'publicando'
+  /** Qué parte se está despachando —«part_07», «walk»—, si el paso corre una por cada salida. */
+  que: string | null
+  segundos: number
+}
+
+/** Qué está corriendo en este proyecto AHORA. Son datos en memoria del backend: se puede
+ *  preguntar seguido y sobrevive a que quien lo disparó cierre la ventana o recargue. */
+export async function getCorridasEnMarcha(projectId: string) {
+  return request<{ success: boolean; corridas: CorridaEnMarcha[] }>(
+    `/api/projects/${projectId}/canvas/progreso`,
   )
 }
 
@@ -2053,7 +2119,11 @@ export interface HerramientaDeAsset {
 
 /** Si el botón del Laboratory tiene a dónde ir, sin empujar nada todavía. */
 export async function getLaboratorio(projectId: string) {
-  return request<{ success: boolean; configurado: boolean; tiene_tdd: boolean; documento?: string; chars?: number }>(
+  return request<{ success: boolean; configurado: boolean; tiene_tdd: boolean
+                   /** Si el laboratorio tiene un build final listo para publicar. Es del SERVICIO,
+                    *  no del proyecto: el laboratorio guarda un solo taller para todos. */
+                   jugable_listo: boolean; lab_responde: boolean; lab_motivo?: string
+                   documento?: string; chars?: number }>(
     `/api/projects/${projectId}/canvas/laboratory`,
   )
 }
@@ -2136,6 +2206,8 @@ export interface PlanDeInstancias {
   sin_clasificar?: { nombre: string; cuenta: number; de: string }[]
   no_son_laminas?: { nombre: string; cuenta: number }[]
   avisos?:         string[]
+  /** De dónde salió la cuenta: el manifiesto de instancias del 3.20, o la prosa del VS Spec. */
+  fuente?:         'manifest' | 'vs_spec' | null
 }
 
 /** Qué hojas pide el alcance y cuántas corridas son. No despacha nada: es lo que el recuadro

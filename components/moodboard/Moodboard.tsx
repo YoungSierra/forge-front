@@ -12,7 +12,6 @@
 // herramientas de edición son Iteración 2 y 3.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import Image from 'next/image'
 import ModelViewer from '@/components/shared/ModelViewer'
 import { glbThumb, glbThumbCached, type Rampa } from '@/lib/glb-thumb'
 import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type AudioThumb } from '@/lib/media-thumb'
@@ -21,7 +20,7 @@ import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import ContextoModal from './ContextoModal'
 import InstanciarModal from './InstanciarModal'
-import { getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
+import { getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import VerticalSliceScope from './VerticalSliceScope'
@@ -165,6 +164,14 @@ const kindOf = (a: UnifiedAsset): 'image' | 'video' | 'audio' | '3d' | 'doc' => 
   return 'doc'
 }
 
+// Material de TRABAJO: se produce, se descarga y se lleva a otra herramienta, pero no se mira.
+// El grafo de un nivel, el perfil de un kit, los beats de un clip que se abren en Cascadeur.
+//
+// Decisión de Miguel (informe v6, punto 1), confirmada con el lead technical artist: en el
+// lienzo estorban —ocupan una tarjeta que nadie va a abrir— y su sitio es la pestaña Docs, que
+// es de donde se bajan. Siguen estando: se quitan del lienzo, no del proyecto.
+const esArchivoDeTrabajo = (a: UnifiedAsset) => String(a.format).toLowerCase() === 'json'
+
 // De dónde viene, para el pie de la tarjeta.
 const originOf = (a: UnifiedAsset) =>
   a.node_key ? `${a.node_key} ${a.node_title ?? ''}`.trim() : (a.node_title || 'Library')
@@ -188,6 +195,56 @@ const nombreDeHoja = (a: UnifiedAsset) => {
     .replace(/([a-z\d])([A-Z])/g, '$1 $2')   // KeyArt -> Key Art
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+// ── La barra de lo que está corriendo ────────────────────────────────────────
+//
+// Informe v6, punto 4. Se queda puesta mientras dure la corrida, sobreviva o no la ventana que
+// la disparó: el dato viene del backend, no de esta pestaña.
+//
+// Solo dice lo que de verdad sabe. Cuando el paso despacha veinte partes, la fracción es real —
+// «7 de 20»— y la barra se llena de a poco; cuando es un despacho único no hay fracción que
+// inventar y late en lugar de fingir un porcentaje. Un porcentaje inventado en algo que se paga
+// es peor que no tener barra.
+function BarraDeCorrida({ corrida, accent }: { corrida: CorridaEnMarcha; accent: string }) {
+  const varias = corrida.de > 1
+  const parte  = varias ? Math.min(corrida.hecho + 1, corrida.de) : 1
+  const pct    = varias ? (corrida.hecho / corrida.de) * 100 : 0
+  const dice = {
+    arrancando: 'starting',
+    preparando: 'preparing the inputs',
+    generando:  'generating',
+    publicando: 'publishing',
+  }[corrida.estado] ?? corrida.estado
+  const mmss = `${Math.floor(corrida.segundos / 60)}:${String(corrida.segundos % 60).padStart(2, '0')}`
+
+  return (
+    <div style={{ padding: '9px 18px', borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+        <span style={{
+          fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '.08em',
+          color: accent, textTransform: 'uppercase',
+        }}>Running</span>
+        <span style={{ fontSize: 12, color: 'var(--text-0)' }}>{corrida.etiqueta}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--text-2)' }}>
+          {varias ? `part ${parte} of ${corrida.de}` : dice}{corrida.que ? ` · ${corrida.que}` : ''}
+        </span>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>{mmss}</span>
+      </div>
+      <div style={{
+        height: 3, borderRadius: 2, overflow: 'hidden',
+        background: 'rgba(255,255,255,0.08)',
+      }}>
+        <div style={{
+          height: '100%', borderRadius: 2, background: accent,
+          width: varias ? `${pct}%` : '38%',
+          transition: 'width 600ms ease',
+          animation: varias ? undefined : 'mb-corre 1.5s ease-in-out infinite',
+        }} />
+      </div>
+    </div>
+  )
 }
 
 const COLS = 4   // como la referencia
@@ -256,6 +313,31 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
   const [tab,     setTab]     = useState('all')
+
+  // Lo que está corriendo en el proyecto (informe v6, punto 4). Se pregunta al backend, no se
+  // deduce de lo que hizo esta pestaña: así la barra aparece también después de recargar la
+  // página, y para quien no fue el que apretó Run.
+  //
+  // Se pregunta cada 2,5 s mientras hay algo corriendo y cada 15 s cuando no: es un dato en
+  // memoria del backend, sin base de datos de por medio, pero preguntar por preguntar tampoco
+  // es gratis para una instancia chica.
+  const [corridas, setCorridas] = useState<CorridaEnMarcha[]>([])
+  useEffect(() => {
+    let vivo = true
+    let t: ReturnType<typeof setTimeout>
+    const mirar = async () => {
+      try {
+        const r = await getCorridasEnMarcha(projectId)
+        if (!vivo) return
+        setCorridas(r.corridas || [])
+        t = setTimeout(mirar, r.corridas?.length ? 2500 : 15000)
+      } catch {
+        if (vivo) t = setTimeout(mirar, 15000)
+      }
+    }
+    mirar()
+    return () => { vivo = false; clearTimeout(t) }
+  }, [projectId])
   // Origen: 'all' · una clave de nodo · 'library' (lo que subió el usuario al proyecto).
   const [node,    setNode]    = useState<string>(nodeKey ?? 'all')
   const [page,    setPage]    = useState(0)
@@ -1090,6 +1172,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     // Lo escondido se cae del LIENZO, no de la tabla: la tabla es donde se busca, y no encontrar
     // ahi algo que sigue existiendo es peor que verlo.
     const base = view === 'table' ? conTab : conTab.filter(a => !ocultos[a.id])
+    // Y lo mismo con los archivos de trabajo: fuera del lienzo, presentes en Docs y en la tabla.
+    const enLienzo = view === 'table' || tab === 'docs' || familia
+      ? base
+      : base.filter(a => !esArchivoDeTrabajo(a))
 
     if (view === 'table') {
       const key = (a: UnifiedAsset) =>
@@ -1097,14 +1183,14 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       : sort.by === 'type'   ? kindOf(a)
       : sort.by === 'origin' ? originOf(a).toLowerCase()
       :                        new Date(a.created_at).getTime()
-      return [...base].sort((a, b) => {
+      return [...enLienzo].sort((a, b) => {
         const ka = key(a), kb = key(b)
         return (ka < kb ? -1 : ka > kb ? 1 : 0) * sort.dir
       })
     }
 
-    if (tab !== 'all') return [...base].sort(porFechaYPagina)
-    return [...base].sort((a, b) => rankOf(a) - rankOf(b) || porFechaYPagina(a, b))
+    if (tab !== 'all') return [...enLienzo].sort(porFechaYPagina)
+    return [...enLienzo].sort((a, b) => rankOf(a) - rankOf(b) || porFechaYPagina(a, b))
   }, [shownSet, tab, view, sort, fechaGrupo, familia, conDescendientes])
 
   // La página es exactamente lo que entra en pantalla: 3 filas de `cols`. Así nunca hay que
@@ -1317,6 +1403,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   }, [guardarLayout])
 
   // Mover un marco mueve a todos sus miembros: eso es lo que lo hace un bloque y no una etiqueta.
+  //
+  // `base` es la foto de dónde estaba cada miembro al empezar el arrastre, y la toma quien
+  // arrastra. Tiene que traerlos a TODOS: al que no viene no hay de dónde moverlo, y antes se
+  // lo descartaba en silencio — el grupo llegaba partido a su destino.
   const moverMarco = useCallback((id: string, dx: number, dy: number, base: Record<string, { x: number; y: number }>) => {
     const m = marcosRef.current.find(x => x.id === id)
     if (!m) return
@@ -1324,12 +1414,13 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       const n = { ...prev }
       for (const hoja of m.ids) {
         const k = `${fase.key}:${hoja}`
-        const p = base[k]
+        const p = base[k] ?? disposicion.pos.get(hoja)
         if (p) n[k] = { x: p.x + dx, y: p.y + dy }
       }
       return n
     })
-  }, [fase.key])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fase.key, disposicion])
 
   // Al entrar a una etapa que todavía no tiene encuadre propio, se encuadra sola: todo el
   // contenido, centrado. Una sola vez por etapa — después el encuadre es del usuario.
@@ -1485,6 +1576,12 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             border: '1px solid var(--line-2)', color: 'var(--text-2)', fontSize: 15, lineHeight: 1,
           }}>×</button>
         </div>
+
+        {/* Lo que está corriendo. Va acá arriba y no dentro del recuadro de Run porque tiene
+            que verse mientras se sigue trabajando en el lienzo — y después de recargar. */}
+        {corridas.map(c => (
+          <BarraDeCorrida key={c.asset_id} corrida={c} accent={theme.accent} />
+        ))}
 
         {/* ── Barra de filtros ─────────────────────────────────────────── */}
         <div style={{
@@ -1861,7 +1958,19 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           e.stopPropagation()
                           // Igual que con una hoja: una foto por gesto, no por pixel.
                           marcarHistorial()
+                          // La base tiene que incluir a TODOS los miembros del marco, no solo a los que
+                          // alguien movió antes a mano. Las páginas que nunca se tocaron no están en
+                          // `posiciones` —las coloca el acomodo por zonas— y se quedaban en su sitio
+                          // mientras el resto del grupo se iba: el grupo se descomponía al sacarlo de
+                          // la zona del ASG (informe v6, punto 9).
                           const base = { ...posicionesRef.current }
+                          for (const hoja of m.ids) {
+                            const k = `${fase.key}:${hoja}`
+                            if (!base[k]) {
+                              const q = disposicion.pos.get(hoja)
+                              if (q) base[k] = q
+                            }
+                          }
                           const ini = { x: e.clientX, y: e.clientY }
                           const mover = (ev: PointerEvent) =>
                             moverMarco(m.id, (ev.clientX - ini.x) / vista.z, (ev.clientY - ini.y) / vista.z, base)
@@ -2101,7 +2210,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             onHover={dentro => (dentro ? entrarHoja(a.id) : salirHoja(a.id))}
                             onOpen={(from) => { setSel(a.id); setDetail({ asset: a, from }) }}
                             onMenu={(x, y) => setMenu({ x, y, asset: a })}
-                            marca={marcas[a.id] ?? null} />
+                            marca={marcas[a.id] ?? null} escala={vista.z} />
 
                       {/* Con qué opciones se generó la pieza, DEBAJO de ella (informe v4, punto 8).
                           La vista ampliada ya las mostraba; en el lienzo no, y ahí es donde uno
@@ -2823,18 +2932,24 @@ function useAudioThumb(url: string, id: string, accent: string) {
   return { data, cargando }
 }
 
-function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu, marca }: {
+function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu, marca, escala }: {
   asset: UnifiedAsset; index: number; accent: string; colors: string[]
   selected: boolean; onOpen: (from: DOMRect) => void
   onSelect?: () => void; onHover?: (dentro: boolean) => void
   onMenu: (x: number, y: number) => void
   // Que esta página quedó desactualizada por un cambio aguas arriba, y qué acción se sugiere.
   marca?: MarcaDeActualizacion | null
+  /** El zoom del lienzo. Decide con qué resolución se pide la miniatura. */
+  escala?: number
 }) {
   const [hover, setHover] = useState(false)
   const t    = tabOf(asset)
   const kind = kindOf(asset)
   const url  = asset.storage_url ?? ''
+  // La miniatura se pide a 600 y se sube a 1200 cuando el lienzo se acerca —ahí es cuando se
+  // leen las páginas de la guía de estilo—. Al alejarse vuelve a la chica sin parpadeo: el
+  // navegador ya la tiene, se pidió al abrir.
+  const anchoMini = (escala ?? 1) > 1.5 ? 1200 : 600
   const g    = useGlbThumb(kind === '3d'    ? url : '', asset.id, rampa(colors, accent))
   const v    = useVideoThumb(kind === 'video' ? url : '', asset.id)
   const a    = useAudioThumb(kind === 'audio' ? url : '', asset.id, vivido(colors, accent))
@@ -2923,10 +3038,16 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
 
       {kind === 'image' && url ? (
         // `contain` y no `cover`: una hoja de guía de estilo recortada pierde justo lo que hay
-        // que leer, y estas páginas tienen que verse enteras. Se pide en tamaño grande porque el
-        // lienzo se acerca hasta 400% y con la miniatura la letra se deshace.
-        <Image src={url} alt={asset.name} fill sizes="1200px"
-               style={{ objectFit: 'contain' }} />
+        // que leer, y estas páginas tienen que verse enteras.
+        //
+        // La reducción es NUESTRA (ver miniaturaUrl) y no la de Vercel: su cuota de optimización
+        // se agotó y devolvía 402 a toda imagen que no tuviera ya en caché, así que las páginas
+        // recién generadas aparecían como un marco vacío. Si la miniatura fallara, se cae al
+        // original — pesa más, pero se ve.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={miniaturaUrl(url, anchoMini)} alt={asset.name} loading="lazy" decoding="async"
+             onError={e => { if (e.currentTarget.src !== url) e.currentTarget.src = url }}
+             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }} />
       ) : kind === 'video' && vid ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -3742,6 +3863,31 @@ const SUBMENU: Record<string, { label: string; items: string[] }> = {
   audio: { label: 'Edit Audio', items: ['New Iteration', 'Trim', 'Transcribe', 'Replace track', 'Upload manual edits'] },
 }
 const submenuDe = (a: UnifiedAsset) => SUBMENU[kindOf(a) === 'doc' ? 'text' : kindOf(a)] ?? SUBMENU.image
+
+// Qué herramientas aplican sobre cada pieza, recordado mientras dure la página.
+//
+// Miguel lo reportó como «New Angle a veces no aparece»: no era aleatorio ni era el requisito,
+// era que el submenú preguntaba al abrirse y se dibujaba antes de la respuesta. Ahora se
+// pregunta un gesto ANTES —al abrir el radial principal, mientras la persona todavía está
+// eligiendo sector— y la respuesta queda guardada, así que volver a abrirlo es instantáneo.
+//
+// La otra mitad del arreglo está en el backend: esa consulta leía los 28 workflows enteros
+// (752 KB) para usar 2,8 KB. Ver getWorkflowLite en config.service.js.
+const HERRAMIENTAS_DE_PIEZA = new Map<string, HerramientaDeAsset[]>()
+const PREGUNTANDO = new Map<string, Promise<HerramientaDeAsset[]>>()
+
+function herramientasDePieza(projectId: string, assetId: string): Promise<HerramientaDeAsset[]> {
+  const guardadas = HERRAMIENTAS_DE_PIEZA.get(assetId)
+  if (guardadas) return Promise.resolve(guardadas)
+  const enCurso = PREGUNTANDO.get(assetId)
+  if (enCurso) return enCurso
+  const p = getAssetTools(projectId, assetId)
+    .then(r => r.herramientas.filter(h => h.disponible))
+    .catch(() => [] as HerramientaDeAsset[])
+    .then(l => { HERRAMIENTAS_DE_PIEZA.set(assetId, l); PREGUNTANDO.delete(assetId); return l })
+  PREGUNTANDO.set(assetId, p)
+  return p
+}
 
 // Qué opción del submenú corre qué herramienta. Por ETIQUETA y no por índice: los cinco tipos
 // tienen su propia lista y la posición 2 de «Edit 3D» es «Retexture», que no es esto.
@@ -4945,6 +5091,30 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo, onMontaje }: {
               {paso.etiqueta_cadena.toUpperCase()} · STEP {paso.indice} OF {paso.de}
             </div>
 
+            {/* La cadena de esta página, de principio a fin (informe v6, punto 7). Miguel eligió
+                la opción (a): los PASOS de producción con nombres claros —«Concept art → 3D
+                production»— y nada más. Segmentación y Nuevo Ángulo no salen acá: no son pasos
+                de la cadena sino herramientas sobre una pieza ya hecha, y verlas mezcladas era
+                lo que hacía imposible saber qué iba a pasar al apretar Run. */}
+            {paso.pasos && paso.pasos.length > 1 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+                {paso.pasos.map((q, i) => (
+                  <div key={q.clave} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {i > 0 && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>→</span>}
+                    <span style={{
+                      padding: '3px 9px', borderRadius: 999, fontSize: 11, whiteSpace: 'nowrap',
+                      background: q.estado === 'siguiente' ? `${accent}22` : 'transparent',
+                      border: `1px solid ${q.estado === 'siguiente' ? accent : 'var(--line-2)'}`,
+                      color: q.estado === 'siguiente' ? accent
+                           : q.estado === 'hecho' ? 'var(--text-2)' : 'var(--text-3)',
+                    }}>
+                      {q.estado === 'hecho' ? '✓ ' : ''}{q.etiqueta}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 12 }}>
               {paso.etiqueta}
             </div>
@@ -5201,16 +5371,17 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<number | null>(null)
   // Cuáles aplican sobre ESTA pieza lo decide el backend: Nuevo Ángulo solo aparece sobre lo que
-  // ya salió aislado sobre blanco. Mientras la respuesta no llega, los dos sectores se ven
-  // apagados — es lo mismo que verían si de verdad no aplicaran, y no hay parpadeo.
-  const [tools, setTools] = useState<HerramientaDeAsset[] | null>(null)
+  // ya salió aislado sobre blanco. Normalmente ya está contestado —el radial principal lo
+  // preguntó al abrirse— y entonces el aro se dibuja directamente con sus sectores definitivos.
+  const [tools, setTools] = useState<HerramientaDeAsset[] | null>(
+    () => HERRAMIENTAS_DE_PIEZA.get(asset.id) ?? null,
+  )
   useEffect(() => {
+    if (tools) return
     let vivo = true
-    getAssetTools(projectId, asset.id)
-      .then(r => { if (vivo) setTools(r.herramientas.filter(h => h.disponible)) })
-      .catch(() => { if (vivo) setTools([]) })
+    herramientasDePieza(projectId, asset.id).then(l => { if (vivo) setTools(l) })
     return () => { vivo = false }
-  }, [projectId, asset.id])
+  }, [projectId, asset.id, tools])
   useEffect(() => { const r = requestAnimationFrame(() => setShown(true)); return () => cancelAnimationFrame(r) }, [])
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onBack() } }
@@ -5219,7 +5390,21 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
   }, [onBack])
 
   const cfg = submenuDe(asset)
-  const N = cfg.items.length
+
+  // Las herramientas que no aplican se OCULTAN, no se apagan (decisión de Miguel, informe v6
+  // #8): Nuevo Ángulo solo tiene sentido sobre una pieza aislada sobre blanco, y enseñarla en
+  // las demás páginas invita a gastar una corrida donde no va a dar nada. Las opciones que
+  // todavía no existen —Recortar, Subir ajustes manuales— sí siguen a la vista y apagadas: esas
+  // van a llegar, y verlas dice qué va a venir.
+  //
+  // Mientras no se sepa cuáles aplican no se dibujan sectores de herramienta: entrar con cinco y
+  // quedarse en cuatro movería todo el aro bajo el cursor. Casi nunca se ve, porque la respuesta
+  // se pidió al abrir el radial principal.
+  const items = useMemo(
+    () => cfg.items.filter(l => !HERRAMIENTA_DE[l] || (tools ?? []).some(h => h.clave === HERRAMIENTA_DE[l])),
+    [cfg, tools],
+  )
+  const N = items.length
   const R  = 172
   const cx = Math.min(Math.max(x, R + 12), window.innerWidth  - R - 12)
   const cy = Math.min(Math.max(y, R + 12), window.innerHeight - R - 12)
@@ -5247,7 +5432,7 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
         backdropFilter: 'blur(4px)',
       }} />
 
-      {cfg.items.map((label, i) => {
+      {items.map((label, i) => {
         // Todo se despacha por ETIQUETA, igual que las herramientas y por la misma razón: los
         // cinco tipos tienen su propia lista y la posición no significa lo mismo en todas. La
         // posición 1 era «Design edits» solo en Edit 2D — en Edit 3D es «3D viewer», en Audio y
@@ -5276,7 +5461,6 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
                    : herr ? (herr.pide_mascara
                        ? 'Paint the part to isolate — it is published as a new piece to the right'
                        : 'A new view of this asset — published as a new piece to the right')
-                   : HERRAMIENTA_DE[label] ? `${label} — only over an asset already isolated on white`
                    : `${label} — not available yet`}
               style={{
                 position: 'absolute', inset: 3, borderRadius: '50%',
@@ -5355,6 +5539,10 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
   // alternativa era repetir acá la regla de qué es una hoja de entorno, que es justo lo que no se
   // hace con las herramientas. Mientras no conteste, el radial tiene sus cinco sectores de
   // siempre; el sexto entra si aplica, dentro de la propia animación de apertura.
+  // Y de paso se preguntan las herramientas, que es lo que va a necesitar el submenú. Se pide
+  // acá y no allá para que la respuesta llegue mientras la persona elige sector.
+  useEffect(() => { herramientasDePieza(projectId, asset.id) }, [projectId, asset.id])
+
   const [montaje, setMontaje] = useState<EstadoDeMontaje | null>(null)
   useEffect(() => {
     let vivo = true
@@ -5877,6 +6065,12 @@ const KEYFRAMES = `
 }
 @keyframes mb-spin {
   to { transform: rotate(360deg); }
+}
+/* Un despacho único no tiene fracción real que enseñar: la barra recorre en vez de mentir
+   un porcentaje. Ver BarraDeCorrida. */
+@keyframes mb-corre {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
 }
 @keyframes mb-sweep {
   0%   { opacity: 0; transform: rotate(-120deg) scale(0.9); filter: blur(6px) saturate(1.6); }

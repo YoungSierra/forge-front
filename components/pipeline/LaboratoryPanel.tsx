@@ -12,7 +12,7 @@
 
 import { createPortal } from 'react-dom'
 import { useEffect, useState } from 'react'
-import { publicarJugable } from '@/lib/api'
+import { publicarJugable, getLaboratorio } from '@/lib/api'
 
 interface Props {
   /** El proyecto, para poder publicar lo que se genere aquí dentro. */
@@ -39,6 +39,20 @@ export default function LaboratoryPanel({ projectId, slug, url, documento, proye
   const [enlace, setEnlace] = useState<{ url: string; archivos: number; bytes: number } | null>(null)
   const [fallo, setFallo] = useState<string | null>(null)
   const [copiado, setCopiado] = useState(false)
+  // Si el laboratorio tiene un build final. Publicar sin él falla del otro lado —«No playable
+  // public/gameplay/main.js. Generate Final first»— y el botón no tiene por qué dejar llegar
+  // hasta ahí. Se vuelve a preguntar mientras el panel está abierto, porque el Final se construye
+  // AQUÍ DENTRO: si solo se mirara al abrir, el botón se quedaría apagado para siempre.
+  const [listo, setListo] = useState<boolean | null>(null)
+  useEffect(() => {
+    let vivo = true
+    const mirar = () => getLaboratorio(projectId)
+      .then(r => { if (vivo) setListo(Boolean(r.jugable_listo)) })
+      .catch(() => { if (vivo) setListo(null) })
+    mirar()
+    const t = setInterval(mirar, 15000)
+    return () => { vivo = false; clearInterval(t) }
+  }, [projectId])
 
   async function publicar() {
     setFallo(null)
@@ -118,16 +132,21 @@ export default function LaboratoryPanel({ projectId, slug, url, documento, proye
           <div style={{ flex: 1 }} />
           <button
             onClick={publicar}
-            disabled={publicando}
-            title="Upload the generated playable and get a link anyone can open"
+            disabled={publicando || listo === false}
+            title={listo === false
+              ? 'There is no final build yet — run Generate Final in the lab first'
+              : listo === null
+                ? 'Checking whether the lab has a final build…'
+                : 'Upload the generated playable and get a link anyone can open'}
             style={{
-              padding: '6px 12px', borderRadius: 8, cursor: publicando ? 'wait' : 'pointer',
-              background: publicando ? 'transparent' : ACENTO,
-              border: `1px solid ${ACENTO}`,
-              color: publicando ? ACENTO : '#1a0d04',
+              padding: '6px 12px', borderRadius: 8,
+              cursor: publicando ? 'wait' : listo === false ? 'not-allowed' : 'pointer',
+              background: publicando || listo !== true ? 'transparent' : ACENTO,
+              border: `1px solid ${listo === false ? 'var(--line-2, #2a2f3a)' : ACENTO}`,
+              color: listo === false ? 'var(--text-3, #6b7280)' : publicando ? ACENTO : listo === null ? ACENTO : '#1a0d04',
               fontSize: 11.5, fontFamily: 'var(--font-sans)', fontWeight: 600,
             }}
-          >{publicando ? 'Publishing…' : 'Publish playable'}</button>
+          >{publicando ? 'Publishing…' : listo === false ? 'Generate Final first' : 'Publish playable'}</button>
 
           {/* La salida a su propia pestaña se queda a mano: el laboratorio se usa a pantalla
               completa durante un rato largo, y el marco de Forge ahí estorba. */}
