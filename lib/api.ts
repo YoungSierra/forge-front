@@ -2031,7 +2031,14 @@ export async function getNextChainStep(projectId: string, assetId: string, leerC
   // `cadenas` solo viene cuando no hay paso: son las que existen, para poder nombrarlas en el
   // aviso. Escritas a mano se quedaron diciendo que Character Sheet era la única cuando ya eran
   // cinco, y quien lo leía se iba creyendo que su hoja no tenía workflow.
-  return request<{ success: boolean; paso: PasoDeCadena | null; cadenas?: string[] }>(
+  return request<{ success: boolean; paso: PasoDeCadena | null; cadenas?: string[]
+    /** Si esta cadena YA avanzó en el proyecto: desde qué pieza seguir y cuál sería el paso.
+     *  El paso que ofrece Run sale de la pieza sobre la que se pulsó, así que parado en la hoja
+     *  es siempre el primero — aunque el proyecto ya tenga los veinte modelos hechos. */
+    continuar?: {
+      asset_id: string; nombre: string; piezas: number; pasos_hechos: string[]
+      paso: { clave: string; etiqueta: string; indice: number; de: number } | null
+    } }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/next-step${leerClips ? '?leer_clips=1' : ''}`,
   )
 }

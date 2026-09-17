@@ -2566,6 +2566,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           projectId={projectId}
           accent={theme.accent}
           onCancel={() => setCorriendo(null)}
+          // Se reabre sobre la pieza que va adelantada: la ventana es la misma, cambia sobre
+          // qué pregunta. Si esa pieza no está en el lienzo —no debería— no se hace nada.
+          onSaltar={id => { const a = assetsRef.current.find(x => x.id === id); if (a) setCorriendo(a) }}
           onMontaje={a => { setCorriendo(null); setMontando({ asset: a, estado: null }) }}
           onListo={ids => {
             setCorriendo(null)
@@ -5036,7 +5039,7 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
   )
 }
 
-function AvisoRun({ asset, projectId, accent, onCancel, onListo, onMontaje }: {
+function AvisoRun({ asset, projectId, accent, onCancel, onListo, onMontaje, onSaltar }: {
   asset: UnifiedAsset
   projectId: string
   accent: string
@@ -5045,6 +5048,8 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo, onMontaje }: {
   /** El paso de montaje no se despacha como los demás: necesita que alguien marque el papel de
    *  cada modelo y elija nivel. Se cede a la ventana que ya hace eso, en vez de duplicarla acá. */
   onMontaje: (a: UnifiedAsset) => void
+  /** Volver a abrir esta misma ventana sobre la pieza que ya va adelantada en la cadena. */
+  onSaltar?: (assetId: string) => void
 }) {
   const [paso,  setPaso]  = useState<PasoDeCadena | null | undefined>(undefined)
   const [texto, setTexto] = useState('')
@@ -5065,13 +5070,17 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo, onMontaje }: {
   const [abierto,  setAbierto]  = useState(false)
   // Qué cadenas existen. Las manda el backend junto con «no hay paso», porque es quien las define.
   const [cadenas,  setCadenas]  = useState<string[] | null>(null)
+  // Si esta cadena ya avanzó en el proyecto. Parado en la hoja del ASG, Run propone siempre el
+  // paso 1 —es de donde arranca la cadena— aunque las veinte partes y los veinte modelos ya
+  // estén hechos. Sin decirlo, el único camino al último paso era saber sobre qué pieza pulsar.
+  const [continuar, setContinuar] = useState<NonNullable<Awaited<ReturnType<typeof getNextChainStep>>['continuar']> | null>(null)
 
   // El paso lo decide el BACKEND, que es quien conoce la cadena y en qué punto quedó la pieza.
   // Calcularlo acá obligaría a duplicar el mapa de workflows en el front y a mantenerlo al día.
   useEffect(() => {
     let vivo = true
     getNextChainStep(projectId, asset.id)
-      .then(r => { if (vivo) { setPaso(r.paso); setCadenas(r.cadenas ?? null) } })
+      .then(r => { if (vivo) { setPaso(r.paso); setCadenas(r.cadenas ?? null); setContinuar(r.continuar ?? null) } })
       .catch(() => { if (vivo) setPaso(null) })
     return () => { vivo = false }
   }, [projectId, asset.id])
@@ -5234,6 +5243,38 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo, onMontaje }: {
                     </span>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Esta cadena ya avanzó, y lo que la ventana propone es rehacer el principio.
+                Pasó con JuanK: veía «Level package» en la cinta, su proyecto tenía las veinte
+                partes y los veinte modelos, y Run le ofrecía generar las veinte otra vez. El paso
+                sale de la pieza sobre la que se pulsó, y él pulsó la hoja — que es el arranque.
+
+                No se salta solo: se dice y se ofrece. Saltar por su cuenta sería elegir por él
+                sobre algo que cuesta, y a veces rehacer el paso 1 es justo lo que se quiere. */}
+            {continuar && (
+              <div style={{
+                padding: '9px 11px', borderRadius: 8, marginBottom: 12,
+                background: 'var(--bg-2)', border: `1px solid ${accent}55`,
+              }}>
+                <div style={{ fontSize: 11.5, color: 'var(--text-1)', lineHeight: 1.55 }}>
+                  This chain already produced <strong>{continuar.piezas} pieces</strong> in this
+                  project{continuar.pasos_hechos.length ? ` (${continuar.pasos_hechos.join(', ')})` : ''}.
+                  {continuar.paso
+                    ? ' Running this step again re-does the beginning.'
+                    : ' It already reached its last step.'}
+                </div>
+                {continuar.paso && (
+                  <button
+                    onClick={() => onSaltar?.(continuar.asset_id)}
+                    style={{
+                      marginTop: 7, padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
+                      background: 'transparent', border: `1px solid ${accent}`, color: accent,
+                      fontSize: 11.5, fontFamily: 'var(--font-sans)',
+                    }}
+                  >Continue from step {continuar.paso.indice} of {continuar.paso.de} — {continuar.paso.etiqueta}</button>
+                )}
               </div>
             )}
 
