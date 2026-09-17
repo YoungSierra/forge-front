@@ -193,18 +193,43 @@ export const claveDe = (catId: string, elemId: string) => `${catId}.${elemId}`
 export const estadoDe = (estados: Estados, catId: string, elemId: string): EstadoElemento =>
   estados[claveDe(catId, elemId)] ?? 'pendiente'
 
-/** Promedio del avance de los elementos de una categoría, de 0 a 1. */
-export function progresoCategoria (cat: CategoriaAlcance, estados: Estados): number {
-  if (!cat.elementos.length) return 0
-  const t = cat.elementos.reduce((s, e) => s + PESO[estadoDe(estados, cat.id, e.id)], 0)
-  return t / cat.elementos.length
+/** Las instancias reales del alcance, por página del ASG. Las trae el backend desde el VS
+ *  Specification o el manifiesto del 3.20. */
+export type Instancias = Record<string, { nombre: string }[]> | null | undefined
+
+/** El nombre de una página sin su número: el maestro cambia la numeración, no los nombres. */
+const sinNumero = (s: string) => s.replace(/^\d+[_\s-]*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+
+/**
+ * Las UNIDADES que se cuentan en una página: sus instancias por asset si el proyecto las declara,
+ * y si no, los sub-elementos.
+ *
+ * Las instancias son lo que manda el documento del menú (§4, §5): el panel rastrea «qué assets del
+ * slice están aprobados», no «qué sub-tareas técnicas quedan». Los sub-elementos siguen ahí como
+ * último recurso porque un proyecto sin Vertical Slice Specification no tiene instancias que
+ * contar, y un cero sin explicación no informa.
+ */
+export function unidadesDe (cat: CategoriaAlcance, instancias?: Instancias): string[] {
+  if (instancias) {
+    const k = Object.keys(instancias).find(x => sinNumero(x) === sinNumero(cat.pagina))
+    const l = k ? instancias[k] : null
+    if (l && l.length) return l.map(i => i.nombre)
+  }
+  return cat.elementos.map(e => e.id)
 }
 
-/** El anillo global: el mismo promedio sobre los 22 elementos, no el promedio de los promedios.
- *  Promediar categorías le daría a «Style · Paleta» —un elemento— el mismo peso que a Character
- *  Sheet, que tiene cuatro. */
-export function progresoGlobal (estados: Estados): number {
-  const todos = ALCANCE_VS.flatMap(c => c.elementos.map(e => estadoDe(estados, c.id, e.id)))
+/** Promedio del avance de una categoría, de 0 a 1. Sobre instancias cuando las hay. */
+export function progresoCategoria (cat: CategoriaAlcance, estados: Estados, instancias?: Instancias): number {
+  const u = unidadesDe(cat, instancias)
+  if (!u.length) return 0
+  return u.reduce((s, x) => s + PESO[estadoDe(estados, cat.id, x)], 0) / u.length
+}
+
+/** El anillo global: el mismo promedio sobre TODAS las unidades del slice, no el promedio de los
+ *  promedios. Promediar categorías le daría a «Color System» —una— el mismo peso que a Character
+ *  Sheet, que puede tener seis personajes. */
+export function progresoGlobal (estados: Estados, instancias?: Instancias): number {
+  const todos = ALCANCE_VS.flatMap(c => unidadesDe(c, instancias).map(x => estadoDe(estados, c.id, x)))
   if (!todos.length) return 0
   return todos.reduce((s, e) => s + PESO[e], 0) / todos.length
 }
@@ -212,7 +237,9 @@ export function progresoGlobal (estados: Estados): number {
 // ── La guía ──────────────────────────────────────────────────────────────────
 export type Guia = {
   categoria:    CategoriaAlcance
-  falta:        ElementoAlcance[]
+  /** Hasta dos unidades sin aprobar de esa página, ya con su nombre visible: los assets concretos
+   *  cuando el proyecto declara instancias —«Moon Jelly × 6»—, y si no, los sub-elementos. */
+  falta:        { nombre: string }[]
   alternativas: CategoriaAlcance[]
 }
 
@@ -231,18 +258,23 @@ export type Guia = {
  *
  * Devuelve `null` cuando todo está aprobado.
  */
-export function calcularGuia (estados: Estados): Guia | null {
+export function calcularGuia (estados: Estados, instancias?: Instancias): Guia | null {
   const incompletas = [...ALCANCE_VS]
     .sort((a, b) => a.orden - b.orden)
-    .filter(c => progresoCategoria(c, estados) < 1)
+    .filter(c => progresoCategoria(c, estados, instancias) < 1)
   if (!incompletas.length) return null
 
   const categoria = incompletas[0]
+  // «Falta» son ASSETS, no sub-tareas. El aviso decía «Missing: Rigs + skinning» —un paso técnico
+  // que además produce el propio workflow— cuando lo que el equipo necesita leer es qué asset
+  // concreto le queda por aprobar. Es el punto que Miguel señaló del menú implementado.
+  const nombreDe = (u: string) => categoria.elementos.find(e => e.id === u)?.nombre ?? u
   return {
     categoria,
-    falta: categoria.elementos
-      .filter(e => estadoDe(estados, categoria.id, e.id) !== 'aprobado')
-      .slice(0, 2),
+    falta: unidadesDe(categoria, instancias)
+      .filter(u => estadoDe(estados, categoria.id, u) !== 'aprobado')
+      .slice(0, 2)
+      .map(u => ({ nombre: nombreDe(u) })),
     alternativas: incompletas.slice(1, 4),
   }
 }

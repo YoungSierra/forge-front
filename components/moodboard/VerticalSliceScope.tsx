@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ALCANCE_VS, calcularGuia, claveDe, esProducible, estadoDe, progresoCategoria, progresoGlobal, PESO,
+  ALCANCE_VS, calcularGuia, claveDe, esProducible, estadoDe, progresoCategoria, progresoGlobal, unidadesDe,
   type CategoriaAlcance, type EstadoElemento, type Estados,
 } from './vs-scope'
 
@@ -101,8 +101,8 @@ export default function VerticalSliceScope ({
   const [pos,       setPos]       = useState({ x: 24, y: 24 })
   const arrastre = useRef<{ dx: number; dy: number } | null>(null)
 
-  const guia    = useMemo(() => calcularGuia(estados), [estados])
-  const global  = useMemo(() => progresoGlobal(estados), [estados])
+  const guia    = useMemo(() => calcularGuia(estados, instancias), [estados, instancias])
+  const global  = useMemo(() => progresoGlobal(estados, instancias), [estados, instancias])
 
   // El lienzo manda: señalar una hoja allá abre su sección acá. Es la mitad que hace que los dos
   // se sigan; sin esto el vínculo sería de ida y el usuario tendría que buscar a mano.
@@ -244,11 +244,9 @@ export default function VerticalSliceScope ({
                   // «2 de 6 personajes» es lo que el equipo quiere leer, no el avance de cuatro
                   // categorías inventadas por nosotros (spec §5, informe v7 #5).
                   const inst = instanciasDe(cat.pagina)
-                  const unidades = inst ? inst.map(i => i.nombre) : cat.elementos.map(e => e.id)
+                  const unidades = unidadesDe(cat, instancias)
                   const aprobados = unidades.filter(u => estadoDe(estados, cat.id, u) === 'aprobado').length
-                  const p = inst
-                    ? unidades.reduce((t, u) => t + PESO[estadoDe(estados, cat.id, u)], 0) / (unidades.length || 1)
-                    : progresoCategoria(cat, estados)
+                  const p = progresoCategoria(cat, estados, instancias)
                   const abierta = abiertas.has(cat.id)
                   const señalada = !!cat.pagina && cat.pagina === paginaActiva
                   return (
@@ -307,40 +305,34 @@ export default function VerticalSliceScope ({
                         </div>
                       )}
 
+                      {/* Sin instancias no se vuelve a la lista de sub-pasos técnicos: eso es
+                          justo lo que el documento de ajustes mandó eliminar («el menú rastrea
+                          qué sub-tareas hay que hacer, cuando debería rastrear qué assets del
+                          slice están aprobados»). Se enseña la REGLA de cuánto entra —que sí es
+                          del documento de alcance— y se dice por qué no hay fichas todavía. */}
+                      {/* Sin instancias declaradas. NO se vuelve a la lista de sub-pasos
+                          técnicos: es lo que el documento de ajustes mandó eliminar —«el menú
+                          rastrea qué sub-tareas hay que hacer, cuando debería rastrear qué
+                          assets del slice están aprobados»— y además esos pasos los produce el
+                          propio workflow, así que marcarlos «by hand» era contradictorio.
+
+                          Queda la regla de cuánto entra, que sí es del documento de alcance, y
+                          el motivo de que no haya fichas todavía. */}
                       {abierta && !instanciasDe(cat.pagina) && (
-                        <div style={{ padding: '2px 8px 8px 22px' }}>
-                          {cat.elementos.map(el => {
-                            const est = estadoDe(estados, cat.id, el.id)
-                            return (
-                              <div key={el.id} style={{ padding: '4px 0' }}>
-                                <div
-                                  onClick={() => avanzar(cat.id, el.id)}
-                                  style={{
-                                    display: 'flex', gap: 6, alignItems: 'baseline',
-                                    cursor: onEstados ? 'pointer' : 'default',
-                                  }}
-                                >
-                                  <span style={{ color: COLOR[est], fontSize: 10, width: 10 }}>{MARCA[est]}</span>
-                                  <span style={{ flex: 1, fontSize: 11, color: 'var(--text-1)' }}>{el.nombre}</span>
-                                  {/* Que un elemento se lleve a mano no es un detalle: distingue
-                                      «nadie lo ha hecho» de «Forge no puede saberlo». */}
-                                  {sinMedida?.[claveDe(cat.id, el.id)] && (
-                                    <span title={sinMedida[claveDe(cat.id, el.id)]}
-                                      style={{ fontSize: 8.5, color: 'var(--text-4)', fontFamily: 'var(--font-mono)' }}>
-                                      by hand
-                                    </span>
-                                  )}
-                                </div>
-                                <div style={{ fontSize: 9.5, color: 'var(--text-3)', marginLeft: 16 }}>{el.regla}</div>
-                                {minimos && (
-                                  <div style={{
-                                    fontSize: 9.5, color: 'var(--text-2)', marginLeft: 16, marginTop: 2,
-                                    paddingLeft: 6, borderLeft: '2px solid var(--line-2)',
-                                  }}>{el.minimo}</div>
-                                )}
-                              </div>
-                            )
-                          })}
+                        <div style={{ padding: '2px 8px 10px 22px' }}>
+                          <div style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.6 }}>
+                            {cat.elementos[0]?.regla}
+                          </div>
+                          <div style={{ fontSize: 9.5, color: 'var(--text-4)', marginTop: 4, lineHeight: 1.5 }}>
+                            No instances yet — the Vertical Slice Specification does not name the
+                            assets for this sheet.
+                          </div>
+                          {minimos && cat.elementos[0]?.minimo && (
+                            <div style={{
+                              fontSize: 9.5, color: 'var(--text-2)', marginTop: 6,
+                              paddingLeft: 6, borderLeft: '2px solid var(--line-2)',
+                            }}>{cat.elementos[0].minimo}</div>
+                          )}
                         </div>
                       )}
                     </div>
