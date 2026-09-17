@@ -19,7 +19,6 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import ContextoModal from './ContextoModal'
-import InstanciarModal from './InstanciarModal'
 import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
@@ -394,7 +393,15 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       })
       .catch(() => { /* sin medida, el panel sigue con lo marcado a mano */ })
     return () => { vivo = false }
-  }, [projectId])
+    // Se vuelve a medir cuando el proyecto GANA PIEZAS o cuando deja de haber algo corriendo.
+    // Es el punto 5 del informe v8: «el estado debe seguir el avance real sin intervención
+    // manual». Pedirlo una sola vez al abrir dejaba el menú congelado en lo que había al entrar,
+    // y había que recargar la pestaña para ver que una Sheet ya estaba terminada.
+    //
+    // Por el NÚMERO de piezas y de corridas, no por los arreglos: `corridas` se repregunta cada
+    // 2,5 s y llega un arreglo nuevo cada vez, así que ponerlo entero dispararía una medición
+    // por segundo durante toda la corrida.
+  }, [projectId, assets.length, corridas.length])
   useEffect(() => {
     try {
       if (Object.keys(alcance).length) window.localStorage.setItem(claveAlcance, JSON.stringify(alcance))
@@ -410,7 +417,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // Se piden una vez al abrir: salen del manifiesto del 3.20 o del VS Specification, y ninguno de
   // los dos cambia mientras alguien acomoda hojas. Si el proyecto no tiene de dónde contar, el
   // panel enseña los sub-elementos de siempre.
-  const [instanciasAlcance, setInstanciasAlcance] = useState<Record<string, { nombre: string }[]> | null>(null)
+  const [instanciasAlcance, setInstanciasAlcance] = useState<Record<string, { nombre: string; tier?: string }[]> | null>(null)
   useEffect(() => {
     let vivo = true
     getInstanciasDelAlcance(projectId)
@@ -470,9 +477,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // sitio. La ventana son los cuatro pasos del handoff; las reglas de a dónde va cada archivo las
   // resuelve el backend, no esta pantalla.
   const [contexto, setContexto] = useState<UnifiedAsset | null>(null)
-  // El recuadro que crea una hoja por ítem del alcance. Vive en el panel y no en el radial porque
-  // no es una acción sobre UNA pieza: es sobre lo que el slice pide entero.
-  const [instanciando, setInstanciando] = useState(false)
+  // Acá vivía el estado del recuadro «Create the sheets». Las hojas por ítem del alcance ya no son
+  // un segundo paso: las crea la propia corrida del ASG (informe v8, puntos 6 y 7). El recuadro y
+  // su ruta siguen existiendo en el repositorio por si hubiera que reponer el gesto a mano.
   // Qué quedó desactualizado al aprobar una página, con su acción sugerida: [R] regenerar o [V]
   // revalidar. Nada se regenera solo —generar cuesta y no es reproducible—, así que esto es una
   // marca y el gate lo pasa una persona.
@@ -949,13 +956,46 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     const nuevos = new Set(nuevosIds)
 
     const cambios: Record<string, { x: number; y: number }> = {}
+
+    // Informe v8, punto 2 — la causa de que se muevan hojas LEJOS de la generación.
+    //
+    // El acomodo por zonas encadena los bloques: `cursorX += w + SEP`. Si la zona del Art Style
+    // Guide recibe veinticinco hojas, su ancho cambia y la zona Art Bible —que va detrás— se
+    // desplaza entera, con todas sus hojas. Nadie la tocó y aun así cambió de sitio.
+    //
+    // Se arregla anclando: antes de meter nada, lo que hay en pantalla se queda con la posición
+    // que tiene AHORA. `disposicion` es la de antes de la recarga —esta función se llama con el
+    // mapa previo— así que es literalmente «donde estaba todo hasta hace un segundo». A partir de
+    // ahí ninguna llegada futura vuelve a recomponer el bloque.
     for (const a of deLaFase) {
-      if (a.id === origenId || nuevos.has(a.id)) continue
-      const p = resolver(a.id)
-      if (!p) continue
-      const compartenBanda = p.y < origen.y + HOJA_H && p.y + HOJA_H > origen.y
-      if (compartenBanda && p.x >= x0) cambios[`${fase.key}:${a.id}`] = { x: p.x + ancho, y: p.y }
+      const k = `${fase.key}:${a.id}`
+      if (guardadas[k] || nuevos.has(a.id)) continue
+      const p = disposicion.pos.get(a.id)
+      if (p) cambios[k] = p
     }
+
+    // Informe v8, punto 2: la versión anterior corría TODA la banda, así que una hoja dejada a
+    // mano tres pantallas a la derecha se movía igual aunque entre medio sobrara sitio. Eso es
+    // «se desorganizan páginas que estaban bien ubicadas, incluso lejos de la zona».
+    //
+    // Se aparta solo la CADENA CONTIGUA que de verdad estorba: se avanza de izquierda a derecha
+    // con un frente —el borde derecho de lo que se acaba de meter— y en cuanto aparece una hoja
+    // que ya tiene su hueco, esa y todas las de más allá se quedan donde el usuario las puso.
+    // Sigue sin haber solapes, que era lo que la regla §9 garantizaba.
+    const enLaBanda = deLaFase
+      .filter(a => a.id !== origenId && !nuevos.has(a.id))
+      .map(a => ({ id: a.id, p: resolver(a.id) }))
+      .filter((v): v is { id: string; p: { x: number; y: number } } => !!v.p)
+      .filter(v => v.p.y < origen.y + HOJA_H && v.p.y + HOJA_H > origen.y && v.p.x >= x0)
+      .sort((a, b) => a.p.x - b.p.x)
+
+    let frente = x0 + ancho          // primer x libre después del bloque nuevo
+    for (const v of enLaBanda) {
+      if (v.p.x >= frente) break     // ya tiene sitio: ni esta ni las siguientes se tocan
+      cambios[`${fase.key}:${v.id}`] = { x: frente, y: v.p.y }
+      frente += PASO
+    }
+
     nuevosIds.forEach((id, i) => { cambios[`${fase.key}:${id}`] = { x: x0 + i * PASO, y: origen.y } })
 
     // Se persiste el mapa YA calculado, no `posicionesRef`: la referencia se actualiza en un
@@ -1779,7 +1819,6 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
               accent={theme.accent}
               sinMedida={sinMedida}
               instancias={instanciasAlcance}
-              onInstanciar={() => setInstanciando(true)}
             />
           )}
           {/* Las cuatro páginas viven abajo, fijas. Antes había marcas laterales de «atrás» y
@@ -2265,7 +2304,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           position: 'absolute', inset: -10, borderRadius: 12, pointerEvents: 'none',
                           border: `2px solid ${theme.accent}`,
                           boxShadow: `0 0 0 4px ${theme.accent}33, 0 0 26px ${theme.accent}88`,
-                          animation: 'mb-breathe 2.6s ease-in-out infinite',
+                          animation: 'mb-respira-borde 2.6s ease-in-out infinite',
                         }} />
                       )}
                       <Card asset={a} index={i} accent={theme.accent} colors={theme.colors}
@@ -2515,25 +2554,6 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             onMontaje={(a, estado) => { setMenu(null); setMontando({ asset: a, estado }) }}
                             onContexto={a => { setMenu(null); setContexto(a) }} />}
 
-      {instanciando && (
-        <InstanciarModal
-          projectId={projectId}
-          accent={theme.accent}
-          onCerrar={() => setInstanciando(false)}
-          onListo={r => {
-            setInstanciando(false)
-            setAviso({
-              titulo: `${r.creados} sheet${r.creados === 1 ? '' : 's'} created`,
-              tono: 'hecho',
-              cuerpo: r.fallos
-                ? `${r.fallos} did not come out. What was produced is published; those can be run again.`
-                : 'They are published to the right of their page, ready to run.',
-            })
-            reload()
-          }}
-        />
-      )}
-
       {contexto && (
         <ContextoModal
           projectId={projectId}
@@ -2594,6 +2614,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           asset={corriendo}
           projectId={projectId}
           accent={theme.accent}
+          // La misma corrida que pinta la barra de arriba, para que el botón la muestre también.
+          // Se busca por asset porque el backend apunta el progreso contra la pieza de origen.
+          corrida={corridas.find(c => c.asset_id === corriendo.id) || null}
           onCancel={() => setCorriendo(null)}
           // Se reabre sobre la pieza que va adelantada: la ventana es la misma, cambia sobre
           // qué pregunta. Si esa pieza no está en el lienzo —no debería— no se hace nada.
@@ -3200,7 +3223,9 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
             onDoubleClick={e => e.stopPropagation()}
             style={{ width: '100%', height: '100%' }}
           >
-            <ModelViewer url={url} style={{ width: '100%', height: '100%' }} />
+            {/* `ruedaSoloZoom`: con el cursor encima del modelo la rueda solo acerca y aleja la
+                pieza. Sin eso el mismo giro llegaba al lienzo y además desplazaba la hoja. */}
+            <ModelViewer url={url} ruedaSoloZoom style={{ width: '100%', height: '100%' }} />
           </div>
         </>
       ) : kind === '3d' && glb ? (
@@ -3464,7 +3489,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
         )}
         {t === '3d' && (
           // El mismo visor que usan la librería de activos y el detalle de nodo.
-          <ModelViewer url={url || undefined} style={{ width: '100%', height: '100%' }} />
+          <ModelViewer url={url || undefined} ruedaSoloZoom style={{ width: '100%', height: '100%' }} />
         )}
         {t === 'doc' && (
           // Al frente el documento se lee, no solo se anuncia: el mismo asomo de texto de la
@@ -5091,10 +5116,13 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
   )
 }
 
-function AvisoRun({ asset, projectId, accent, onCancel, onListo, onMontaje, onSaltar }: {
+function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMontaje, onSaltar }: {
   asset: UnifiedAsset
   projectId: string
   accent: string
+  /** En qué va la corrida de ESTA pieza, si el backend ya la está contando. Alimenta la barra
+   *  del propio botón (informe v8, punto 1). */
+  corrida?: CorridaEnMarcha | null
   onCancel: () => void
   onListo: (idsNuevos: string[]) => void
   /** El paso de montaje no se despacha como los demás: necesita que alguien marque el papel de
@@ -5552,8 +5580,32 @@ function AvisoRun({ asset, projectId, accent, onCancel, onListo, onMontaje, onSa
                   border: `1px solid ${accent}88`, color: accent,
                   fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-sans)',
                   opacity: busy || (paso.pide_prompt && !texto.trim()) ? 0.55 : 1,
+                  // El relleno va DENTRO del botón, así que el botón es el marco.
+                  position: 'relative', overflow: 'hidden',
                 }}
-              >{busy ? 'Running…' : despachosReales > 1 ? `Run all ${despachosReales}` : 'Run'}</button>
+              >
+                {/* Informe v8, punto 1: el botón es donde se dispara la acción y donde se espera
+                    ver el avance. Mismo criterio que la barra de arriba —y misma fuente de dato—:
+                    con varias partes se llena por fracción REAL, y con un solo despacho, que no
+                    tiene fracción, recorre de izquierda a derecha en vez de inventar un
+                    porcentaje. Lo que se paga no lleva números fingidos. */}
+                {busy && (
+                  <span style={{
+                    position: 'absolute', left: 0, top: 0, bottom: 0, pointerEvents: 'none',
+                    background: `color-mix(in srgb, ${accent} 34%, transparent)`,
+                    width: corrida && corrida.de > 1 ? `${(corrida.hecho / corrida.de) * 100}%` : '34%',
+                    transition: 'width 600ms ease',
+                    animation: corrida && corrida.de > 1 ? undefined : 'mb-corre 1.5s ease-in-out infinite',
+                  }} />
+                )}
+                <span style={{ position: 'relative' }}>
+                  {busy
+                    ? corrida && corrida.de > 1
+                      ? `Running… ${Math.min(corrida.hecho + 1, corrida.de)} of ${corrida.de}`
+                      : 'Running…'
+                    : despachosReales > 1 ? `Run all ${despachosReales}` : 'Run'}
+                </span>
+              </button>
             </div>
 
             {despachosReales > 1 && !busy && (
@@ -6309,6 +6361,15 @@ const KEYFRAMES = `
 @keyframes mb-shock {
   0%   { width: 10px;  height: 10px;  margin-left: -5px;   margin-top: -5px;   opacity: 0.9; }
   100% { width: 420px; height: 420px; margin-left: -210px; margin-top: -210px; opacity: 0; }
+}
+/* El aro de resalte NO está centrado: va en «inset: -10», pegado a los bordes de la tarjeta.
+   Usaba «mb-breathe», que lleva «translate(-50%, -50%)» porque su otro usuario sí es un elemento
+   centrado — y eso corría el aro media tarjeta hacia arriba y hacia la izquierda. Ese era el
+   «recuadro fuera de lugar» de los informes v7 y v8: no era medición ni zoom, era una animación
+   prestada. */
+@keyframes mb-respira-borde {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.02); }
 }
 @keyframes mb-breathe {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }

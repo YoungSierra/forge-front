@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import MaskPainter, { type MaskPainterHandle } from '@/components/shared/MaskPainter'
+import VisorDeAngulo from './VisorDeAngulo'
 import { runAssetTool, type HerramientaDeAsset } from '@/lib/api'
 
 /** El PNG de los trazos, en base64, para que el servidor lo componga contra la lámina. */
@@ -50,6 +51,11 @@ export default function HerramientaModal({
 }) {
   const esMascara = herramienta.pide_mascara
   const campos    = herramienta.controles?.campos ?? []
+  // ¿Esta herramienta es un ángulo de cámara? Se pregunta por los TRES campos que la esfera
+  // representa, no por la clave de la herramienta: es el workflow quien declara sus controles, y
+  // atarlo a «multiangle» se rompería en silencio el día que se registre otro.
+  const hayAngulo = ['horizontal_angle', 'vertical_angle', 'zoom']
+    .every(k => campos.some(c => c.campo === k))
 
   const [archivo,  setArchivo]  = useState<File | null>(null)
   const [cargando, setCargando] = useState(esMascara)
@@ -154,6 +160,18 @@ export default function HerramientaModal({
                 </>
               )}
             </>
+          )}
+
+          {/* Los tres controles, en una sola imagen (informe v8, punto 8). Solo sale cuando el
+              workflow declara los tres ejes: si mañana una herramienta trae otros campos, la
+              esfera no los representa y dibujarla mentiría. */}
+          {hayAngulo && (
+            <VisorDeAngulo
+              azimut={valores.horizontal_angle}
+              elevacion={valores.vertical_angle}
+              zoom={valores.zoom}
+              accent={accent}
+            />
           )}
 
           {campos.map(c => (

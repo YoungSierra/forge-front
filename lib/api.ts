@@ -2288,7 +2288,7 @@ export async function guardarContexto(projectId: string, body: {
 export async function getInstanciasDelAlcance(projectId: string) {
   return request<{ success: boolean; hay: boolean; motivo?: string
     fuente?: 'manifest' | 'vs_spec' | null; instancias?: number
-    porHoja?: Record<string, { nombre: string; de?: string; cuenta?: number }[]>
+    porHoja?: Record<string, { nombre: string; de?: string; cuenta?: number; tier?: string }[]>
     avisos?: string[] }>(`/api/projects/${projectId}/canvas/alcance`)
 }
 

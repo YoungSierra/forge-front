@@ -14,15 +14,18 @@ const glbCache = new Map<string, string>()
 interface Props {
   url?: string
   style?: React.CSSProperties
+  /** El visor se queda la rueda: hace zoom del modelo y no deja que además mueva lo de atrás. */
+  ruedaSoloZoom?: boolean
 }
 
-export default function ModelViewer({ url, style }: Props) {
+export default function ModelViewer({ url, style, ruedaSoloZoom }: Props) {
   const [blobUrl,  setBlobUrl]  = useState<string | null>(null)
   const [error,    setError]    = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   // Solo para drag & drop — blobs locales que SÍ revocamos al reemplazar
   const localBlob = useRef<string | null>(null)
   const visor = useRef<HTMLElement | null>(null)
+  const caja  = useRef<HTMLDivElement | null>(null)
 
   // El visor es un custom element que trae `@google/model-viewer`. Hasta que ese módulo carga y
   // registra el elemento, `<model-viewer>` es una etiqueta desconocida: el navegador la acepta,
@@ -68,6 +71,24 @@ export default function ModelViewer({ url, style }: Props) {
     el.addEventListener('camera-change', onCambio)
     return () => el.removeEventListener('camera-change', onCambio)
   }, [blobUrl, visorListo])
+
+  // La rueda encima del visor: solo acerca y aleja el MODELO.
+  //
+  // `camera-controls` ya hacía el zoom, pero no se quedaba el evento: el mismo giro seguía subiendo
+  // y el lienzo del Moodboard —que escucha `wheel` en su contenedor— desplazaba la página a la vez.
+  // Dos cosas al mismo tiempo con un solo gesto, que es el «resultado ambiguo» del informe.
+  //
+  // Tiene que ser un oyente NATIVO: React registra `wheel` como pasivo y lo delega en la raíz, así
+  // que un `stopPropagation` desde `onWheel` ocurre cuando el oyente del lienzo ya corrió.
+  // Solo se activa donde se pide (`ruedaSoloZoom`), para no cambiar el scroll de los modales que
+  // ya usan este visor.
+  useEffect(() => {
+    const el = caja.current
+    if (!el || !ruedaSoloZoom || !blobUrl || !visorListo) return
+    const h = (e: WheelEvent) => { e.stopPropagation(); e.preventDefault() }
+    el.addEventListener('wheel', h, { passive: false })
+    return () => el.removeEventListener('wheel', h)
+  }, [ruedaSoloZoom, blobUrl, visorListo])
 
   // Drag & drop: crea blob local (no se cachea, se revoca al reemplazar)
   function loadLocalBlob(blob: Blob) {
@@ -191,7 +212,7 @@ export default function ModelViewer({ url, style }: Props) {
   )
 
   return (
-    <div style={{ ...base, display: 'block', padding: 0 }} {...dropProps}>
+    <div ref={caja} style={{ ...base, display: 'block', padding: 0 }} {...dropProps}>
       {/* Gira solo al abrirlo, y se para PARA SIEMPRE en cuanto lo tocás.
           El giro automático estuvo apagado un tiempo porque `auto-rotate` vuelve a arrancar a los
           pocos segundos de soltar el ratón: uno elegía un ángulo y el modelo se lo llevaba. Eso

@@ -26,14 +26,11 @@ type Props = {
   paginaActiva?: string | null
   /** Las instancias reales por página del ASG, con el nombre de su asset. Vacío mientras no se
    *  sepan: entonces se enseñan los sub-elementos de siempre (spec §4 vs. v7 #5). */
-  instancias?: Record<string, { nombre: string }[]> | null
+  instancias?: Record<string, { nombre: string; tier?: string }[]> | null
   onPagina?:  (pagina: string | null) => void
   onCerrar?:  () => void
   /** Color de identidad del proyecto; el moodboard ya lo resuelve desde el 3.9. */
   accent?:    string
-  /** Abre el recuadro que crea una hoja por ítem del alcance. Sin este callback el botón no sale:
-   *  cada instancia es un despacho pago y no puede depender de que la pantalla lo suponga. */
-  onInstanciar?: () => void
   /** Elementos que Forge no puede medir, y por qué. Los demás vienen de lo publicado, así que
    *  marcarlos a mano ya no tiene sentido: lo medido los pisa en la próxima carga. */
   sinMedida?: Record<string, string>
@@ -84,7 +81,7 @@ function Barra ({ valor, accent }: { valor: number; accent: string }) {
 }
 
 export default function VerticalSliceScope ({
-  estados, onEstados, paginaActiva, onPagina, onCerrar, accent = '#7d8493', sinMedida, onInstanciar,
+  estados, onEstados, paginaActiva, onPagina, onCerrar, accent = '#7d8493', sinMedida,
   instancias,
 }: Props) {
   // Qué instancias tiene una página del ASG, por NOMBRE: el número cambia entre maestros.
@@ -298,6 +295,27 @@ export default function VerticalSliceScope ({
                                 >
                                   <span style={{ color: COLOR[est], fontSize: 10, width: 10 }}>{MARCA[est]}</span>
                                   <span style={{ flex: 1, fontSize: 11, color: 'var(--text-1)' }}>{inst.nombre}</span>
+                                  {/* FINAL o SLICE-ONLY. Es una CLASE de asset, no un estado: la
+                                      marca dirección de arte y el menú solo la enseña (spec §7 y
+                                      §11.4). Existe para verificar de un vistazo el criterio del
+                                      alcance — qué se entrega tal cual y qué se va a reemplazar.
+
+                                      Sale del inventario del VS Specification, columna Tier. La
+                                      instancia que no la declara no lleva nada: inventarla sería
+                                      prometer una calidad que nadie firmó. */}
+                                  {inst.tier && (
+                                    <span
+                                      title={/final/i.test(inst.tier)
+                                        ? 'FINAL — ships as it is, production quality'
+                                        : 'For the slice only — it will be replaced later'}
+                                      style={{
+                                        fontSize: 8, fontFamily: 'var(--font-mono)', letterSpacing: '.06em',
+                                        padding: '1px 5px', borderRadius: 4, whiteSpace: 'nowrap',
+                                        color: /final/i.test(inst.tier) ? '#3fb950' : 'var(--text-3)',
+                                        border: `1px solid ${/final/i.test(inst.tier) ? '#3fb95055' : 'var(--line-2)'}`,
+                                      }}
+                                    >{inst.tier.toUpperCase().slice(0, 14)}</span>
+                                  )}
                                 </div>
                               </div>
                             )
@@ -350,15 +368,12 @@ export default function VerticalSliceScope ({
             <span style={{ color: COLOR.pendiente }}>○</span><span>pending</span>
             <span style={{ color: COLOR.en_progreso }}>●</span><span>in progress</span>
             <span style={{ color: COLOR.aprobado }}>✓</span><span>approved</span>
-            {onInstanciar && (
-              <button
-                onClick={onInstanciar}
-                title="Create one sheet per item of the scope. Every instance is a paid run, so it asks first."
-                style={{ ...botonIcono, marginLeft: 'auto', fontSize: 9.5, width: 'auto', padding: '2px 6px',
-                         borderColor: `${accent}66`, color: accent }}
-              >Create the sheets</button>
-            )}
-            <button onClick={() => setMinimos(m => !m)} style={{ ...botonIcono, marginLeft: onInstanciar ? 0 : 'auto', fontSize: 9.5, width: 'auto', padding: '2px 6px' }}>
+            {/* Aquí vivía «Create the sheets». Se quitó por el informe v8, puntos 6 y 7: crear las
+                Sheet en un SEGUNDO paso dejaba en el lienzo la página genérica y la de cada ítem
+                —«Cartón se generó dos veces»— y las de la segunda tanda nacían fuera de este menú,
+                que cuenta instancias y no reconoce a la genérica como una.
+                Ahora las crea la propia corrida del ASG, una por ítem del alcance y ya vinculadas. */}
+            <button onClick={() => setMinimos(m => !m)} style={{ ...botonIcono, marginLeft: 'auto', fontSize: 9.5, width: 'auto', padding: '2px 6px' }}>
               {minimos ? 'Hide minimums' : 'Show minimums'}
             </button>
           </div>
