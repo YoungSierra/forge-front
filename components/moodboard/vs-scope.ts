@@ -180,7 +180,9 @@ export const CATEGORIAS_PRODUCIBLES = new Set([
 export const esProducible = (c: CategoriaAlcance) => CATEGORIAS_PRODUCIBLES.has(c.id)
 
 // ── Progreso ─────────────────────────────────────────────────────────────────
-const PESO: Record<EstadoElemento, number> = { pendiente: 0, en_progreso: 0.5, aprobado: 1 }
+/** Cuánto vale cada estado al promediar. Lo usa también el panel cuando cuenta instancias en vez
+ *  de elementos, así que la escala vive en un solo sitio. */
+export const PESO: Record<EstadoElemento, number> = { pendiente: 0, en_progreso: 0.5, aprobado: 1 }
 
 export type Estados = Record<string, EstadoElemento>
 

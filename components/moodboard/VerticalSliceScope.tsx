@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ALCANCE_VS, calcularGuia, claveDe, esProducible, estadoDe, progresoCategoria, progresoGlobal,
+  ALCANCE_VS, calcularGuia, claveDe, esProducible, estadoDe, progresoCategoria, progresoGlobal, PESO,
   type CategoriaAlcance, type EstadoElemento, type Estados,
 } from './vs-scope'
 
@@ -24,6 +24,9 @@ type Props = {
   onEstados?: (e: Estados) => void
   /** La página del ASG señalada en el lienzo, para que menú y lienzo se sigan mutuamente. */
   paginaActiva?: string | null
+  /** Las instancias reales por página del ASG, con el nombre de su asset. Vacío mientras no se
+   *  sepan: entonces se enseñan los sub-elementos de siempre (spec §4 vs. v7 #5). */
+  instancias?: Record<string, { nombre: string }[]> | null
   onPagina?:  (pagina: string | null) => void
   onCerrar?:  () => void
   /** Color de identidad del proyecto; el moodboard ya lo resuelve desde el 3.9. */
@@ -82,7 +85,16 @@ function Barra ({ valor, accent }: { valor: number; accent: string }) {
 
 export default function VerticalSliceScope ({
   estados, onEstados, paginaActiva, onPagina, onCerrar, accent = '#7d8493', sinMedida, onInstanciar,
+  instancias,
 }: Props) {
+  // Qué instancias tiene una página del ASG, por NOMBRE: el número cambia entre maestros.
+  const soloNombre = (s: string) => s.replace(/^\d+[_\s-]*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+  const instanciasDe = (pagina: string) => {
+    if (!instancias) return null
+    const k = Object.keys(instancias).find(x => soloNombre(x) === soloNombre(pagina))
+    const l = k ? instancias[k] : null
+    return l && l.length ? l : null
+  }
   const [abiertas,  setAbiertas]  = useState<Set<string>>(() => new Set())
   const [minimos,   setMinimos]   = useState(false)
   const [plegado,   setPlegado]   = useState(false)
@@ -164,10 +176,10 @@ export default function VerticalSliceScope ({
         </div>
         <button
           onClick={() => setPlegado(p => !p)}
-          title={plegado ? 'Desplegar' : 'Plegar'}
+          title={plegado ? 'Expand' : 'Collapse'}
           style={botonIcono}
         >{plegado ? '▢' : '—'}</button>
-        {onCerrar && <button onClick={onCerrar} title="Cerrar" style={botonIcono}>✕</button>}
+        {onCerrar && <button onClick={onCerrar} title="Close" style={botonIcono}>✕</button>}
       </div>
 
       {/* ── Franja «Continúa por aquí» ── */}
@@ -228,8 +240,15 @@ export default function VerticalSliceScope ({
                   color: 'var(--text-4)',
                 }}>{titulo as string}</div>
                 {(cats as CategoriaAlcance[]).map(cat => {
-                  const p = progresoCategoria(cat, estados)
-                  const aprobados = cat.elementos.filter(e => estadoDe(estados, cat.id, e.id) === 'aprobado').length
+                  // Cuando la página tiene instancias reales, el conteo y la barra son de ELLAS:
+                  // «2 de 6 personajes» es lo que el equipo quiere leer, no el avance de cuatro
+                  // categorías inventadas por nosotros (spec §5, informe v7 #5).
+                  const inst = instanciasDe(cat.pagina)
+                  const unidades = inst ? inst.map(i => i.nombre) : cat.elementos.map(e => e.id)
+                  const aprobados = unidades.filter(u => estadoDe(estados, cat.id, u) === 'aprobado').length
+                  const p = inst
+                    ? unidades.reduce((t, u) => t + PESO[estadoDe(estados, cat.id, u)], 0) / (unidades.length || 1)
+                    : progresoCategoria(cat, estados)
                   const abierta = abiertas.has(cat.id)
                   const señalada = !!cat.pagina && cat.pagina === paginaActiva
                   return (
@@ -253,13 +272,42 @@ export default function VerticalSliceScope ({
                               style={{ fontSize: 9, color: 'var(--text-4)' }}>no chain</span>
                           )}
                           <span style={{ fontSize: 9.5, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
-                            {aprobados}/{cat.elementos.length}
+                            {aprobados}/{unidades.length}
                           </span>
                         </div>
                         <div style={{ marginTop: 5 }}><Barra valor={p} accent={accent} /></div>
                       </button>
 
-                      {abierta && (
+                      {abierta && instanciasDe(cat.pagina) && (
+                        // Las INSTANCIAS por asset, que es como la spec define este nivel: una fila
+                        // por personaje, por entorno, por prop del alcance — con su nombre, no con
+                        // una categoría genérica. El conteo de arriba pasa a ser aprobadas / total.
+                        //
+                        // El estado se guarda por NOMBRE de instancia, así que sobrevive a que el
+                        // alcance se recuente: si mañana entra un personaje más, los que ya estaban
+                        // aprobados siguen estándolo.
+                        <div style={{ padding: '2px 8px 8px 22px' }}>
+                          {instanciasDe(cat.pagina)!.map(inst => {
+                            const est = estadoDe(estados, cat.id, inst.nombre)
+                            return (
+                              <div key={inst.nombre} style={{ padding: '4px 0' }}>
+                                <div
+                                  onClick={() => avanzar(cat.id, inst.nombre)}
+                                  style={{
+                                    display: 'flex', gap: 6, alignItems: 'baseline',
+                                    cursor: onEstados ? 'pointer' : 'default',
+                                  }}
+                                >
+                                  <span style={{ color: COLOR[est], fontSize: 10, width: 10 }}>{MARCA[est]}</span>
+                                  <span style={{ flex: 1, fontSize: 11, color: 'var(--text-1)' }}>{inst.nombre}</span>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      {abierta && !instanciasDe(cat.pagina) && (
                         <div style={{ padding: '2px 8px 8px 22px' }}>
                           {cat.elementos.map(el => {
                             const est = estadoDe(estados, cat.id, el.id)

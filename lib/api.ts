@@ -2279,6 +2279,19 @@ export async function guardarContexto(projectId: string, body: {
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 }
 
+/** Las INSTANCIAS del alcance, con el nombre de cada asset: «Diver (player character)», no
+ *  «Characters / actors». Salen del manifiesto de instancias del 3.20 si existe, y si no, de las
+ *  tablas del Vertical Slice Specification. `fuente` dice de cuál de los dos.
+ *
+ *  `motivo` viene cuando no hay de dónde contar, y dice qué falta — el panel lo enseña en vez de
+ *  fingir una lista vacía. */
+export async function getInstanciasDelAlcance(projectId: string) {
+  return request<{ success: boolean; hay: boolean; motivo?: string
+    fuente?: 'manifest' | 'vs_spec' | null; instancias?: number
+    porHoja?: Record<string, { nombre: string; de?: string; cuenta?: number }[]>
+    avisos?: string[] }>(`/api/projects/${projectId}/canvas/alcance`)
+}
+
 /** El progreso del alcance medido contra lo publicado: qué elementos produjo de verdad una cadena.
  *  Lo que Forge no puede medir no viene en `estados` y `sin_medida` dice por qué — ahí el panel
  *  conserva lo que marcó una persona. */

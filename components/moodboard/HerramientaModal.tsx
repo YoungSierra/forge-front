@@ -196,7 +196,7 @@ export default function HerramientaModal({
 
           {herramienta.controles?.nota && (
             <div style={{ fontSize: 10.5, color: 'var(--text-3, #6b7280)', lineHeight: 1.5, marginTop: -6 }}>
-              Una vista por corrida: para otro ángulo, se repite.
+              One view per run: for another angle, run it again.
             </div>
           )}
 

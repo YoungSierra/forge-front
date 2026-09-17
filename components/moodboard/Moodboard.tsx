@@ -20,7 +20,7 @@ import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import ContextoModal from './ContextoModal'
 import InstanciarModal from './InstanciarModal'
-import { type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
+import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import VerticalSliceScope from './VerticalSliceScope'
@@ -403,6 +403,21 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   }, [alcance, claveAlcance])
   // Qué página del ASG está señalada. Es lo que hace que el menú y el lienzo se sigan.
   const [paginaAlcance, setPaginaAlcance] = useState<string | null>(null)
+
+  // Las instancias del alcance, con el nombre de cada asset. Es lo que el panel despliega bajo
+  // cada página Sheet desde el informe v7 — «Diver (player character)», no «Characters / actors».
+  //
+  // Se piden una vez al abrir: salen del manifiesto del 3.20 o del VS Specification, y ninguno de
+  // los dos cambia mientras alguien acomoda hojas. Si el proyecto no tiene de dónde contar, el
+  // panel enseña los sub-elementos de siempre.
+  const [instanciasAlcance, setInstanciasAlcance] = useState<Record<string, { nombre: string }[]> | null>(null)
+  useEffect(() => {
+    let vivo = true
+    getInstanciasDelAlcance(projectId)
+      .then(r => { if (vivo && r.hay && r.porHoja) setInstanciasAlcance(r.porHoja) })
+      .catch(() => {})
+    return () => { vivo = false }
+  }, [projectId])
   // Y qué hoja quedó señalada por esa página, para dibujarle el aro. Se guarda aparte del nombre
   // de página porque la hoja puede no existir todavía: la guía señala pasos que aún no se han
   // producido, y en ese caso no hay nada que iluminar.
@@ -1072,15 +1087,23 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // ni marcaba la hoja (informe v5, punto 2). La página del alcance —«19_EnvironmentSheet»— es el
   // último tramo del nombre de la hoja, así que se busca por ahí. Si todavía no se produjo, no se
   // inventa nada: queda sin señalar, que es la verdad.
+  // A qué página se voló ya. Sin esto el efecto re-centra cada vez que cambia cualquiera de sus
+  // dependencias —y `posicionDe` cambia al mover una hoja—, así que el lienzo quedaba capturado:
+  // intentabas irte y te devolvía. Es el punto 1 del informe v7.
+  const yaVolado = useRef<string | null>(null)
   useEffect(() => {
-    if (!paginaAlcance) { setSeñalada(null); return }
+    if (!paginaAlcance) { setSeñalada(null); yaVolado.current = null; return }
     const hoja = deLaFase.find(a =>
       soloNombre(String(a.name).split(/\s+[—–]\s+/).pop()?.trim() || '') === soloNombre(paginaAlcance))
     if (!hoja) { setSeñalada(null); return }
     setSeñalada(hoja.id)
     setSel(hoja.id)
     // Si el gesto vino del lienzo, la hoja ya está donde el usuario la puso: solo se enciende.
-    if (alcanceDesdeLienzo.current) { alcanceDesdeLienzo.current = false; return }
+    if (alcanceDesdeLienzo.current) { alcanceDesdeLienzo.current = false; yaVolado.current = paginaAlcance; return }
+    // Y a cada página se vuela UNA vez. Volver a volar porque se movió otra hoja es lo que
+    // hacía imposible navegar.
+    if (yaVolado.current === paginaAlcance) return
+    yaVolado.current = paginaAlcance
     const caja = lienzoRef.current?.getBoundingClientRect()
     if (!caja) return
     const i = deLaFase.indexOf(hoja)
@@ -1635,7 +1658,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
               slice— y no algo que uno quiera tapando el lienzo mientras acomoda hojas. */}
           <button
             onClick={() => setAlcanceAbierto(v => !v)}
-            title="Alcance del Vertical Slice"
+            title="Vertical Slice scope"
             style={{
               padding: '5px 10px', borderRadius: 7, fontSize: 11, cursor: 'pointer',
               fontFamily: 'var(--font-sans)', marginRight: 6,
@@ -1755,6 +1778,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
               onCerrar={() => setAlcanceAbierto(false)}
               accent={theme.accent}
               sinMedida={sinMedida}
+              instancias={instanciasAlcance}
               onInstanciar={() => setInstanciando(true)}
             />
           )}
@@ -1794,6 +1818,11 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
               // pegada— y encima pega el contenido del portapapeles en Linux. El gesto es nuestro.
               onAuxClick={e => { if (e.button === 1) e.preventDefault() }}
               onPointerDown={e => {
+                // Tocar el lienzo suelta el resalte de la guía. Señalar una página es un gesto que
+                // dice «por acá seguís», no un modo del que haya que salir: mientras estaba puesto,
+                // el lienzo volvía a centrarse en esa hoja y no se podía ir a otra (informe v7 #1).
+                if (paginaAlcance) setPaginaAlcance(null)
+
                 // Confirmado con Miguel el 25-ago: la rueda tiene DOS gestos distintos y el
                 // documento nombraba a los dos con «Ctrl + scroll». Girarla acerca; APRETARLA y
                 // arrastrar pasea el lienzo. Es el botón central, y funciona empiece donde empiece
@@ -3086,7 +3115,9 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
         <button
           onPointerDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); setVivo3d(v => !v) }}
-          title={vivo3d ? 'Back to the still thumbnail' : 'Turn the model here — drag to orbit it'}
+          title={vivo3d
+            ? 'Back to the still thumbnail — to move the page, drag its top edge'
+            : 'Turn the model here — drag to orbit it'}
           style={{
             position: 'absolute', right: 7, bottom: 7, zIndex: 3,
             padding: '3px 8px', borderRadius: 999, cursor: 'pointer',
@@ -3144,13 +3175,34 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
         //
         // `stopPropagation` en el puntero es lo que hace que arrastrar gire el modelo en vez de
         // mover la tarjeta por el lienzo: ese arrastre lo escucha el contenedor de arriba.
-        <div
-          onPointerDown={e => e.stopPropagation()}
-          onDoubleClick={e => e.stopPropagation()}
-          style={{ width: '100%', height: '100%' }}
-        >
-          <ModelViewer url={url} style={{ width: '100%', height: '100%' }} />
-        </div>
+        <>
+          {/* La franja para mover la tarjeta sin apagar la rotación (informe v7, punto 4).
+
+              Con el modelo encendido, arrastrar sobre él gira —es el gesto que se pidió— y por eso
+              el visor corta la propagación. El efecto colateral era que para reposicionar la hoja
+              había que apagar «Turn» cada vez.
+
+              Con la franja son dos zonas y ningún interruptor: el cuerpo gira, este borde mueve.
+              No corta la propagación a propósito — así el arrastre llega al contenedor de arriba,
+              que es quien mueve la hoja, con su selección múltiple y su acomodo. */}
+          <div
+            title="Drag here to move the page — the model keeps turning"
+            style={{
+              position: 'absolute', top: 0, left: 0, right: 0, height: 16, zIndex: 3,
+              cursor: 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'linear-gradient(rgba(6,7,9,0.75), rgba(6,7,9,0))',
+            }}
+          >
+            <div style={{ width: 26, height: 2, borderRadius: 2, background: 'rgba(255,255,255,0.32)' }} />
+          </div>
+          <div
+            onPointerDown={e => e.stopPropagation()}
+            onDoubleClick={e => e.stopPropagation()}
+            style={{ width: '100%', height: '100%' }}
+          >
+            <ModelViewer url={url} style={{ width: '100%', height: '100%' }} />
+          </div>
+        </>
       ) : kind === '3d' && glb ? (
         // Silueta de la geometría real del modelo, no un ícono. Ver lib/glb-thumb.
         // eslint-disable-next-line @next/next/no-img-element
