@@ -20,7 +20,7 @@ import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import ContextoModal from './ContextoModal'
 import InstanciarModal from './InstanciarModal'
-import { getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
+import { type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import VerticalSliceScope from './VerticalSliceScope'
@@ -441,7 +441,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // La iteracion vive ACA y no en el radial: el menu se cierra al elegir, y el modal tiene que
   // sobrevivirlo. `aviso` es el caso de lo que todavia no se puede iterar.
   // `pagina` solo existe cuando se rehace una hoja de un deck; en Design Edits va `pedido`.
-  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string; opciones?: Record<string, unknown> | null } | null>(null)
+  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string; opciones?: Record<string, unknown> | null; cambio?: ClaseDeCambio } | null>(null)
   // §8: la hoja sobre la que se pidió Run, esperando el recuadro de confirmación. Run avanza UN
   // paso y nada más — correr los dos de la cadena es apretarlo dos veces, no hay encadenado.
   const [corriendo, setCorriendo] = useState<UnifiedAsset | null>(null)
@@ -1223,7 +1223,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
 
     if (tab !== 'all') return [...enLienzo].sort(porFechaYPagina)
     return [...enLienzo].sort((a, b) => rankOf(a) - rankOf(b) || porFechaYPagina(a, b))
-  }, [shownSet, tab, view, sort, fechaGrupo, familia, conDescendientes])
+    // `ocultos` FALTABA acá, y por eso «Remove from canvas» parecía no hacer nada: la hoja se
+    // marcaba, el acomodo se guardaba —al recargar ya no estaba—, pero esta lista no se volvía a
+    // calcular y la tarjeta seguía dibujada hasta que cambiara cualquier otra cosa.
+  }, [shownSet, tab, view, sort, fechaGrupo, familia, conDescendientes, ocultos])
 
   // La página es exactamente lo que entra en pantalla: 3 filas de `cols`. Así nunca hay que
   // scrollear dentro de una página — se pasa a la siguiente.
@@ -2591,7 +2594,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           projectId={projectId}
           accent={theme.accent}
           onClose={() => setEditando(null)}
-          onSubmit={(texto, opciones) => { const a = editando; setEditando(null); setIterando({ asset: a, pagina: null, pedido: texto, opciones }) }}
+          onSubmit={(texto, opciones, cambio) => { const a = editando; setEditando(null); setIterando({ asset: a, pagina: null, pedido: texto, opciones, cambio }) }}
         />
       )}
       {iterando && (
@@ -4100,9 +4103,17 @@ function NotaModal({ asset, valor, otras, accent, onClose, onGuardar }: {
 // porque el workflow conserva la plantilla a propósito y sin decirlo se pide lo imposible.
 function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
   asset: UnifiedAsset; projectId: string; accent: string; onClose: () => void
-  onSubmit: (texto: string, opciones: Record<string, unknown> | null) => void
+  onSubmit: (texto: string, opciones: Record<string, unknown> | null, cambio: ClaseDeCambio) => void
 }) {
   const [texto, setTexto] = useState('')
+  // Qué clase de cambio es. De esto depende que las piezas que salieron de esta página se
+  // marquen para REHACER o solo para revisar — v2.3 §2.1, el caso del león: la hoja pasó de un
+  // gato a un león y sus veinte partes seguían siendo del gato.
+  //
+  // Lo elige quien edita y no se deduce del texto: «change the spider for a lion» es fácil,
+  // «make it warmer and add a fireplace» no, y equivocarse manda a alguien a pagar una
+  // regeneración que no hacía falta. Arranca en «tratamiento», que es lo que no cuesta.
+  const [cambio, setCambio] = useState<ClaseDeCambio>('tratamiento')
   // Rehacer ESTA imagen con otras opciones (informe v3, punto 12, paso 3). Se parte de las que
   // produjeron la pieza, no de los valores del workflow: el workflow ya cambió para entonces y
   // arrancar de ahí le cambiaría al usuario cosas que no tocó.
@@ -4218,7 +4229,7 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
           autoFocus
           value={texto}
           onChange={e => setTexto(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && texto.trim()) onSubmit(texto.trim(), cambiadas) }}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && texto.trim()) onSubmit(texto.trim(), cambiadas, cambio) }}
           placeholder="Describe the design change — a character, an environment, a prop…"
           rows={4}
           style={{
@@ -4233,6 +4244,39 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
           what the rest of the pipeline reads.
         </div>
 
+        {/* Qué clase de cambio es. Decide si lo que YA salió de esta página se marca para rehacer
+            o solo para revisar (v2.3 §2.1 del sistema de actualización).
+
+            Es una pregunta y no una deducción del texto a propósito: «change the spider for a lion»
+            se deduce solo, «make it warmer and add a fireplace» no, y equivocarse manda a alguien a
+            pagar una regeneración que no hacía falta. Arranca en la opción que no cuesta. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>What are you changing?</span>
+          {([
+            ['tratamiento', 'How it looks', 'Light, palette, materials — what came out of this page probably still holds.'],
+            ['sujeto',      'What it shows', 'A different subject — what came out of this page will need redoing.'],
+          ] as const).map(([clave, etiqueta, ayuda]) => (
+            <button
+              key={clave}
+              onClick={() => setCambio(clave)}
+              title={ayuda}
+              style={{
+                padding: '4px 10px', borderRadius: 999, cursor: 'pointer', fontSize: 11,
+                fontFamily: 'var(--font-sans)',
+                background: cambio === clave ? `${accent}22` : 'transparent',
+                border: `1px solid ${cambio === clave ? accent : 'var(--line-2)'}`,
+                color: cambio === clave ? accent : 'var(--text-2)',
+              }}
+            >{etiqueta}</button>
+          ))}
+        </div>
+        {cambio === 'sujeto' && (
+          <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+            Everything produced from this page will be marked <strong>[R] regenerate</strong> once
+            the new version is approved. Nothing runs on its own — someone approves each one.
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{
             padding: '7px 16px', borderRadius: 8, cursor: 'pointer',
@@ -4240,7 +4284,7 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
             color: 'var(--text-2)', fontSize: 12, fontFamily: 'var(--font-mono)',
           }}>Cancel</button>
           <button
-            onClick={() => texto.trim() && onSubmit(texto.trim(), cambiadas)}
+            onClick={() => texto.trim() && onSubmit(texto.trim(), cambiadas, cambio)}
             disabled={!texto.trim()}
             style={{
               padding: '7px 16px', borderRadius: 8,
@@ -4256,11 +4300,13 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
   )
 }
 
-function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pedido, opciones }: {
+function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pedido, opciones, cambio }: {
   asset: UnifiedAsset; projectId: string; pagina: { n: number; nombre: string } | null; accent: string
   onClose: () => void; onListo: () => void
   /** Design Edits: el cambio pedido en palabras. Sin esto, se rehace la página desde su documento. */
   pedido?: string
+  /** Qué clase de cambio declaró quien lo pidió: viaja hasta la llamada y de ahí a la versión. */
+  cambio?: ClaseDeCambio
   /** Las opciones de generación para ESTA imagen. Valen solo para ella: en Run valen para toda
    *  la corrida, acá para la pieza que se está rehaciendo. */
   opciones?: Record<string, unknown> | null
@@ -4311,7 +4357,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
     // lo mandaba. Es el mismo id que usa el resto del front para atribuir el gasto.
     const miembro = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
     const trabajo = pedido
-      ? designEditAsset(projectId, asset.id, pedido, miembro, opciones ?? null)
+      ? designEditAsset(projectId, asset.id, pedido, miembro, opciones ?? null, cambio ?? null)
       : iterateAssetPage(projectId, asset.id, miembro)
     trabajo
       .then(r => {

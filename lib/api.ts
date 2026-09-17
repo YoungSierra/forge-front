@@ -1712,15 +1712,20 @@ export async function saveAssetNote(projectId: string, assetId: string, body: st
  * aplicando SOLO eso. A diferencia de `iterateAssetPage`, no rehace la página desde el documento
  * — parte de la imagen que ya existe—, así que sirve para cualquier activo visual.
  */
+/** Qué clase de cambio es un Design Edit. Decide si lo que salió de esa página hay que rehacerlo
+ *  o solo revisarlo (v2.3 §2.1 del sistema de actualización): 'sujeto' marca [R], 'tratamiento'
+ *  marca [V]. Lo elige quien edita — del texto no se deduce sin adivinar. */
+export type ClaseDeCambio = 'sujeto' | 'tratamiento'
+
 export async function designEditAsset(
   projectId: string, assetId: string, prompt: string, memberId?: string | null,
-  opciones?: Record<string, unknown> | null,
+  opciones?: Record<string, unknown> | null, cambio?: ClaseDeCambio | null,
 ) {
   return request<{ success: boolean; version: { id: string; version_number: number; storage_url: string } }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/design-edit`,
     {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, member_id: memberId ?? null, opciones: opciones ?? null }),
+      body: JSON.stringify({ prompt, member_id: memberId ?? null, opciones: opciones ?? null, cambio: cambio ?? null }),
     },
   )
 }
