@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { updateOwnProfile } from '@/lib/api'
+import { despertarBackend, estadoDelBackend, alCambiarElBackend, type EstadoDelBackend } from '@/lib/despertar'
 
 // Captura el hash antes de que Supabase lo borre
 const _rawHash = typeof window !== 'undefined' ? window.location.hash : ''
@@ -46,6 +47,18 @@ export default function LoginPage() {
   const [invitePwC, setInvitePwC]       = useState('')
   const [inviteSaving, setInviteSaving] = useState(false)
   const [inviteError, setInviteError]   = useState('')
+
+  // ── Despertar Render mientras se escribe ────────────────────
+  // El login se autentica contra Supabase y no toca el backend, así que hasta ahora Render seguía
+  // dormido durante toda esta pantalla y el arranque —del orden de 50 s— se lo comía el usuario
+  // en la primera pantalla de la aplicación. Se dispara AL ABRIR, no al enviar: la espera es la
+  // misma si se lanza en el submit, solo que después.
+  const [backend, setBackend] = useState<EstadoDelBackend>(estadoDelBackend)
+  useEffect(() => {
+    const dejar = alCambiarElBackend(setBackend)
+    despertarBackend()          // no se espera a propósito: corre de fondo
+    return dejar
+  }, [])
 
   // Forzar dark mode en el login
   useEffect(() => {
@@ -437,6 +450,22 @@ export default function LoginPage() {
               }}>
                 {loading ? 'Signing in…' : 'Sign in →'}
               </button>
+
+              {/* Qué está pasando por detrás. Solo se dice cuando cambia algo para quien mira:
+                  mientras el servidor arranca —para que la espera de la pantalla siguiente tenga
+                  una explicación— y si no llegó a levantarse, que es lo que convierte un fallo
+                  mudo en algo que se entiende. Cuando ya está despierto no se dice nada: no es
+                  una noticia. */}
+              {backend === 'despertando' && (
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#50505e', textAlign: 'center', letterSpacing: '0.04em' }}>
+                  starting the server — this first load takes a moment
+                </div>
+              )}
+              {backend === 'no_responde' && (
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#c98a3e', textAlign: 'center', letterSpacing: '0.04em' }}>
+                  the server is not answering yet — you can sign in, but the workspace may be slow to load
+                </div>
+              )}
             </form>
           </>
         )}
