@@ -5145,7 +5145,7 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
   const [fuera,    setFuera]    = useState<Set<string>>(() => new Set())
   const [leyendo,  setLeyendo]  = useState(false)
   const [ops,      setOps]      = useState<OpcionWorkflow[] | null>(null)
-  const [tamano,   setTamano]   = useState<{ imagenes: number; usd: number } | null>(null)
+  const [tamano,   setTamano]   = useState<{ porDespacho: number; usd: number } | null>(null)
   const [elegidas, setElegidas] = useState<Record<string, unknown>>({})
   const [abierto,  setAbierto]  = useState(false)
   // Qué cadenas existen. Las manda el backend junto con «no hay paso», porque es quien las define.
@@ -5179,7 +5179,11 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
       .then(r => {
         if (!vivo) return
         setOps(r.opciones)
-        setTamano({ imagenes: (paso.despachos ?? 1) * r.imagenes, usd: r.costo_por_imagen_usd })
+        // Lo que cuesta UN despacho. Cuántos van se decide después, tachando clips, y multiplicar
+        // acá dejaba el renglón del precio congelado en el número de la apertura: con 1 de 8
+        // marcada seguía diciendo «8 images · ≈ $0.32». Es justo el número que se lee antes de
+        // pagar. Lo reportó Migue Amez el 18-09 sobre la Animation Sheet.
+        setTamano({ porDespacho: r.imagenes, usd: r.costo_por_imagen_usd })
         // Run parte de las opciones CON LAS QUE SE GENERÓ ESTA PIEZA (informe v4, punto 8).
         // Arrancando siempre de los valores del workflow, ajustar la calidad y volver a correr
         // devolvía el diálogo en blanco y había que reelegir todo — y lo que uno no reelige se
@@ -5539,11 +5543,16 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
                   cobrar. NO se calcula un precio por calidad: el precio por imagen es plano
                   —medido, 405 corridas y un solo valor— así que variarlo sería inventarlo. Lo que
                   sí se dice es cuál de las opciones elegidas encarece del lado del proveedor. */}
-              {tamano && (
-                <div style={{ marginTop: 7, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-2)' }}>
-                  {tamano.imagenes} image{tamano.imagenes === 1 ? '' : 's'} · ≈ ${(tamano.imagenes * tamano.usd).toFixed(2)} estimated
-                </div>
-              )}
+              {/* Se multiplica ACÁ, por lo que se va a despachar de verdad: así el precio sigue a
+                  la selección de clips en vez de quedarse en el del momento de abrir. */}
+              {tamano && (() => {
+                const imagenes = Math.max(0, despachosReales) * tamano.porDespacho
+                return (
+                  <div style={{ marginTop: 7, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-2)' }}>
+                    {imagenes} image{imagenes === 1 ? '' : 's'} · ≈ ${(imagenes * tamano.usd).toFixed(2)} estimated
+                  </div>
+                )
+              })()}
               {caras.length > 0 && (
                 <div style={{ marginTop: 5, fontSize: 11, color: '#F59E0B' }}>
                   {caras.map(o => o.etiqueta).join(', ')} raise{caras.length === 1 ? 's' : ''} what the provider charges above that estimate.
