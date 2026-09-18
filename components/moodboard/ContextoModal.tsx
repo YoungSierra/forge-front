@@ -267,6 +267,17 @@ export default function ContextoModal({ projectId, paginas, accent, onCerrar, on
               Approving also feeds node 3.9 and marks the pages that depend on the destination, so a
               person can decide what to regenerate. Nothing is regenerated on its own.
             </div>
+
+            {/* Punto (d) de la nota de Miguel del 18-09. En Color System la referencia sesga la
+                imagen y el mood, pero NO repinta los swatches: esos los gobierna el ADI §2.5. Sin
+                decirlo, alguien sube una referencia roja, ve que la paleta no cambia y concluye
+                que la inyección no funciona — que es exactamente lo que pasó. */}
+            {/^0?8[_\s]?colorsystem$/i.test(String(elegido?.pagina || '').replace(/[^\w]/g, '')) && (
+              <div style={{ fontSize: 11, color: '#c98a3e', lineHeight: 1.6, marginTop: 8 }}>
+                On Color System the reference biases the image and the mood, but it does not repaint
+                the swatches — those are governed by the ADI (§2.5), not by an image.
+              </div>
+            )}
           </>
         )}
 

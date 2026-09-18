@@ -19,9 +19,11 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import ContextoModal from './ContextoModal'
-import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
+import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
+import SubirEdicionModal from './SubirEdicionModal'
+import SubirMontajeModal from './SubirMontajeModal'
 import VerticalSliceScope from './VerticalSliceScope'
 import { ALCANCE_VS, progresoCategoria, type Estados } from './vs-scope'
 
@@ -463,7 +465,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // La iteracion vive ACA y no en el radial: el menu se cierra al elegir, y el modal tiene que
   // sobrevivirlo. `aviso` es el caso de lo que todavia no se puede iterar.
   // `pagina` solo existe cuando se rehace una hoja de un deck; en Design Edits va `pedido`.
-  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string; opciones?: Record<string, unknown> | null; cambio?: ClaseDeCambio } | null>(null)
+  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string; opciones?: Record<string, unknown> | null; cambio?: ClaseDeCambio; estilo?: boolean } | null>(null)
   // §8: la hoja sobre la que se pidió Run, esperando el recuadro de confirmación. Run avanza UN
   // paso y nada más — correr los dos de la cadena es apretarlo dos veces, no hay encadenado.
   const [corriendo, setCorriendo] = useState<UnifiedAsset | null>(null)
@@ -477,6 +479,12 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // sitio. La ventana son los cuatro pasos del handoff; las reglas de a dónde va cada archivo las
   // resuelve el backend, no esta pantalla.
   const [contexto, setContexto] = useState<UnifiedAsset | null>(null)
+  // La pieza que se está reemplazando con un archivo editado fuera de Forge (informe v9, §3).
+  const [subiendo, setSubiendo] = useState<UnifiedAsset | null>(null)
+  // Y la página del ASG que se está re-estilizando (informe v9, §2).
+  const [estilando, setEstilando] = useState<UnifiedAsset | null>(null)
+  // El nivel ya montado que vuelve de Blender: modelo y renders, juntos (informe v9, §5).
+  const [recibiendo, setRecibiendo] = useState<UnifiedAsset | null>(null)
   // Acá vivía el estado del recuadro «Create the sheets». Las hojas por ítem del alcance ya no son
   // un segundo paso: las crea la propia corrida del ASG (informe v8, puntos 6 y 7). El recuadro y
   // su ruta siguen existiendo en el repositorio por si hubiera que reponer el gesto a mano.
@@ -2541,6 +2549,14 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             // Segmentación y Nuevo Ángulo: producen pieza nueva, no editan la
                             // página. Igual que Run, primero el recuadro.
                             onHerramienta={(a, h) => { setMenu(null); setHerram({ asset: a, h }) }}
+                            // «Upload manual edits» (informe v9, punto 3): la pieza vuelve de
+                            // fuera de Forge y REEMPLAZA a la actual. No abre una ventana propia
+                            // porque no hay nada que preguntar antes: se elige un archivo.
+                            onSubir={a => { setMenu(null); setSubiendo(a) }}
+                            // «New Art Style» (informe v9, punto 2): re-estiliza la página del ASG
+                            // conservando su template. Mismo recuadro de prompt que Design Edits
+                            // —el encargo es de la misma forma— y reemplaza la página en su sitio.
+                            onEstilo={a => { setMenu(null); setEstilando(a) }}
                             // §9 del informe v5: el sector existía y no llevaba a ninguna parte.
                             // Abre la tabla acotada a esta pieza y a su descendencia.
                             onLibreria={a => {
@@ -2553,6 +2569,52 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             // cada modelo, que es lo que le faltaba al disparador para responder.
                             onMontaje={(a, estado) => { setMenu(null); setMontando({ asset: a, estado }) }}
                             onContexto={a => { setMenu(null); setContexto(a) }} />}
+
+      {recibiendo && (
+        <SubirMontajeModal
+          asset={recibiendo}
+          projectId={projectId}
+          accent={theme.accent}
+          onCancel={() => setRecibiendo(null)}
+          onListo={reemplazado => {
+            const origen = recibiendo.id
+            setRecibiendo(null)
+            reload()
+            // Un montaje NUEVO se publica a la derecha de su hoja, como todo lo que sale de
+            // ella; uno que reemplaza al anterior ya tiene su sitio y no se mueve.
+            if (!reemplazado) origenDeLaPublicacion.current = origen
+          }}
+        />
+      )}
+
+      {estilando && (
+        <DesignEditPrompt
+          asset={estilando}
+          projectId={projectId}
+          accent={theme.accent}
+          modo="estilo"
+          onClose={() => setEstilando(null)}
+          // El texto va al slot {{NEW_ART_STYLE}} del workflow; la clase de cambio la fija el
+          // servidor, así que acá no viaja ninguna.
+          onSubmit={texto => { const a = estilando; setEstilando(null); setIterando({ asset: a, pagina: null, pedido: texto, opciones: null, estilo: true }) }}
+        />
+      )}
+
+      {subiendo && (
+        <SubirEdicionModal
+          asset={subiendo}
+          projectId={projectId}
+          accent={theme.accent}
+          onCancel={() => setSubiendo(null)}
+          onListo={() => {
+            setSubiendo(null)
+            // Recargar Y volver a leer las marcas: la subida dispara la misma cascada que un
+            // Design Edit, así que las páginas que dependían de esta acaban de quedar marcadas.
+            reload()
+            cargarMarcas()
+          }}
+        />
+      )}
 
       {contexto && (
         <ContextoModal
@@ -2581,6 +2643,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           estado={montando.estado}
           accent={theme.accent}
           onCancel={() => setMontando(null)}
+          onRecibir={() => { const a = montando.asset; setMontando(null); setRecibiendo(a) }}
           onListo={idNuevo => {
             const origen = montando.asset.id
             setMontando(null)
@@ -2659,6 +2722,17 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           pagina={iterando.pagina}
           pedido={iterando.pedido}
           opciones={iterando.opciones}
+          // La clase de cambio, que se recogía y se perdía acá.
+          //
+          // El recuadro de Design Edit pregunta «What are you changing?», guarda la respuesta en
+          // `iterando.cambio`… y este sitio no se la pasaba al modal que hace la llamada. La prop
+          // existía y se usaba dentro (línea ~4462); lo único que faltaba era esta línea.
+          //
+          // Medido en la base el 18-09: las 22 páginas que marcó el Design Edit de Miguel llevan
+          // `cambio: null`, así que TODAS salieron [V] y ninguna pudo ser [R] — que es justo la
+          // etiqueta «regenerate» que pide el informe v9. La pregunta estaba de adorno.
+          cambio={iterando.cambio}
+          estilo={iterando.estilo}
           accent={theme.accent}
           onClose={() => setIterando(null)}
           onListo={recargarYPublicar}
@@ -3023,6 +3097,22 @@ function useAudioThumb(url: string, id: string, accent: string) {
   return { data, cargando }
 }
 
+// El color de una página desactualizada. Rojo para lo que hay que rehacer, ámbar para lo que
+// probablemente siga valiendo — los mismos dos de la ficha de detalle, definidos UNA vez porque
+// ahora los usan el borde, el aro y la etiqueta, y tres copias se desincronizan solas.
+const colorDeMarca = (accion: 'R' | 'V') => (accion === 'R' ? 'rgb(200,80,66)' : 'rgb(232,181,98)')
+
+// ¿Es una de las 25 páginas del Art Style Guide?
+//
+// Por el DOCUMENTO del nombre y no por el número: el maestro pasó de 34 páginas a 25 y los números
+// se movieron. Una hoja instanciada —«Art Style Guide — 18_CharacterSheet — Cartón»— también lo es:
+// sigue siendo una página del ASG, con su template, y re-estilizarla es igual de válido.
+//
+// Es una comprobación de PANTALLA, para no ofrecer un sector que no lleva a ninguna parte. La que
+// manda la vuelve a hacer el backend con `paginaDe()`, que conoce los alias de los dos maestros.
+const esPaginaDelASG = (a: UnifiedAsset) =>
+  /^\s*art style guide\s*[—–-]/i.test(String(a.name || '')) && kindOf(a) === 'image'
+
 function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu, marca, escala, progreso }: {
   asset: UnifiedAsset; index: number; accent: string; colors: string[]
   selected: boolean; onOpen: (from: DOMRect) => void
@@ -3072,8 +3162,21 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
         position: 'relative', width: '100%', height: '100%', minHeight: 0,
         borderRadius: 12, overflow: 'hidden',
         cursor: 'pointer', background: 'var(--bg-2)',
-        border: `1px solid ${selected ? accent : hover ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)'}`,
-        boxShadow: selected ? `0 0 0 1px ${accent}, 0 0 26px ${accent}33` : 'none',
+        // El recuadro de DESACTUALIZADA (informe v9, punto 1b).
+        //
+        // La marca existía y se disparaba bien —medido: 22 páginas marcadas un minuto después del
+        // Design Edit de Miguel— pero lo único que se veía era un chip de 9,5 px en una esquina.
+        // A la escala a la que se mira el lienzo eso no existe, y por eso el informe dice «en el
+        // canvas todo se ve igual». Lo que hace falta es que se distinga UNA HOJA de otra sin
+        // acercarse, y para eso el borde es lo que se lee de lejos.
+        //
+        // La selección manda sobre la marca: es un gesto que la persona acaba de hacer y tiene que
+        // responder al instante. Estando marcada Y seleccionada, el borde es el de la selección y
+        // el aro exterior sigue siendo el de la marca, así que no se pierde ninguna de las dos.
+        border: `1px solid ${selected ? accent : marca ? colorDeMarca(marca.accion) : hover ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)'}`,
+        boxShadow: selected
+          ? `0 0 0 1px ${accent}, 0 0 26px ${accent}33`
+          : marca ? `0 0 0 2px ${colorDeMarca(marca.accion)}, 0 0 18px ${colorDeMarca(marca.accion)}44` : 'none',
         transition: 'border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease',
         transform: hover && !selected ? 'translateY(-2px)' : 'none',
         animation: `mb-in 320ms ease ${index * 32}ms backwards`,
@@ -3116,7 +3219,11 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
       )}
 
       {/* Desactualizada. Va a la derecha para no pelearse con el sello de versión, y dice la
-          acción sugerida — no la ejecuta: regenerar cuesta y lo aprueba una persona. */}
+          acción sugerida — no la ejecuta: regenerar cuesta y lo aprueba una persona.
+
+          Lleva la PALABRA y no `[V]`. El informe v9 pide literalmente «la etiqueta regenerate»:
+          dos letras entre corchetes hay que saber qué significan, y quien mira el lienzo por
+          primera vez no lo sabe. La palabra se lee sola. */}
       {marca && (
         <div title={
           marca.accion === 'R'
@@ -3124,12 +3231,12 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
             : `Outdated — revalidate. Page ${marca.por_pagina ?? ''} changed; this one probably still holds. Look at it and confirm.`
         } style={{
           position: 'absolute', top: 7, right: 7, zIndex: 2,
-          padding: '2px 7px', borderRadius: 5,
-          background: marca.accion === 'R' ? 'rgba(200,80,66,0.86)' : 'rgba(232,181,98,0.86)',
-          border: '1px solid rgba(255,255,255,0.22)', backdropFilter: 'blur(3px)',
-          fontSize: 9.5, fontFamily: 'var(--font-mono)', color: '#0b0c0e', fontWeight: 700,
-          letterSpacing: '.06em',
-        }}>[{marca.accion}]</div>
+          padding: '3px 8px', borderRadius: 5,
+          background: colorDeMarca(marca.accion),
+          border: '1px solid rgba(255,255,255,0.28)', backdropFilter: 'blur(3px)',
+          fontSize: 10, fontFamily: 'var(--font-mono)', color: '#0b0c0e', fontWeight: 700,
+          letterSpacing: '.08em', textTransform: 'uppercase',
+        }}>{marca.accion === 'R' ? 'regenerate' : 'revalidate'}</div>
       )}
 
       {/* Encender el modelo en la propia tarjeta. Solo en las de 3D, y solo cuando el cursor está
@@ -3489,7 +3596,33 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
         )}
         {t === '3d' && (
           // El mismo visor que usan la librería de activos y el detalle de nodo.
-          <ModelViewer url={url || undefined} ruedaSoloZoom style={{ width: '100%', height: '100%' }} />
+          //
+          // Y si la pieza es un nivel montado, sus renders debajo: «el visualizador 3D abre el
+          // .glb y las imágenes quedan como galería del nivel» (documento de JuanK, 18-09). Las
+          // dos cosas juntas porque se subieron juntas — mirar el modelo sin las vistas que el
+          // artista eligió enseñar es media entrega.
+          (() => {
+            const renders = asset.montaje_renders || []
+            if (!renders.length) return <ModelViewer url={url || undefined} ruedaSoloZoom style={{ width: '100%', height: '100%' }} />
+            return (
+              <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  <ModelViewer url={url || undefined} ruedaSoloZoom style={{ width: '100%', height: '100%' }} />
+                </div>
+                <div style={{ display: 'flex', gap: 8, padding: '10px 12px', overflowX: 'auto', flexShrink: 0 }}>
+                  {renders.map(r => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img key={r.url} src={miniaturaUrl(r.url, 400)} alt={r.nombre} title={r.nombre}
+                         onClick={() => window.open(r.url, '_blank')}
+                         style={{
+                           height: 92, borderRadius: 7, cursor: 'zoom-in', flexShrink: 0,
+                           border: '1px solid var(--line-2)', objectFit: 'cover',
+                         }} />
+                  ))}
+                </div>
+              </div>
+            )
+          })()
         )}
         {t === 'doc' && (
           // Al frente el documento se lee, no solo se anuncia: el mismo asomo de texto de la
@@ -3878,7 +4011,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
 //   visual    — el menú radial de la referencia, con las cuatro acciones de la v.3.
 // Las acciones del radial todavía no hacen nada: se cablean en la Iteración 2 (contexto y
 // output) y en la 3 (edición). Se muestran apagadas en vez de simular que responden.
-function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria, onMontaje, onContexto }: {
+function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria, onMontaje, onContexto, onSubir, onEstilo }: {
   x: number; y: number; asset: UnifiedAsset; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
   onRun: (a: UnifiedAsset) => void
@@ -3887,11 +4020,13 @@ function ContextMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar,
   onLibreria: (a: UnifiedAsset) => void
   onMontaje: (a: UnifiedAsset, estado: EstadoDeMontaje) => void
   onContexto: (a: UnifiedAsset) => void
+  onSubir: (a: UnifiedAsset) => void
+  onEstilo: (a: UnifiedAsset) => void
 }) {
   // La descarga directa es solo para documentos; lo visual abre el radial.
   return kindOf(asset) === 'doc'
     ? <DownloadMenu x={x} y={y} asset={asset} onDone={onDone} />
-    : <RadialMenu   x={x} y={y} asset={asset} projectId={projectId} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} onHerramienta={onHerramienta} onLibreria={onLibreria} onMontaje={onMontaje} onContexto={onContexto} />
+    : <RadialMenu   x={x} y={y} asset={asset} projectId={projectId} accent={accent} colors={colors} onDone={onDone} onIterar={onIterar} onDesignEdit={onDesignEdit} onRun={onRun} onHerramienta={onHerramienta} onLibreria={onLibreria} onMontaje={onMontaje} onContexto={onContexto} onSubir={onSubir} onEstilo={onEstilo} />
 }
 
 function DownloadMenu({ x, y, asset, onDone }: {
@@ -4181,10 +4316,14 @@ function NotaModal({ asset, valor, otras, accent, onClose, onGuardar }: {
 // Es un paso aparte y no un campo dentro del modal de progreso: acá todavía no se gastó nada, y
 // el texto que se escriba es lo único que decide el resultado. Se avisa qué NO va a cambiar,
 // porque el workflow conserva la plantilla a propósito y sin decirlo se pide lo imposible.
-function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
+function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 'design' }: {
   asset: UnifiedAsset; projectId: string; accent: string; onClose: () => void
   onSubmit: (texto: string, opciones: Record<string, unknown> | null, cambio: ClaseDeCambio) => void
+  /** «estilo» = New Art Style: mismo recuadro, otro encargo. No pregunta qué clase de cambio es
+   *  porque re-estilizar SIEMPRE es tratamiento — lo fija el servidor (informe v9, punto 2). */
+  modo?: 'design' | 'estilo'
 }) {
+  const esEstilo = modo === 'estilo'
   const [texto, setTexto] = useState('')
   // Qué clase de cambio es. De esto depende que las piezas que salieron de esta página se
   // marquen para REHACER o solo para revisar — v2.3 §2.1, el caso del león: la hoja pasó de un
@@ -4310,7 +4449,9 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
           value={texto}
           onChange={e => setTexto(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && texto.trim()) onSubmit(texto.trim(), cambiadas, cambio) }}
-          placeholder="Describe the design change — a character, an environment, a prop…"
+          placeholder={esEstilo
+            ? "Describe the art style — cel-shaded anime, clean linework, pastel palette, matte finish…"
+            : "Describe the design change — a character, an environment, a prop…"}
           rows={4}
           style={{
             width: '100%', resize: 'vertical', padding: '10px 12px', borderRadius: 9,
@@ -4320,8 +4461,9 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
         />
 
         <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
-          Only the design changes. The page keeps its layout, boxes, text and colours — those are
-          what the rest of the pipeline reads.
+          {esEstilo
+            ? 'Only the rendering style of the artwork changes. The template stays untouched — same layout, frames, text and typography.'
+            : 'Only the design changes. The page keeps its layout, boxes, text and colours — those are what the rest of the pipeline reads.'}
         </div>
 
         {/* Qué clase de cambio es. Decide si lo que YA salió de esta página se marca para rehacer
@@ -4329,7 +4471,12 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
 
             Es una pregunta y no una deducción del texto a propósito: «change the spider for a lion»
             se deduce solo, «make it warmer and add a fireplace» no, y equivocarse manda a alguien a
-            pagar una regeneración que no hacía falta. Arranca en la opción que no cuesta. */}
+            pagar una regeneración que no hacía falta. Arranca en la opción que no cuesta.
+
+            En New Art Style NO se pregunta: el prompt fijo del workflow bloquea el cambio de
+            sujeto, así que la respuesta es siempre «cómo se ve». Preguntar algo cuya respuesta ya
+            se sabe es una decisión más que tomar por nada. */}
+        {!esEstilo && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 11, color: 'var(--text-3)' }}>What are you changing?</span>
           {([
@@ -4350,10 +4497,11 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
             >{etiqueta}</button>
           ))}
         </div>
-        {cambio === 'sujeto' && (
+        )}
+        {!esEstilo && cambio === 'sujeto' && (
           <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
-            Everything produced from this page will be marked <strong>[R] regenerate</strong> once
-            the new version is approved. Nothing runs on its own — someone approves each one.
+            Everything produced from this page will be marked <strong>regenerate</strong> once the
+            new version is approved. Nothing runs on its own — someone approves each one.
           </div>
         )}
 
@@ -4373,20 +4521,22 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit }: {
               border: `1px solid ${texto.trim() ? accent + '88' : 'var(--line-2)'}`,
               color: texto.trim() ? accent : 'var(--text-4)',
               fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)',
-            }}>Generate</button>
+            }}>{esEstilo ? 'Re-style this page' : 'Generate'}</button>
         </div>
       </div>
     </div>
   )
 }
 
-function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pedido, opciones, cambio }: {
+function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pedido, opciones, cambio, estilo }: {
   asset: UnifiedAsset; projectId: string; pagina: { n: number; nombre: string } | null; accent: string
   onClose: () => void; onListo: () => void
   /** Design Edits: el cambio pedido en palabras. Sin esto, se rehace la página desde su documento. */
   pedido?: string
   /** Qué clase de cambio declaró quien lo pidió: viaja hasta la llamada y de ahí a la versión. */
   cambio?: ClaseDeCambio
+  /** New Art Style en vez de Design Edit: otro workflow, mismo gesto. */
+  estilo?: boolean
   /** Las opciones de generación para ESTA imagen. Valen solo para ella: en Run valen para toda
    *  la corrida, acá para la pieza que se está rehaciendo. */
   opciones?: Record<string, unknown> | null
@@ -4436,9 +4586,14 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
     // Sin el miembro, la versión queda sin autor: las 29 que ya existen están así porque nadie
     // lo mandaba. Es el mismo id que usa el resto del front para atribuir el gasto.
     const miembro = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
-    const trabajo = pedido
-      ? designEditAsset(projectId, asset.id, pedido, miembro, opciones ?? null, cambio ?? null)
-      : iterateAssetPage(projectId, asset.id, miembro)
+    // Tres encargos con la misma cara: re-estilizar, editar el diseño, o rehacer la página desde
+    // su documento. Los tres reemplazan la página en su sitio y dejan la anterior en la librería,
+    // así que comparten esta ventana; lo único que cambia es a quién se le pide.
+    const trabajo = estilo && pedido
+      ? newArtStyleAsset(projectId, asset.id, pedido, miembro)
+      : pedido
+        ? designEditAsset(projectId, asset.id, pedido, miembro, opciones ?? null, cambio ?? null)
+        : iterateAssetPage(projectId, asset.id, miembro)
     trabajo
       .then(r => {
         setVers(v => [...v.filter(x => x.n !== r.version.version_number),
@@ -4857,7 +5012,7 @@ const colaDeNombre = (n: string) => {
   return partes.length > 2 ? partes.slice(-2).join(' — ') : n
 }
 
-function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onListo }: {
+function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onListo, onRecibir }: {
   asset: UnifiedAsset
   projectId: string
   /** El estado que ya traía el radial. Sin él —cuando se llega desde el paso 3 del Run— la ventana
@@ -4866,6 +5021,8 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
   accent: string
   onCancel: () => void
   onListo: (idNuevo: string | null) => void
+  /** Abre la subida del nivel ya montado. Vive acá porque es el mismo sitio que exporta. */
+  onRecibir?: () => void
 }) {
   const [estado, setEstado] = useState<EstadoDeMontaje | null>(dado)
   useEffect(() => {
@@ -5089,6 +5246,19 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
               {marcados} of {modelos.length} models have a role. If this level has no floor plan yet,
               one is generated first — that costs a call and fixes the plan for later runs.
             </div>
+
+            {/* El nivel montado vuelve por el MISMO sitio que exportó sus insumos. Es lo que pide
+                el documento de JuanK del 18-09 —«el usuario lo sube a mano al moodboard»— y es
+                donde alguien lo va a buscar: quien exportó el `.zip` desde acá, vuelve acá con el
+                nivel armado. Ponerlo en otro menú obligaría a recordar dónde. */}
+            {onRecibir && (
+              <button onClick={onRecibir} disabled={busy} style={{
+                width: '100%', padding: '8px 0', borderRadius: 8, marginBottom: 8,
+                cursor: busy ? 'default' : 'pointer', background: 'transparent',
+                border: '1px dashed var(--line-2)', color: 'var(--text-2)',
+                fontSize: 11.5, fontFamily: 'var(--font-sans)',
+              }}>Already assembled it? Upload the level and its renders ↑</button>
+            )}
 
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={onCancel} disabled={busy} style={{
@@ -5639,10 +5809,12 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
 // Submenú de «Edit»: cinco sectores, contextual por tipo. Solo la primera opción responde.
 // Vuelve al radial principal con Escape o con el botón del centro, para no dejar sin salida a
 // quien entró por error.
-function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone, onNewIteration, onDesignEdit, onHerramienta }: {
+function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone, onNewIteration, onDesignEdit, onHerramienta, onSubir }: {
   x: number; y: number; asset: UnifiedAsset; projectId: string; accent: string; colors: string[]
   onBack: () => void; onDone: () => void; onNewIteration: () => void; onDesignEdit: () => void
   onHerramienta: (h: HerramientaDeAsset) => void
+  /** Traer de vuelta un archivo arreglado fuera de Forge. Vale en los cinco tipos. */
+  onSubir: () => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<number | null>(null)
@@ -5722,7 +5894,10 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
         const herr   = (tools || []).find(h => h.clave === HERRAMIENTA_DE[label])
         const esIterar = label === 'New Iteration'
         const esDesign = label === 'Design edits'
-        const activa = esIterar || esDesign || !!herr
+        // «Upload manual edits» vale en los CINCO tipos y no depende de ningún workflow: es traer
+        // de vuelta un archivo que alguien arregló fuera de Forge. Por eso no pasa por `tools`.
+        const esSubir  = label === 'Upload manual edits'
+        const activa = esIterar || esDesign || esSubir || !!herr
         const pos = sectorAt(i, N)
         return (
           <div key={label}>
@@ -5735,10 +5910,12 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
                 e.stopPropagation()
                 if (esIterar) onNewIteration()
                 else if (esDesign) onDesignEdit()
+                else if (esSubir) onSubir()
                 else if (herr) onHerramienta(herr)
               }}
               title={esIterar ? 'Re-run this page through its workflow'
                    : esDesign ? 'Describe a design change and re-generate the image'
+                   : esSubir ? 'Replace this page with a file you edited outside Forge — it keeps its place and its connections'
                    : herr ? (herr.pide_mascara
                        ? 'Paint the part to isolate — it is published as a new piece to the right'
                        : 'A new view of this asset — published as a new piece to the right')
@@ -5802,7 +5979,7 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
   )
 }
 
-function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria, onMontaje, onContexto }: {
+function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, onDesignEdit, onRun, onHerramienta, onLibreria, onMontaje, onContexto, onSubir, onEstilo }: {
   x: number; y: number; asset: UnifiedAsset; projectId: string; accent: string; colors: string[]
   onDone: () => void; onIterar: (a: UnifiedAsset) => void; onDesignEdit: (a: UnifiedAsset) => void
   onRun: (a: UnifiedAsset) => void
@@ -5810,6 +5987,9 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
   onLibreria: (a: UnifiedAsset) => void
   onMontaje: (a: UnifiedAsset, estado: EstadoDeMontaje) => void
   onContexto: (a: UnifiedAsset) => void
+  onSubir: (a: UnifiedAsset) => void
+  /** New Art Style: re-estiliza la página del ASG conservando su template (informe v9, §2). */
+  onEstilo: (a: UnifiedAsset) => void
 }) {
   const [shown, setShown] = useState(false)
   const [hot,   setHot]   = useState<string | null>(null)
@@ -5854,6 +6034,7 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
       onNewIteration={() => onIterar(asset)}
       onDesignEdit={() => onDesignEdit(asset)}
       onHerramienta={h => onHerramienta(asset, h)}
+      onSubir={() => onSubir(asset)}
     />
   )
 
@@ -5911,7 +6092,10 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
         // El montaje responde siempre que exista el sector, incluso con cosas por resolver: la
         // ventana es donde se marca el papel de cada modelo y donde se elige el nivel, y es también
         // donde se lee qué falta. Un sector apagado dejaba el estado en un tooltip.
+        // «New Art Style» solo sobre páginas del ASG: re-estiliza la página entera y fuera de
+        // ellas no tiene sentido (§7 del documento de Miguel). El backend lo vuelve a comprobar.
         const vivo = q.key === 'edit' || q.key === 'run' || q.key === 'library' || q.key === 'context'
+                  || (q.key === 'style' && esPaginaDelASG(asset))
                   || (q.key === 'montaje' && Boolean(montaje?.aplica))
         return (
         <div key={q.key}>
@@ -5924,12 +6108,16 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
               if (q.key === 'library') { e.stopPropagation(); onLibreria(asset) }
               if (q.key === 'montaje' && montaje?.aplica) { e.stopPropagation(); onMontaje(asset, montaje) }
               if (q.key === 'context') { e.stopPropagation(); onContexto(asset) }
+              if (q.key === 'style' && esPaginaDelASG(asset)) { e.stopPropagation(); onEstilo(asset) }
             }}
             title={
               q.key === 'edit' ? `${q.label} — open the editing menu`
               : q.key === 'run' ? 'Run — execute this page’s workflow and publish the result to the right'
               : q.key === 'library' ? 'Asset Library — this page and everything produced from it, as a list'
               : q.key === 'montaje' ? tituloMontaje(montaje)
+              : q.key === 'style' ? (esPaginaDelASG(asset)
+                  ? 'New Art Style — re-render this ASG page in another art style, keeping the template'
+                  : 'New Art Style — only on Art Style Guide pages')
               : `${q.label} — coming in ${q.hint}`
             }
             style={{

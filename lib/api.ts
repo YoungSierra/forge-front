@@ -392,6 +392,9 @@ export interface UnifiedAsset {
    *  reusa al rehacerla: el workflow ya cambió de valores para entonces, así que leerlo de ahí
    *  diría con qué se generaría hoy, no con qué se generó esto. */
   opciones?: Record<string, unknown> | null
+  /** Los renders del nivel montado, cuando esta pieza es uno. El visor los enseña como galería
+   *  debajo del modelo: se subieron juntos y se miran juntos (informe v9, §5). */
+  montaje_renders?: { nombre: string; url: string }[] | null
   created_at: string
   versions: UnifiedAssetVersion[]
 }
@@ -441,6 +444,53 @@ export async function uploadLibraryAsset(
   }
   const data = await res.json()
   return data.asset
+}
+
+/**
+ * New Art Style: re-estiliza una página del ASG conservando su template (informe v9, punto 2).
+ *
+ * Mismo camino que un Design Edit —reemplaza la página en su sitio y la anterior queda en la
+ * Asset Library— pero con otro workflow y otro token. No lleva clase de cambio: re-estilizar es,
+ * por definición, cambiar cómo se ve y no qué se retrata, así que el servidor la fija.
+ */
+export async function newArtStyleAsset(
+  projectId: string, assetId: string, prompt: string, memberId?: string | null,
+) {
+  return request<{ success: boolean; version: { id: string; version_number: number; storage_url: string } }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/new-art-style`,
+    {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, member_id: memberId ?? null }),
+    },
+  )
+}
+
+/**
+ * Reemplazar una página con un archivo editado fuera de Forge (informe v9, punto 3).
+ *
+ * No crea una pieza nueva: guarda una VERSIÓN de la que ya existe, así que conserva su sitio en el
+ * lienzo, su instancia en el menú del Vertical Slice y todo lo que cuelga de ella. El tipo lo
+ * deduce el servidor por la extensión.
+ */
+export async function subirEdicionManual(
+  projectId: string, assetId: string, file: File, cambio?: ClaseDeCambio | null,
+): Promise<{ version: { id: string; version_number: number; storage_url: string }; formato: string }> {
+  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+  const fd = new FormData()
+  fd.append('archivo', file)
+  if (memberId) fd.append('member_id', memberId)
+  if (cambio)   fd.append('cambio', cambio)
+
+  // Sin Content-Type: el browser pone el boundary del multipart.
+  const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/canvas/assets/${assetId}/upload-manual`, {
+    method: 'POST', headers: await authHeaders(), body: fd,
+  })
+  if (!res.ok) {
+    let msg = `Upload failed: ${res.status}`
+    try { const b = await res.json(); msg = b.error || b.message || msg } catch {}
+    throw new Error(msg)
+  }
+  return await res.json()
 }
 
 /** La lámina reducida al tamaño de una tarjeta del lienzo.
@@ -2376,4 +2426,32 @@ export async function runAssetTool(
       }),
     },
   )
+}
+
+/**
+ * Subir el nivel ya montado: el modelo y sus renders, juntos (informe v9 punto 5, documento de
+ * JuanK del 18-09).
+ *
+ * Van en UNA petición a propósito: «modelo y renders se suben y se reemplazan siempre juntos».
+ * Y en el moodboard vive un solo montaje por nivel, el último — si ya había uno, este lo
+ * reemplaza y el anterior queda en la Asset Library.
+ */
+export async function subirMontajeDeNivel(
+  projectId: string, assetId: string, modelo: File, renders: File[],
+): Promise<{ id: string; reemplazado: boolean; modelo: string; renders: { nombre: string; url: string }[] }> {
+  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+  const fd = new FormData()
+  fd.append('modelo', modelo)
+  for (const r of renders) fd.append('renders', r)
+  if (memberId) fd.append('member_id', memberId)
+
+  const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/canvas/assets/${assetId}/montaje-subido`, {
+    method: 'POST', headers: await authHeaders(), body: fd,
+  })
+  if (!res.ok) {
+    let msg = `Upload failed: ${res.status}`
+    try { const b = await res.json(); msg = b.error || b.message || msg } catch {}
+    throw new Error(msg)
+  }
+  return await res.json()
 }
