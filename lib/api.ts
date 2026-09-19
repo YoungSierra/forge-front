@@ -1702,7 +1702,15 @@ export interface IteracionResultado {
 }
 
 /** Un marco: un conjunto de hojas con nombre, que se mueve y se gestiona junto. */
-export interface MoodboardMarco { id: string; nombre: string; fase: string; ids: string[] }
+export interface MoodboardMarco {
+  id: string; nombre: string; fase: string; ids: string[]
+  /** Apilado: el grupo se dibuja como una sola carta y sus hojas no ocupan el lienzo (informe v6,
+   *  punto 1). Es un ESTADO del grupo y no otra estructura — así hereda el nombre, el movimiento
+   *  como unidad y la mezcla entre pestañas que los marcos ya tienen. */
+  colapsado?: boolean
+  /** Qué hoja hace de portada. Por defecto la primera; se puede cambiar. */
+  portada?: string
+}
 
 /**
  * Acomodo del moodboard: dónde quedó cada hoja y qué marcos hay. Es del proyecto, lo ve todo el

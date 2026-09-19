@@ -1276,9 +1276,14 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     // ahi algo que sigue existiendo es peor que verlo.
     const base = view === 'table' ? conTab : conTab.filter(a => !ocultos[a.id])
     // Y lo mismo con los archivos de trabajo: fuera del lienzo, presentes en Docs y en la tabla.
+    //
+    // Y con lo APILADO (informe v6, punto 1): una hoja dentro de una pila no se dibuja suelta en
+    // el lienzo —la pila la representa— pero sigue en la tabla y en su página madre. Apilar es
+    // ordenar el espacio de trabajo, no esconder: la diferencia es que de una pila se sale
+    // desplegándola, y de lo escondido hay que ir a buscarlo.
     const enLienzo = view === 'table' || tab === 'docs' || familia
       ? base
-      : base.filter(a => !esArchivoDeTrabajo(a))
+      : base.filter(a => !esArchivoDeTrabajo(a) && !apiladas.has(a.id))
 
     if (view === 'table') {
       const key = (a: UnifiedAsset) =>
@@ -1414,6 +1419,59 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     setSeleccion(new Set())
     setRenombrando(id)   // nace pidiendo nombre: un marco sin nombre no organiza nada
   }, [seleccion, fase.key, guardarLayout])
+
+  // ── Colapsar / apilar ───────────────────────────────────────────────────────
+  //
+  // Informe v6, punto 1. El lienzo acumula hojas que no hace falta mirar todo el tiempo —los
+  // `.json` de level_graph, de perfil, los mapas— y hoy la única forma de quitarlas de en medio es
+  // esconderlas, que es otra cosa: esconder las saca de la vista, apilar las deja a mano.
+  //
+  // Apilar es un ESTADO DEL MARCO y no una estructura nueva. Así hereda todo lo que los marcos ya
+  // saben hacer —el nombre, moverse como unidad, la mezcla entre pestañas del backend— y el día
+  // que alguien despliegue el grupo no hay nada que reconstruir: las hojas nunca dejaron de estar
+  // en él. Una segunda estructura para «pilas» habría duplicado esas cuatro cosas.
+  //
+  // Van como funciones normales y no en `useCallback` a propósito. Este componente ya no lo puede
+  // compilar el compilador de React —la línea base del archivo trae cinco «existing memoization
+  // could not be preserved»— y cada hook nuevo hereda ese error sin ganar nada: son manejadores
+  // de evento sobre un puñado de grupos, no un camino caliente. Memoizar acá sería pagar un error
+  // de lint por una optimización que nadie necesita.
+  const colapsar = () => {
+    marcarHistorial()
+    const ids = [...seleccion]
+    if (ids.length < 2) return
+    const id = `m${Date.now().toString(36)}`
+    setMarcos(ms => [
+      ...ms.map(m => ({ ...m, ids: m.ids.filter(x => !ids.includes(x)) })).filter(m => m.ids.length > 1),
+      // Nace YA colapsado y con portada: apilar desde la selección es un solo gesto, y pedir
+      // nombre primero —como hace agrupar— obligaría a dos para lo mismo. El nombre se pone
+      // después, desde la propia pila, si hace falta.
+      { id, nombre: 'Stack', fase: fase.key, ids, colapsado: true, portada: ids[0] },
+    ])
+    setSeleccion(new Set())
+    // El guardado lo dispara el efecto que vigila `marcos`, como en todo el resto del acomodo.
+  }
+
+  /** Plegar o desplegar un grupo que ya existe. */
+  const alternarColapso = (id: string) => {
+    marcarHistorial()
+    setMarcos(ms => ms.map(m => m.id === id
+      ? { ...m, colapsado: !m.colapsado, portada: m.portada || m.ids[0] }
+      : m))
+  }
+
+  /** Qué hoja hace de portada. Se elige desde la pila, sobre la hoja que se quiere enseñar. */
+  const cambiarPortada = (id: string, portada: string) => {
+    marcarHistorial()
+    setMarcos(ms => ms.map(m => m.id === id ? { ...m, portada } : m))
+  }
+
+  /** Las hojas que ahora mismo están dentro de una pila: no se dibujan sueltas en el lienzo. */
+  const apiladas = (() => {
+    const s = new Set<string>()
+    for (const m of marcos) if (m.colapsado && m.fase === fase.key) for (const x of m.ids) s.add(x)
+    return s
+  })()
 
   // Los rectángulos de los marcos TAL COMO ESTÁN AHORA. Se toma una foto al empezar a arrastrar:
   // medirlos al soltar, excluyendo la hoja movida, encogía el marco con cada movimiento — y en un
@@ -2043,7 +2101,116 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                 {/* ── Marcos ────────────────────────────────────────────────────
                     Un conjunto con nombre. Se dibuja alrededor de sus hojas, se arrastra como un
                     bloque y se desagrupa desde su propia etiqueta. */}
-                {marcos.filter(m => m.fase === fase.key).map(m => {
+                {/* ── Pilas ─────────────────────────────────────────────────────
+                    Un grupo colapsado (informe v6, punto 1). Se dibuja como UNA carta —la
+                    portada— con dos más asomando detrás, desalineadas en diagonal, que es el
+                    aspecto que el informe pide: «sensación de varias páginas apiladas».
+
+                    Sus hojas no están en `visible` —las quita el filtro del lienzo— así que la
+                    posición se lee directamente del acomodo. */}
+                {marcos.filter(m => m.fase === fase.key && m.colapsado && m.ids.length > 1).map(m => {
+                  const donde = (id: string) => posiciones[`${fase.key}:${id}`] ?? disposicion.pos.get(id) ?? null
+                  const portada = m.portada && m.ids.includes(m.portada) ? m.portada : m.ids[0]
+                  // La pila se planta donde está su portada; si esa hoja nunca tuvo posición
+                  // propia, donde esté la primera del grupo que sí la tenga.
+                  const p = donde(portada) || m.ids.map(donde).find(Boolean)
+                  if (!p) return null
+                  const hoja = assets.find(a => a.id === portada)
+                  const detras = Math.min(2, m.ids.length - 1)
+
+                  return (
+                    <div key={m.id} style={{ position: 'absolute', left: p.x, top: p.y, zIndex: 3 }}>
+                      {/* Las de atrás. Desfase en diagonal y un grado de giro: apiladas a mano,
+                          no en una cuadrícula — es lo que las hace leerse como varias. */}
+                      {Array.from({ length: detras }, (_, i) => (
+                        <div key={i} style={{
+                          position: 'absolute', left: (i + 1) * 7, top: (i + 1) * 7,
+                          width: HOJA_W, height: HOJA_H, borderRadius: 12,
+                          background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,0.10)',
+                          transform: `rotate(${(i + 1) * 0.9}deg)`,
+                          transformOrigin: '50% 100%',
+                        }} />
+                      ))}
+
+                      <div
+                        // Una pila se ARRASTRA como una unidad, igual que el grupo desplegado. Sus
+                        // hojas conservan sus posiciones debajo —siguen siendo un marco— así que
+                        // se mueve con el mismo `moverMarco`: desplegarla después la deja donde el
+                        // usuario la dejó, no donde estaba antes de apilarla.
+                        onPointerDown={e => {
+                          e.stopPropagation()
+                          marcarHistorial()
+                          // La base incluye a TODOS los miembros, también a los que nunca se
+                          // movieron a mano: si no, la pila se mueve y al desplegarla la mitad de
+                          // las hojas se quedaron atrás. Es el mismo cuidado del punto 9 del v6.
+                          const base = { ...posicionesRef.current }
+                          for (const h of m.ids) {
+                            const k = `${fase.key}:${h}`
+                            if (!base[k]) { const q = disposicion.pos.get(h); if (q) base[k] = q }
+                          }
+                          const ini = { x: e.clientX, y: e.clientY }
+                          const mover = (ev: PointerEvent) =>
+                            moverMarco(m.id, (ev.clientX - ini.x) / vista.z, (ev.clientY - ini.y) / vista.z, base)
+                          const soltar = () => {
+                            window.removeEventListener('pointermove', mover)
+                            window.removeEventListener('pointerup', soltar)
+                            guardarLayout()
+                          }
+                          window.addEventListener('pointermove', mover)
+                          window.addEventListener('pointerup', soltar)
+                        }}
+                        onDoubleClick={e => { e.stopPropagation(); alternarColapso(m.id) }}
+                        title={`${m.nombre} — ${m.ids.length} pages. Drag to move it, double-click to expand.`}
+                        style={{
+                          position: 'relative', width: HOJA_W, height: HOJA_H, borderRadius: 12,
+                          overflow: 'hidden', cursor: 'grab', background: 'var(--bg-2)',
+                          border: `1px solid ${theme.accent}77`,
+                          boxShadow: `0 6px 20px rgba(0,0,0,0.45)`,
+                        }}
+                      >
+                        {hoja?.storage_url && kindOf(hoja) === 'image' && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={miniaturaUrl(hoja.storage_url, 600)} alt={hoja.name}
+                               style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.85 }} />
+                        )}
+
+                        {/* El texto sobrepuesto que pide el informe: lo que identifica al grupo
+                            sin abrirlo. Es el nombre del marco, así que renombrar la pila y
+                            renombrar el grupo son la misma cosa. */}
+                        <div style={{
+                          position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 10px 9px',
+                          background: 'linear-gradient(rgba(6,7,9,0), rgba(6,7,9,0.92))',
+                          display: 'flex', alignItems: 'baseline', gap: 6,
+                        }}>
+                          <span onDoubleClick={e => { e.stopPropagation(); setRenombrando(m.id) }}
+                                style={{ fontSize: 12.5, color: '#fff', fontWeight: 600, flex: 1,
+                                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {m.nombre}
+                          </span>
+                          <span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: theme.accent }}>
+                            {m.ids.length}
+                          </span>
+                        </div>
+
+                        {/* Cambiar la portada: se pasa por las hojas del grupo y se VE cuál queda.
+                            Un menú con veinte nombres de archivo no dice cuál es cuál. */}
+                        <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
+                          <BotonPila titulo="Previous cover" onClick={() => {
+                            const i = m.ids.indexOf(portada)
+                            cambiarPortada(m.id, m.ids[(i - 1 + m.ids.length) % m.ids.length])
+                          }}>‹</BotonPila>
+                          <BotonPila titulo="Next cover" onClick={() => {
+                            const i = m.ids.indexOf(portada)
+                            cambiarPortada(m.id, m.ids[(i + 1) % m.ids.length])
+                          }}>›</BotonPila>
+                          <BotonPila titulo="Expand the stack" onClick={() => alternarColapso(m.id)}>⤢</BotonPila>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {marcos.filter(m => m.fase === fase.key && !m.colapsado).map(m => {
                   const pos = m.ids
                     .map(id => ({ id, i: visible.findIndex(a => a.id === id) }))
                     .filter(x => x.i !== -1)
@@ -2135,6 +2302,18 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             >✎</button>
                           </>
                         )}
+                        {/* Volver a plegar. El informe pide poder des-colapsar Y volver a
+                            colapsar, así que el camino de vuelta vive en la etiqueta del grupo,
+                            al lado de las otras acciones que ya tiene. */}
+                        <button
+                          onPointerDown={e => e.stopPropagation()}
+                          onClick={e => { e.stopPropagation(); alternarColapso(m.id) }}
+                          title="Collapse into a stack"
+                          style={{
+                            border: 'none', background: 'transparent', cursor: 'pointer',
+                            color: 'var(--text-2)', fontSize: 12, lineHeight: 1, padding: 0,
+                          }}
+                        >▤</button>
                         <button
                           onPointerDown={e => e.stopPropagation()}
                           onClick={e => { e.stopPropagation(); desagrupar(m.id) }}
@@ -2175,6 +2354,10 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                       }}>{seleccion.size}</span>
                       <BarraBtn titulo="Tidy — align them in a grid" onClick={ordenarSeleccion}>⌗</BarraBtn>
                       <BarraBtn titulo="Group them in a named frame" onClick={agrupar}>▣</BarraBtn>
+                      {/* Apilar (informe v6, punto 1). Va al lado de agrupar porque son la misma
+                          familia de gesto sobre la misma selección — y la selección puede venir
+                          del marco de arrastre, que es como el informe pide poder hacerlo. */}
+                      <BarraBtn titulo="Collapse them into a stack — the first page stays as the cover" onClick={colapsar}>▤</BarraBtn>
                       <BarraBtn titulo="Save them to my computer" onClick={() => {
                         for (const id of seleccion) {
                           const a = visible.find(x => x.id === id)
@@ -3101,6 +3284,26 @@ function useAudioThumb(url: string, id: string, accent: string) {
 // probablemente siga valiendo — los mismos dos de la ficha de detalle, definidos UNA vez porque
 // ahora los usan el borde, el aro y la etiqueta, y tres copias se desincronizan solas.
 const colorDeMarca = (accion: 'R' | 'V') => (accion === 'R' ? 'rgb(200,80,66)' : 'rgb(232,181,98)')
+
+/** Los controles de una pila: pequeños, sobre la portada, y solo los tres que hacen falta. */
+function BotonPila({ titulo, onClick, children }: { titulo: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      title={titulo}
+      // `stopPropagation` en los dos: el clic no debe llegar al lienzo (deselecciona) ni el doble
+      // clic a la portada (desplegaría la pila al pulsar dos veces una flecha).
+      onClick={e => { e.stopPropagation(); onClick() }}
+      onDoubleClick={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
+      style={{
+        width: 20, height: 20, borderRadius: 5, cursor: 'pointer', lineHeight: 1,
+        background: 'rgba(10,12,16,0.78)', border: '1px solid rgba(255,255,255,0.20)',
+        color: '#fff', fontSize: 11, fontFamily: 'var(--font-mono)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(3px)',
+      }}
+    >{children}</button>
+  )
+}
 
 // ¿Es una de las 25 páginas del Art Style Guide?
 //
