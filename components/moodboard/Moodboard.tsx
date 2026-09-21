@@ -896,6 +896,49 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       zonas.push({ nombre, x: cursorX - 18, y: 0, w: w + 36, h: h + TITULO + 18 })
       cursorX += w + SEP
     }
+
+    // ── Una hoja nueva nace JUNTO A LA QUE LA GENERÓ ──────────────────────────
+    //
+    // Punto 5 del informe v11: «cuando se generan nuevos outputs, siempre quedan de nuevo en la
+    // zona superior del lienzo. Hay que volver a la zona superior, ordenarlos y arrastrarlos hasta
+    // donde se estaba trabajando». Viene de los informes v4·2, v6·1 y v8·2 — la cuarta vez que lo
+    // pide.
+    //
+    // Y la mitad que faltaba ya existía: de qué pieza salió cada hoja está guardado en
+    // `derived_from` desde que se crea, y el lienzo YA dibuja la línea desde la madre. Solo el
+    // acomodo no la miraba, y repartía celdas desde arriba a la izquierda.
+    //
+    // Se coloca a la derecha de la madre, y si ahí hay algo se baja una fila y se sigue probando
+    // hacia la derecha. Nunca se mueve la madre —eso es lo que el informe pide explícitamente— ni
+    // se toca ninguna hoja que ya tenga posición propia.
+    const ocupado = (x: number, y: number) =>
+      colocadas.some(c => Math.abs(c.x - x) < HOJA_W && Math.abs(c.y - y) < HOJA_H) ||
+      [...pos.values()].some(c => Math.abs(c.x - x) < HOJA_W && Math.abs(c.y - y) < HOJA_H)
+
+    // Las madres primero: una hija de una hija tiene que encontrar a su madre ya colocada.
+    const porFecha = [...deLaFase].sort((a, b) =>
+      String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))
+
+    for (const a of porFecha) {
+      if (!a.derived_from) continue
+      // Una hoja que el usuario ya movió se queda donde la dejó, sin excepción.
+      if (posiciones[`${fase.key}:${a.id}`]) continue
+      const madre = posiciones[`${fase.key}:${a.derived_from}`] ?? pos.get(a.derived_from)
+      if (!madre) continue
+
+      let destino: { x: number; y: number } | null = null
+      for (let fila = 0; fila < 6 && !destino; fila++) {
+        for (let col = 1; col <= 4; col++) {
+          const c = {
+            x: madre.x + col * (HOJA_W + HOJA_GAP),
+            y: madre.y + fila * (HOJA_H + HOJA_GAP),
+          }
+          if (!ocupado(c.x, c.y)) { destino = c; break }
+        }
+      }
+      if (destino) pos.set(a.id, destino)
+    }
+
     return { pos, zonas }
   }, [deLaFase, posiciones, fase.key])
 
@@ -1046,6 +1089,18 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // Marco de selección y qué quedó dentro. En coordenadas del lienzo.
   const [marco, setMarco] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
+
+  // Qué pila se acaba de desplegar y DÓNDE estaba (punto 1c del informe v11).
+  //
+  // Al expandir, las hojas ya se dibujan en su posición final: sin esto aparecen de golpe, que es
+  // lo que Miguel reporta. Se guarda el punto donde estaba la pila y cada hoja entra desde ahí.
+  // Es un dato de ANIMACIÓN, no de acomodo: vive en memoria, no se guarda, y se borra sola.
+  //
+  // Declarado ACÁ arriba, por encima de todo lo que lo lee durante el render. Un `const` leído por
+  // algo que corre antes en el render está en su zona muerta temporal y tira `ReferenceError` en
+  // cada pintado — y ni tsc, ni lint, ni el build lo ven, porque esta ruta es dinámica. Ya tumbó
+  // el moodboard una vez, el 21-09.
+  const [desplegando, setDesplegando] = useState<{ ids: string[]; x: number; y: number } | null>(null)
 
 
 
@@ -1470,9 +1525,22 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   /** Plegar o desplegar un grupo que ya existe. */
   const alternarColapso = (id: string) => {
     marcarHistorial()
-    setMarcos(ms => ms.map(m => m.id === id
-      ? { ...m, colapsado: !m.colapsado, portada: m.portada || m.ids[0] }
-      : m))
+    const m = marcos.find(x => x.id === id)
+
+    // Al DESPLEGAR se anota dónde estaba la pila, para que las hojas salgan de ahí y no aparezcan
+    // de golpe. Al plegar no hace falta: la carta de la pila trae su propia animación de entrada.
+    if (m && m.colapsado) {
+      const portada = m.portada && m.ids.includes(m.portada) ? m.portada : m.ids[0]
+      const p = posiciones[`${fase.key}:${portada}`] ?? disposicion.pos.get(portada) ?? null
+      if (p) setDesplegando({ ids: m.ids, x: p.x, y: p.y })
+      // Se retira sola. Mientras esté puesta, cada hoja del grupo lleva la animación en su estilo;
+      // si se quedara, volvería a correr en cuanto React recree cualquiera de esos nodos.
+      setTimeout(() => setDesplegando(null), 420)
+    }
+
+    setMarcos(ms => ms.map(x => x.id === id
+      ? { ...x, colapsado: !x.colapsado, portada: x.portada || x.ids[0] }
+      : x))
   }
 
   /** Qué hoja hace de portada. Se elige desde la pila, sobre la hoja que se quiere enseñar. */
@@ -2157,6 +2225,11 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,0.10)',
                           transform: `rotate(${(i + 1) * 0.9}deg)`,
                           transformOrigin: '50% 100%',
+                          // Llegan DESPUÉS de la portada y escalonadas entre sí: es el retraso lo
+                          // que se lee como «una sobre otra». Sin él las tres aparecen a la vez y
+                          // vuelve a parecer que ya estaban apiladas.
+                          ['--giro' as string]: `${(i + 1) * 0.9}deg`,
+                          animation: `mb-apila-detras 300ms cubic-bezier(.2,.8,.25,1) ${90 + i * 70}ms both`,
                         }} />
                       ))}
 
@@ -2167,6 +2240,28 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                         // usuario la dejó, no donde estaba antes de apilarla.
                         onPointerDown={e => {
                           e.stopPropagation()
+
+                          // Una pila también se SELECCIONA (punto 1b del informe v11: «las
+                          // herramientas de la barra de arriba no responden sobre la pila»). No
+                          // respondían porque la barra aparece con `seleccion.size > 1` y una pila
+                          // nunca entraba en la selección: al pulsarla solo empezaba el arrastre,
+                          // así que la barra no tenía sobre qué actuar.
+                          //
+                          // Se seleccionan sus MIEMBROS, no la pila: lo que las herramientas saben
+                          // manipular son hojas, y así ordenar, agrupar, bajar o sacar del lienzo
+                          // operan sobre las que la pila contiene sin tocar ninguna de ellas.
+                          if (e.shiftKey) {
+                            setSeleccion(prev => {
+                              const n = new Set(prev)
+                              // Si ya estaba entera, la pila sale entera.
+                              if (m.ids.every(id => n.has(id))) for (const id of m.ids) n.delete(id)
+                              else                              for (const id of m.ids) n.add(id)
+                              return n
+                            })
+                          } else {
+                            setSeleccion(new Set(m.ids))
+                          }
+
                           marcarHistorial()
                           // La base incluye a TODOS los miembros, también a los que nunca se
                           // movieron a mano: si no, la pila se mueve y al desplegarla la mitad de
@@ -2194,11 +2289,20 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           overflow: 'hidden', cursor: 'grab', background: 'var(--bg-2)',
                           border: `1px solid ${theme.accent}77`,
                           boxShadow: `0 6px 20px rgba(0,0,0,0.45)`,
+                          animation: 'mb-apila 340ms cubic-bezier(.2,.8,.25,1) both',
                         }}
                       >
                         {hoja?.storage_url && kindOf(hoja) === 'image' && (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={miniaturaUrl(hoja.storage_url, 600)} alt={hoja.name}
+                               // Lo mismo que la hoja suelta del lienzo, que a la pila se le
+                               // olvidó: una imagen es arrastrable por defecto, así que además de
+                               // nuestro arrastre por puntero el navegador empezaba el SUYO. Eso
+                               // es lo que Migue describe como «el clic se queda enganchado» en el
+                               // punto 1 del informe v11 — y es el mismo fallo que ya habíamos
+                               // arreglado en la hoja suelta, reintroducido al construir la pila.
+                               draggable={false}
+                               onDragStart={e => e.preventDefault()}
                                style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.85 }} />
                         )}
 
@@ -2218,6 +2322,24 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           <span style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: theme.accent }}>
                             {m.ids.length}
                           </span>
+                          {/* Expandir, CON SU NOMBRE (punto 1d del informe v11: «falta un botón
+                              claro para volver a expandir»). El botón existía —el `⤢` de la
+                              esquina— y el doble clic también, pero un glifo de siete píxeles no
+                              dice qué hace: Young preguntó qué era el `⇱` de al lado dos días
+                              después de publicarlo. Si el que lo encargó no lo lee, nadie lo lee.
+                              La palabra ocupa lo mismo y no hay que adivinarla. */}
+                          <button
+                            onClick={e => { e.stopPropagation(); alternarColapso(m.id) }}
+                            onDoubleClick={e => e.stopPropagation()}
+                            onPointerDown={e => e.stopPropagation()}
+                            title="Expand the stack — lay the pages back out side by side"
+                            style={{
+                              border: '1px solid rgba(255,255,255,0.22)', borderRadius: 5,
+                              background: 'rgba(255,255,255,0.10)', color: '#fff', cursor: 'pointer',
+                              fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: 0.3,
+                              padding: '2px 7px', lineHeight: 1.4,
+                            }}
+                          >EXPAND</button>
                         </div>
 
                         {/* Cambiar la portada: se pasa por las hojas del grupo y se VE cuál queda.
@@ -2246,7 +2368,6 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                               ? 'Take this page out of the stack'
                               : 'Take this page out — with one page left, the stack dissolves'}
                             onClick={() => sacarDeLaPila(m.id, portada)}>⇱</BotonPila>
-                          <BotonPila titulo="Expand the stack" onClick={() => alternarColapso(m.id)}>⤢</BotonPila>
                         </div>
                       </div>
                     </div>
@@ -2401,9 +2522,12 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           familia de gesto sobre la misma selección — y la selección puede venir
                           del marco de arrastre, que es como el informe pide poder hacerlo. */}
                       <BarraBtn titulo="Collapse them into a stack — the first page stays as the cover" onClick={colapsar}>▤</BarraBtn>
+                      {/* Se busca en `assets` y no en `visible`: una hoja apilada NO está en
+                          `visible` —ese es justo el filtro que la esconde bajo la pila— así que
+                          con una pila seleccionada esto no bajaba nada, en silencio. */}
                       <BarraBtn titulo="Save them to my computer" onClick={() => {
                         for (const id of seleccion) {
-                          const a = visible.find(x => x.id === id)
+                          const a = assets.find(x => x.id === id)
                           if (a) bajarActivo(a)
                         }
                       }}>↓</BarraBtn>
@@ -2529,6 +2653,16 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                         position: 'absolute', left: p.x, top: p.y,
                         width: HOJA_W, height: HOJA_H, cursor: 'grab',
                         WebkitUserDrag: 'none',
+                        // Recién salida de una pila: entra desde donde estaba la pila y se abre
+                        // hasta acá (punto 1c del informe v11). El desplazamiento va AL REVÉS
+                        // —empieza corrida hacia la pila y termina en cero— porque la hoja ya está
+                        // dibujada en su sitio definitivo. El escalón por hoja es lo que hace que
+                        // se abran en abanico y no todas a la vez.
+                        ...(desplegando?.ids.includes(a.id) ? {
+                          ['--dx' as string]: `${desplegando.x - p.x}px`,
+                          ['--dy' as string]: `${desplegando.y - p.y}px`,
+                          animation: `mb-despliega 360ms cubic-bezier(.2,.8,.25,1) ${Math.min(desplegando.ids.indexOf(a.id), 8) * 28}ms both`,
+                        } : {}),
                       } as React.CSSProperties}
                     >
                       {/* El aro de «Continue here»: la guía señala el paso Y lo enseña en el
@@ -6821,6 +6955,35 @@ const KEYFRAMES = `
 @keyframes mb-aparece {
   from { opacity: 0; transform: scale(0.965); }
   to   { opacity: 1; transform: scale(1); }
+}
+/* Colapsar y expandir una pila (punto 1c del informe v11: «al colapsar no se produce ninguna
+   animación que muestre las páginas apilándose una sobre otra; simplemente aparecen ya
+   apiladas»).
+
+   Son dos gestos opuestos y por eso dos animaciones:
+
+   OJO: este bloque es un template literal de JS. Nada de acentos graves acá dentro — cierran la
+   cadena y el archivo deja de compilar.
+
+   · mb-apila es la CARTA de la pila al nacer. Entra un poco más grande y girada, como si las
+     hojas vinieran cayendo de fuera, y se asienta. Las de atrás (mb-apila-detras) llegan desde
+     más lejos y con retraso, que es lo que se lee como «una sobre otra» y no como «apareció».
+   · mb-despliega es cada HOJA al expandirse: sale del sitio donde estaba la pila y se abre hacia
+     el suyo. Como cada una ya se dibuja en su posición final, el desplazamiento se hace al revés
+     —empieza corrida hacia el centro de la pila y termina en cero—, que da el mismo efecto sin
+     tener que medir dos veces el lienzo. */
+@keyframes mb-apila {
+  from { opacity: 0; transform: scale(1.09) rotate(-2.5deg); }
+  60%  { opacity: 1; transform: scale(0.985) rotate(0.4deg); }
+  to   { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+@keyframes mb-apila-detras {
+  from { opacity: 0; transform: translate(26px, -34px) rotate(-6deg); }
+  to   { opacity: 1; transform: translate(0, 0) rotate(var(--giro, 0deg)); }
+}
+@keyframes mb-despliega {
+  from { opacity: 0.25; transform: translate(var(--dx, 0px), var(--dy, 0px)) scale(0.93); }
+  to   { opacity: 1;    transform: translate(0, 0) scale(1); }
 }
 @keyframes mb-latido {
   0%, 100% { opacity: 0.32; }
