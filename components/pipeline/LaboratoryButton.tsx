@@ -30,6 +30,8 @@ export default function LaboratoryButton({ projectId }: Props) {
   const [pos,   setPos]   = useState<{ x: number; y: number } | null>(null)
   // Qué contestó el servidor sobre este proyecto. `null` mientras no contesta.
   const [estado, setEstado] = useState<{ configurado: boolean; tiene_tdd: boolean } | null>(null)
+  // La comprobación no se pudo hacer. Es distinto de «no hay TDD» y se dice distinto.
+  const [fallo, setFallo] = useState(false)
   const [doc,   setDoc]   = useState<string | null>(null)
   const [yendo, setYendo] = useState(false)
   const [hover, setHover] = useState(false)
@@ -67,7 +69,14 @@ export default function LaboratoryButton({ projectId }: Props) {
     let vivo = true
     getLaboratorio(projectId)
       .then(r => { if (vivo) { setEstado({ configurado: r.configurado, tiene_tdd: r.tiene_tdd }); setDoc(r.documento ?? null) } })
-      .catch(() => { if (vivo) setEstado({ configurado: false, tiene_tdd: false }) })
+      // Un fallo NO es «este proyecto no tiene TDD».
+      //
+      // Antes el `catch` devolvía `tiene_tdd: false`, así que cualquier tropiezo —red, timeout, un
+      // 500— se mostraba como «run node 3.12 first». David lo vio así el 18-09 y nos mandó a
+      // buscar un problema en el TDD que no existía: el documento llevaba 170.000 caracteres
+      // aprobado en el lienzo. Decir «no se pudo comprobar» cuesta lo mismo y no manda a nadie a
+      // correr un nodo de balde.
+      .catch(() => { if (vivo) setFallo(true) })
     return () => { vivo = false }
   }, [projectId])
 
@@ -117,7 +126,9 @@ export default function LaboratoryButton({ projectId }: Props) {
   if (!pos) return null
 
   const listo = Boolean(estado?.configurado && estado?.tiene_tdd)
-  const porQueNo = !estado
+  const porQueNo = fallo
+    ? 'Could not check the Laboratory — the server did not answer. Try again in a moment.'
+    : !estado
     ? 'Checking…'
     : !estado.configurado
       ? 'The Laboratory is not configured on this server (LAB_URL).'

@@ -72,6 +72,7 @@ export function despertarBackend(): Promise<EstadoDelBackend> {
         if (r.ok) {
           console.log(`[despertar] backend listo en ${((Date.now() - t0) / 1000).toFixed(1)} s`)
           anunciar('despierto')
+          despertarLaboratorio()
           return estado
         }
       } catch {
@@ -86,6 +87,23 @@ export function despertarBackend(): Promise<EstadoDelBackend> {
   })()
 
   return enCurso
+}
+
+/**
+ * Y de paso, el Laboratory.
+ *
+ * Es un TERCER servicio que también se duerme —el suyo tarda ~22 s en arrancar— y hasta ahora solo
+ * despertaba cuando alguien abría un proyecto, que es justo cuando ya está esperando. Se despierta
+ * desde el login por la misma razón que Render.
+ *
+ * Va DESPUÉS y no en paralelo: quien despierta al Laboratory es el backend, así que pedirlo antes
+ * de que el backend esté en pie sería una petición que nadie atiende. Y no se espera su respuesta:
+ * el endpoint contesta al instante y el arranque corre del otro lado.
+ */
+function despertarLaboratorio() {
+  fetch(`${BACKEND_URL}/api/health/lab`, { cache: 'no-store' })
+    .then(() => console.log('[despertar] laboratorio avisado'))
+    .catch(() => { /* silencio: es de fondo y su fallo no es de quien está entrando */ })
 }
 
 /** El estado de ahora, para pintar sin suscribirse. */
