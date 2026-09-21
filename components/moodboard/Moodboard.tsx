@@ -1466,6 +1466,26 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     setMarcos(ms => ms.map(m => m.id === id ? { ...m, portada } : m))
   }
 
+  /**
+   * Sacar de la pila la hoja que se está viendo (informe v4, punto 10).
+   *
+   * En UNA sola operación y no encadenando `cambiarPortada` + `quitarDelMarco`: cada una marca el
+   * historial, así que deshacerlo habría costado dos pulsaciones para algo que el usuario hizo de
+   * un clic. La portada pasa a la siguiente para no quedar apuntando a una hoja que ya salió; y un
+   * grupo que se queda con una sola deja de ser un grupo y se retira, igual que en `quitarDelMarco`.
+   */
+  const sacarDeLaPila = (id: string, hoja: string) => {
+    marcarHistorial()
+    setMarcos(ms => ms
+      .map(m => {
+        if (m.id !== id) return m
+        const ids = m.ids.filter(x => x !== hoja)
+        const i = m.ids.indexOf(hoja)
+        return { ...m, ids, portada: ids.length ? m.ids[(i + 1) % m.ids.length] : undefined }
+      })
+      .filter(m => m.ids.length > 1))
+  }
+
   /** Las hojas que ahora mismo están dentro de una pila: no se dibujan sueltas en el lienzo. */
   const apiladas = (() => {
     const s = new Set<string>()
@@ -2203,6 +2223,21 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             const i = m.ids.indexOf(portada)
                             cambiarPortada(m.id, m.ids[(i + 1) % m.ids.length])
                           }}>›</BotonPila>
+                          {/* Sacar de la pila la hoja que se está viendo (informe v4, punto 10;
+                              lo volvió a preguntar Miguel el 19-09 sobre la entrega de apilar).
+                              Existía desde hacía tiempo —el `⇱` de la barra de una hoja— pero esa
+                              barra vive sobre una hoja DEL LIENZO, y una apilada no está ahí: había
+                              que desplegar, sacarla y volver a plegar.
+
+                              Acá no hace falta, porque las flechas ya recorren los miembros y los
+                              ENSEÑAN: se saca el que estás mirando. Es el mismo `quitarDelMarco`,
+                              con un botón más. La portada pasa a la siguiente, para no quedarse
+                              apuntando a una hoja que ya no está en el grupo. */}
+                          <BotonPila
+                            titulo={m.ids.length > 2
+                              ? 'Take this page out of the stack'
+                              : 'Take this page out — with one page left, the stack dissolves'}
+                            onClick={() => sacarDeLaPila(m.id, portada)}>⇱</BotonPila>
                           <BotonPila titulo="Expand the stack" onClick={() => alternarColapso(m.id)}>⤢</BotonPila>
                         </div>
                       </div>
