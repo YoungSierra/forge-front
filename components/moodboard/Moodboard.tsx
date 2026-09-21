@@ -1257,6 +1257,21 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     return m
   }, [assets])
 
+  /**
+   * Las hojas que ahora mismo están dentro de una pila: no se dibujan sueltas en el lienzo.
+   *
+   * Va ARRIBA del `useMemo` que arma lo visible, y esto no es cosmético: la tenía declarada 200
+   * líneas más abajo y la usaba dentro de ese memo, que corre en el render. Un `const` no existe
+   * antes de su línea —zona muerta temporal— así que lanzaba `ReferenceError` en cada render y
+   * tumbaba el moodboard entero en producción. Ni `tsc` ni el build lo ven, porque el uso está
+   * dentro de una función: lo único que lo caza es el orden, o abrir la página.
+   */
+  const apiladas = (() => {
+    const s = new Set<string>()
+    for (const m of marcos) if (m.colapsado && m.fase === fase.key) for (const x of m.ids) s.add(x)
+    return s
+  })()
+
   const porFechaYPagina = (a: UnifiedAsset, b: UnifiedAsset) => {
     const ga = grupoDe(a), gb = grupoDe(b)
     if (ga !== gb) return (fechaGrupo.get(gb) ?? 0) - (fechaGrupo.get(ga) ?? 0)
@@ -1485,13 +1500,6 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       })
       .filter(m => m.ids.length > 1))
   }
-
-  /** Las hojas que ahora mismo están dentro de una pila: no se dibujan sueltas en el lienzo. */
-  const apiladas = (() => {
-    const s = new Set<string>()
-    for (const m of marcos) if (m.colapsado && m.fase === fase.key) for (const x of m.ids) s.add(x)
-    return s
-  })()
 
   // Los rectángulos de los marcos TAL COMO ESTÁN AHORA. Se toma una foto al empezar a arrastrar:
   // medirlos al soltar, excluyendo la hoja movida, encogía el marco con cada movimiento — y en un
