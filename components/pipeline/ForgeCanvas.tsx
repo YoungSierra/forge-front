@@ -2517,14 +2517,33 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               // El documento del nodo es el de la sesión general; el png es una de sus salidas.
               const ES_IMG = ['png', 'image', 'jpg', 'jpeg']
               const assetOut = outSession?.output_asset
-              const cuerpoOut = (assetOut && !ES_IMG.includes(String(assetOut.format).toLowerCase())
-                ? assetOut.content
-                : session?.output_asset?.content) ?? null
-              const seccionOut  = cuerpoOut ? extractSection(cuerpoOut, activeOutKey, otherKeys) : null
-              const vieneSeccionado = !!cuerpoOut && otherKeys.some(k => !!k && extractSection(cuerpoOut, k) !== null)
+              // `outputSessions[outTab]` y NO `outSession`: este último cae a la sesión general
+              // cuando la pestaña no tiene la suya, y ese documento sí es compartido y sí hay que
+              // repartirlo. La pregunta es «¿esta salida corrió aparte?», no «¿hay algo que ver?».
+              const delPropioOutput = !!outputSessions[outTab]?.output_asset
+                && !!assetOut && !ES_IMG.includes(String(assetOut.format).toLowerCase())
+              const cuerpoOut = (delPropioOutput ? assetOut.content : session?.output_asset?.content) ?? null
+
+              // Segmentar SOLO cuando el documento es compartido.
+              //
+              // Si esta pestaña tiene su propia sesión, lo que se está mirando es el documento de
+              // ESTA salida y nada más: no hay secciones hermanas dentro que repartir, el documento
+              // entero es el contenido de la pestaña.
+              //
+              // Buscarle una sección igual rompía el modo focus, y de la peor manera: el Art
+              // Direction Document contiene capítulos que se llaman como sus salidas hermanas
+              // —Style Guide, Color Palette, Visual Targets—, así que el visor veía «otras claves sí
+              // están» y concluía que la de esta pestaña faltaba. Escondía el documento completo y
+              // avisaba de que el modelo lo había fundido en una hermana. El modelo no había hecho
+              // nada mal: el documento estaba entero, delante, y el visor no lo enseñaba.
+              // Reportado por Miguel el 21-09 sobre el 3.9 corrido en focus.
+              const seccionOut = (cuerpoOut && !delPropioOutput)
+                ? extractSection(cuerpoOut, activeOutKey, otherKeys) : null
+              const vieneSeccionado = !!cuerpoOut && !delPropioOutput
+                && otherKeys.some(k => !!k && extractSection(cuerpoOut, k) !== null)
               const sinSeccion  = !!cuerpoOut && !seccionOut && vieneSeccionado
               const section     = cuerpoOut
-                ? (seccionOut ?? (vieneSeccionado ? null : cuerpoOut))
+                ? (delPropioOutput ? cuerpoOut : (seccionOut ?? (vieneSeccionado ? null : cuerpoOut)))
                 : null
 
               // Gallery solo tiene sentido cuando el output tiene image_gen (para generar imágenes por ítem)
