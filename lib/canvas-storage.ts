@@ -22,17 +22,62 @@ const ctrKey = (projectId: string, containerKey: string) => `forge_canvas_${proj
 
 const dbTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 
+/**
+ * El acomodo, reducido a lo que ES un acomodo: dónde va cada cosa.
+ *
+ * Se guardaba el array de nodos de React Flow tal cual, y cada nodo arrastra dentro su
+ * `data.canvasNode` — la DNA, sus salidas, sus sesiones. Medido el 21-09 en `13_lives_kitten_TEST`:
+ * UN nodo pesaba **738 KB** y los 21 sumaban **2.428 KB**. Lo que hace falta para recolocarlos son
+ * **1,5 KB**.
+ *
+ * Eso es lo que reventó: escribir 2,4 MB cada vez que alguien mueve un nodo hacía que Postgres
+ * cancelara la sentencia a los 34 segundos, y que la lectura previa del otro dueño de la columna
+ * expirara — y una mezcla sobre una lectura fallida borra la mitad que no trae. `v.09` perdió así
+ * el acomodo de sus 29 nodos.
+ *
+ * Lo que se quita no se pierde: vive en la base y el canvas lo vuelve a pedir al cargar, que es de
+ * donde salió. Guardarlo acá era tener dos copias y mantener la mala.
+ */
+function soloPosiciones(layout: CanvasLayout): CanvasLayout {
+  return {
+    ...layout,
+    nodes: layout.nodes?.map(n => ({
+      id: n.id,
+      position: n.position,
+      ...(n.type ? { type: n.type } : {}),
+      // Dos números que evitan el salto del primer pintado mientras React Flow mide.
+      ...(n.measured ? { measured: n.measured } : {}),
+    })) as Node[] | undefined,
+    // Las aristas NO son el problema —154 pesaban 51 KB— y llevan algo que no se puede tirar: los
+    // `waypoints`, los puntos por los que alguien hizo pasar un cable a mano. Se conservan esos y
+    // se deja fuera el resto de su `data`, que se reconstruye.
+    edges: layout.edges?.map(e => {
+      const wp = (e.data as { waypoints?: unknown[] } | undefined)?.waypoints
+      return {
+        id: e.id, source: e.source, target: e.target,
+        ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
+        ...(e.targetHandle ? { targetHandle: e.targetHandle } : {}),
+        ...(e.type ? { type: e.type } : {}),
+        ...(wp?.length ? { data: { waypoints: wp } } : {}),
+      }
+    }) as Edge[] | undefined,
+  }
+}
+
 export function saveLayout(projectId: string, layout: CanvasLayout, immediate = false): void {
+  const magro = soloPosiciones(layout)
   try {
-    localStorage.setItem(key(projectId), JSON.stringify(layout))
+    // También en `localStorage`, que tiene un tope de unos 5 MB por origen: con dos proyectos
+    // gordos abiertos se llenaba y el `catch` se lo tragaba en silencio.
+    localStorage.setItem(key(projectId), JSON.stringify(magro))
   } catch { /* storage full or SSR */ }
 
   if (dbTimers[projectId]) clearTimeout(dbTimers[projectId])
   if (immediate) {
-    saveCanvasLayout(projectId, layout).catch(() => {})
+    saveCanvasLayout(projectId, magro).catch(() => {})
   } else {
     dbTimers[projectId] = setTimeout(() => {
-      saveCanvasLayout(projectId, layout).catch(() => {})
+      saveCanvasLayout(projectId, magro).catch(() => {})
       delete dbTimers[projectId]
     }, 3000)
   }
@@ -85,7 +130,9 @@ export function saveContainerLayout(
       ...existing,
       container_layouts: { ...existing.container_layouts, [containerKey]: data },
     }
-    saveCanvasLayout(projectId, merged).catch(() => {})
+    // También por acá: este camino reconstruye el acomodo desde lo guardado y lo reescribe, así
+    // que sin recortar volvería a subir los nodos enteros aunque el otro camino ya no lo haga.
+    saveCanvasLayout(projectId, soloPosiciones(merged)).catch(() => {})
     delete dbTimers[timerKey]
   }, 3000)
 }
