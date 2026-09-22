@@ -27,6 +27,34 @@ import SubirMontajeModal from './SubirMontajeModal'
 import VerticalSliceScope from './VerticalSliceScope'
 import { ALCANCE_VS, progresoCategoria, type Estados } from './vs-scope'
 
+// ── Qué ES cada formato ──────────────────────────────────────────────────────
+//
+// En UN solo sitio. La familia de un activo se decidía en tres listas distintas —`kindOf`,
+// `ES_GRAFICO` y la tabla de pestañas— y cada una conocía un subconjunto distinto de formatos.
+// Las tres decían «audio», ninguna decía «mp3», y el formato que la base guarda es `mp3`:
+//
+//   · la pestaña Audio no lo recogía  → caía en Concept Art, que es el destino de lo desconocido
+//   · `ES_GRAFICO` no lo reconocía    → se le asignaba la fase de documentación
+//   · `kindOf` devolvía 'doc'         → se dibujaba como documento y nunca salía el reproductor
+//
+// Y el reproductor existe: `useAudioThumb`, la onda, la duración y el `<audio>` de la vista
+// grande estaban construidos y esperando un `kind === 'audio'` que no llegaba nunca. Es lo que
+// Miguel reporta en el punto 4 del informe v12 —«el output no se visualiza en el Moodboard»— y
+// otra vez son dos mitades que existen y no se tocan.
+//
+// Se declaran las EXTENSIONES reales, no solo la palabra de la familia: lo que llega de ComfyUI
+// es el nombre del archivo que produjo el workflow.
+const FAMILIA: Record<string, 'image' | 'video' | 'audio' | '3d'> = {
+  image: 'image', png: 'image', jpg: 'image', jpeg: 'image', webp: 'image',
+  video: 'video', mp4: 'video', webm: 'video', mov: 'video',
+  audio: 'audio', mp3: 'audio', wav: 'audio', flac: 'audio', ogg: 'audio', m4a: 'audio',
+  model_3d: '3d', glb: '3d', gltf: '3d',
+}
+
+/** La familia de un formato. Lo que no está declarado es un documento, como hasta ahora. */
+const familiaDe = (f: unknown): 'image' | 'video' | 'audio' | '3d' | 'doc' =>
+  FAMILIA[String(f).toLowerCase()] ?? 'doc'
+
 // ── Pestañas ─────────────────────────────────────────────────────────────────
 // El juego es el de la referencia. Las que no tienen activos se muestran apagadas en vez de
 // esconderse: la barra no cambia de forma entre proyectos y se ve qué tipos faltan por producir.
@@ -58,7 +86,7 @@ const TABS: { key: string; label: string; formats: string[] }[] = [
 // `reference_images` van a Pre-Producción bajo la categoría Refs —no como documento— por ser
 // insumo directo del Art Style Guide. El arte propiamente dicho lo produce el 3.20.
 const ARTE = new Set(['3.20'])
-const ES_IMAGEN = ['image', 'png', 'jpg', 'jpeg']
+const esImagen = (f: unknown) => familiaDe(f) === 'image'
 
 // ── Qué se puede iterar hoy ──────────────────────────────────────────────────
 // MVP: solo las páginas del Art Style Guide. Son las únicas donde la iteración tiene un destino
@@ -68,7 +96,7 @@ const ES_IMAGEN = ['image', 'png', 'jpg', 'jpeg']
 const ITERABLE_NODO = '3.20'
 function paginaASG(a: UnifiedAsset): { n: number; nombre: string } | null {
   if (a.node_key !== ITERABLE_NODO) return null
-  if (!ES_IMAGEN.includes(String(a.format).toLowerCase())) return null
+  if (!esImagen(a.format)) return null
   const out = outputOf(a) ?? ''
   const m = /^(\d{1,3})[_\s.-]?(.*)$/.exec(out)
   return m ? { n: Number(m[1]), nombre: out } : null
@@ -110,7 +138,6 @@ const FASES: { key: string; label: string; phases: string[] }[] = [
 // en el título) y el «Art Bible Intake» del 3.9, que es el insumo del Art Bible y no el Art Bible.
 const NODO_DOCS_GRAFICOS = '3.20'
 
-const ES_GRAFICO = ['image', 'png', 'jpg', 'jpeg', 'model_3d', 'glb', 'video', 'mp4', 'audio']
 
 // null = el activo no pertenece a una fase. Lo que sube el usuario y lo legacy caen acá, y esa
 // es la regla: una referencia pertenece a su TIPO, no a un momento. Un PDF vive en Docs y se ve
@@ -124,7 +151,9 @@ const faseDe = (a: UnifiedAsset) => {
   const base = FASES.find(f => f.phases.includes(String((a as { phase?: string | null }).phase ?? '')))?.key ?? null
   if (base !== 'pre') return base
   if (a.node_key === NODO_DOCS_GRAFICOS) return 'pre'
-  return ES_GRAFICO.includes(String(a.format).toLowerCase()) ? 'pre' : 'doc'
+  // Gráfico = tiene familia. Antes era una lista propia que tampoco conocía `mp3`, así que un
+  // audio caía en la fase de documentación en vez de en la etapa donde se produjo.
+  return familiaDe(a.format) !== 'doc' ? 'pre' : 'doc'
 }
 
 // El asset se guarda como "<título del nodo> — <label del output>", así que el output es lo
@@ -150,20 +179,18 @@ const sangrarJson = (t: string) => {
 
 const tabOf = (a: UnifiedAsset) => {
   const f = String(a.format).toLowerCase()
-  if (ES_IMAGEN.includes(f)) return a.node_key && ARTE.has(a.node_key) ? 'concept' : 'refs'
+  // Por FAMILIA y no por la lista de la pestaña: así un `.mp3` va a Audio y un `.webm` a Video sin
+  // tener que declarar cada extensión en dos sitios. La búsqueda en `TABS` queda para lo que no
+  // tiene familia —los documentos, y el `.zip` del paquete de montaje, que es material 3D.
+  const fam = familiaDe(f)
+  if (fam === 'image') return a.node_key && ARTE.has(a.node_key) ? 'concept' : 'refs'
+  if (fam !== 'doc')   return fam === '3d' ? '3d' : fam
   return TABS.find(t => t.formats.includes(f))?.key ?? 'concept'
 }
 
 // Cómo se dibuja el activo. Siempre por formato real, nunca por pestaña: una imagen subida
 // vive en Refs pero se sigue viendo como imagen.
-const kindOf = (a: UnifiedAsset): 'image' | 'video' | 'audio' | '3d' | 'doc' => {
-  const f = String(a.format).toLowerCase()
-  if (['image', 'png', 'jpg', 'jpeg'].includes(f)) return 'image'
-  if (['video', 'mp4'].includes(f))                return 'video'
-  if (f === 'audio')                               return 'audio'
-  if (['model_3d', 'glb'].includes(f))             return '3d'
-  return 'doc'
-}
+const kindOf = (a: UnifiedAsset) => familiaDe(a.format)
 
 // Material de TRABAJO: se produce, se descarga y se lleva a otra herramienta, pero no se mira.
 // El grafo de un nivel, el perfil de un kit, los beats de un clip que se abren en Cascadeur.
@@ -830,7 +857,21 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
 
   const disposicion = useMemo(() => {
     const grupos = new Map<string, UnifiedAsset[]>()
-    for (const a of deLaFase) {
+    // ── El reparto de celdas va de la MÁS VIEJA a la más nueva ────────────────
+    //
+    // Es lo que hace que una hoja nueva no desordene las que ya estaban. La lista llega de la API
+    // ordenada del más nuevo al más viejo, y la cuadrícula repartía celdas en ese orden: un output
+    // nuevo tomaba la PRIMERA celda y corría una posición a todas las de atrás. Medido en el
+    // proyecto de Miguel: de 215 hojas hay 189 colocadas a mano —ésas conservan su sitio— y 26 que
+    // dependen de la cuadrícula, y eran esas 26 las que se movían en cada Run. Por eso se lee como
+    // desorden: unas se mueven y otras no.
+    //
+    // Repartiendo de la más vieja a la más nueva, cada hoja conserva la celda que ya tenía y la
+    // nueva se añade al final. Es el punto 1 del informe v12, y la mitad que le faltaba al punto 5
+    // del v11 — allí resolví DÓNDE nace la hoja nueva, no que dejara de empujar al resto.
+    const porAntiguedad = [...deLaFase].sort((a, b) =>
+      String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))
+    for (const a of porAntiguedad) {
       const z = zonaDe(a)
       if (!grupos.has(z)) grupos.set(z, [])
       grupos.get(z)!.push(a)
