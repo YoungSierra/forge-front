@@ -2433,6 +2433,43 @@ export async function getMontajeDeAsset(projectId: string, assetId: string, desd
   )
 }
 
+/** El pack de animación de un personaje: su `.glb`, un `.mp4` por movimiento nombrado con el
+ *  movimiento, la lámina y el listado de tiempos. Es la Fase 5 del proceso de JuanK y la carpeta
+ *  que espera su pipeline de Blender.
+ *
+ *  Se pregunta siempre y contesta el backend, igual que el paquete de nivel: qué lleva y qué
+ *  falta lo sabe él, y escribir la regla acá la dejaría desincronizada en cuanto cambie. */
+export interface EstadoDePack {
+  aplica: boolean
+  motivo?: string
+  personaje?: string
+  videos?: { archivo: string; clip: string | null; segundos: number | null }[]
+  modelo?: string | null
+  lamina?: boolean
+  clips?: number
+  faltantes?: { que: string; dice: string }[]
+  listo?: boolean
+}
+
+export async function getPackDeAnimacion(projectId: string, assetId: string) {
+  return request<{ success: boolean } & EstadoDePack>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/pack-de-animacion`,
+  )
+}
+
+/** Arma el zip. Devuelve su URL y lo deja además como pieza del proyecto, para poder volver a
+ *  bajarlo sin re-armarlo. */
+export async function armarPackDeAnimacion(projectId: string, assetId: string, memberId?: string | null) {
+  return request<{
+    success: boolean; url: string; pack_id: string; personaje: string; bytes: number
+    videos: string[]; modelo: string | null; lamina: string | null
+    ausencias: { archivo: string; motivo: string }[]
+  }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/pack-de-animacion`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ member_id: memberId ?? null }) },
+  )
+}
+
 /** Qué herramientas se pueden correr sobre ESTA pieza. Lo decide el backend: la habilitación es
  *  por procedencia —Nuevo Ángulo solo sobre lo que ya salió aislado sobre blanco— y si la regla
  *  viviera acá, bastaría abrir el menú desde otro visor para saltársela. */

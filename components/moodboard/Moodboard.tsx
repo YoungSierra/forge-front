@@ -19,7 +19,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import ContextoModal from './ContextoModal'
-import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
+import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import SubirEdicionModal from './SubirEdicionModal'
@@ -4530,6 +4530,21 @@ const RADIAL = [
 // nivel a partir de ella. Los seis sectores se reparten solos: la geometría siempre fue por N.
 const MONTAJE = { key: 'montaje', label: 'Level package', hint: '' } as const
 
+// El pack del PERSONAJE, hermano del anterior: el `.glb`, un `.mp4` por movimiento y el listado
+// de tiempos, en la carpeta que espera el pipeline de Blender. Mismo gesto —clic derecho sobre la
+// hoja— porque es la misma idea: Forge reúne lo aprobado y el trabajo sigue fuera.
+const PACK = { key: 'pack', label: 'Animation pack', hint: '' } as const
+
+// Lo que dice al pasar por encima: el personaje que leyó y, si falta algo, qué falta. Con el pack
+// listo dice cuántos vídeos lleva, que es lo que se va a bajar.
+function tituloPack(e: EstadoDePack | null): string {
+  if (!e) return 'Animation pack — checking…'
+  const t = e.personaje ? `Animation pack · ${e.personaje}` : 'Animation pack'
+  if (e.faltantes?.length) return `${t} — missing: ${e.faltantes.map(f => f.dice).join(' · ')}`
+  const n = e.videos?.length || 0
+  return `${t} — ${n} reference video${n === 1 ? '' : 's'} + model + timings`
+}
+
 // Lo que el sector dice al pasar por encima. Nombra el entorno que leyó y, o bien lo que falta,
 // o bien los niveles que lo usan — porque cuando son varios hay que elegir, y conviene verlo
 // antes de pulsar.
@@ -6535,9 +6550,22 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
     return () => { vivo = false }
   }, [projectId, asset.id])
 
+  // El pack de animación, por el mismo camino que el montaje: se pregunta siempre y decide el
+  // backend. Sobre cualquier pieza que no sea una hoja de animación contesta `aplica: false` y el
+  // sector no se dibuja.
+  const [pack, setPack] = useState<EstadoDePack | null>(null)
+  const [armando, setArmando] = useState(false)
+  useEffect(() => {
+    let vivo = true
+    getPackDeAnimacion(projectId, asset.id)
+      .then(r => { if (vivo) setPack(r) })
+      .catch(() => { if (vivo) setPack({ aplica: false }) })
+    return () => { vivo = false }
+  }, [projectId, asset.id])
+
   const sectores = useMemo(
-    () => (montaje?.aplica ? [...RADIAL, MONTAJE] : [...RADIAL]),
-    [montaje?.aplica],
+    () => [...RADIAL, ...(montaje?.aplica ? [MONTAJE] : []), ...(pack?.aplica ? [PACK] : [])],
+    [montaje?.aplica, pack?.aplica],
   )
 
   const R  = 152
@@ -6619,6 +6647,11 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
         const vivo = q.key === 'edit' || q.key === 'run' || q.key === 'library' || q.key === 'context'
                   || (q.key === 'style' && esPaginaDelASG(asset))
                   || (q.key === 'montaje' && Boolean(montaje?.aplica))
+                  // El pack solo se enciende cuando está COMPLETO: a diferencia del montaje, acá
+                  // no hay ventana donde resolver lo que falta —se baja o no se baja—, así que un
+                  // sector encendido que devuelve un error sería una promesa falsa. Lo que falta
+                  // lo dice la etiqueta al pasar por encima.
+                  || (q.key === 'pack' && Boolean(pack?.listo) && !armando)
         return (
         <div key={q.key}>
           <div
@@ -6631,12 +6664,23 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
               if (q.key === 'montaje' && montaje?.aplica) { e.stopPropagation(); onMontaje(asset, montaje) }
               if (q.key === 'context') { e.stopPropagation(); onContexto(asset) }
               if (q.key === 'style' && esPaginaDelASG(asset)) { e.stopPropagation(); onEstilo(asset) }
+              // El pack se arma y se baja en el sitio: no abre ventana porque no hay nada que
+              // elegir — el personaje lo fija la hoja y el contenido lo fija el contrato. El zip
+              // queda además como pieza del proyecto, así que volver a bajarlo no lo re-arma.
+              if (q.key === 'pack' && pack?.listo && !armando) {
+                e.stopPropagation()
+                setArmando(true)
+                armarPackDeAnimacion(projectId, asset.id)
+                  .then(r => { window.open(r.url, '_blank', 'noopener'); onDone() })
+                  .catch(() => setArmando(false))
+              }
             }}
             title={
               q.key === 'edit' ? `${q.label} — open the editing menu`
               : q.key === 'run' ? 'Run — execute this page’s workflow and publish the result to the right'
               : q.key === 'library' ? 'Asset Library — this page and everything produced from it, as a list'
               : q.key === 'montaje' ? tituloMontaje(montaje)
+              : q.key === 'pack' ? (armando ? 'Animation pack — packing…' : tituloPack(pack))
               : q.key === 'style' ? (esPaginaDelASG(asset)
                   ? 'New Art Style — re-render this ASG page in another art style, keeping the template'
                   : 'New Art Style — only on Art Style Guide pages')
