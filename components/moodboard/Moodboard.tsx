@@ -19,7 +19,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import ContextoModal from './ContextoModal'
-import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
+import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import SubirEdicionModal from './SubirEdicionModal'
@@ -5735,6 +5735,16 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
   // entero y cada lámina se paga.
   const [fuera,    setFuera]    = useState<Set<string>>(() => new Set())
   const [leyendo,  setLeyendo]  = useState(false)
+
+  // Los prompts de los clips, para mirarlos y corregirlos ANTES de pagar los vídeos (punto 5 del
+  // informe v4 de JuanK). `null` = no se han pedido todavía; pedirlos cuesta una llamada de texto
+  // por clip, así que lo decide quien mira el recuadro, no se hace al abrirlo.
+  //
+  // Su razón no es comodidad: a él dos clips le salieron iguales —«el pulse y el activation están
+  // iguales, debería haber cambios entre ellas»— porque el documento no los distingue. Si la
+  // fuente no lleva la diferencia, el prompt es el único sitio donde meterla.
+  const [prompts,  setPrompts]  = useState<Record<string, { prompt: string; segundos?: number }> | null>(null)
+  const [pidiendo, setPidiendo] = useState(false)
   const [ops,      setOps]      = useState<OpcionWorkflow[] | null>(null)
   const [tamano,   setTamano]   = useState<{ porDespacho: number; usd: number } | null>(null)
   const [elegidas, setElegidas] = useState<Record<string, unknown>>({})
@@ -5817,6 +5827,10 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
   // Un aviso que dice ocho cuando van tres es peor que no avisar.
   const despachosReales = paso?.clips?.length ? paso.clips.length - fuera.size : (paso?.despachos ?? 1)
 
+  // Las animaciones que SIGUEN elegidas. Es lo que se le pide al escritor de prompts y lo que se
+  // muestra para corregir: escribirle a una descartada cuesta una llamada que no va a correr.
+  const seleccionados = (paso?.clips || []).filter(c => !fuera.has(c.nombre))
+
   const correr = async (limitePorCada = 0) => {
     if (!paso || busy) return
     setBusy(true); setError(null)
@@ -5826,6 +5840,11 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
         // Qué animaciones correr. Null = todas, que es como venía funcionando; la selección solo
         // existe cuando el paso las enumera.
         clips: paso.clips?.length && fuera.size ? paso.clips.filter(c => !fuera.has(c.nombre)).map(c => c.nombre) : null,
+        // Solo los de los clips que SIGUEN elegidos: mandar el de uno descartado no rompe nada
+        // —el backend lo ignoraría— pero deja creer que se revisó algo que no va a correr.
+        promptsClips: prompts
+          ? Object.fromEntries(Object.entries(prompts).filter(([k]) => !fuera.has(k)))
+          : null,
         // Solo lo que el usuario CAMBIÓ. Mandar el catálogo entero reescribiría cada nodo con lo
         // que ya tenía y convertiría cualquier futuro cambio del workflow en letra muerta.
         opciones: Object.keys(cambiadas).length ? cambiadas : null,
@@ -6113,6 +6132,88 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
                         fontSize: 11.5, color: dentro ? 'var(--text-1)' : 'var(--text-4)',
                         textDecoration: dentro ? 'none' : 'line-through',
                       }}>{c.etiqueta}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Mirar y corregir los prompts ANTES de pagar los vídeos (punto 5 del informe v4 de
+                JuanK). Pedirlos no despacha vídeo: es una llamada de texto por animación, y por
+                eso lo decide quien mira el recuadro en vez de pasar al abrirlo.
+                Su razón es concreta: a él dos clips le salieron iguales —«el pulse y el
+                activation están iguales»— porque el documento no los distingue. Si la fuente no
+                lleva la diferencia, el prompt es el único sitio donde meterla.
+                Lo que no se pida sigue saliendo como hasta ahora: escrito en el despacho. */}
+            {!!paso.clips?.length && (
+              <div style={{ marginBottom: 14, border: '1px solid var(--line-2)', borderRadius: 9, padding: '8px 11px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>The prompts that will be used</div>
+                    <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 2, lineHeight: 1.45 }}>
+                      Writing them costs one text call per animation — no video is produced. Edit
+                      anything you want changed before running.
+                    </div>
+                  </div>
+                  <button
+                    disabled={pidiendo || busy}
+                    onClick={async () => {
+                      setPidiendo(true); setError(null)
+                      try {
+                        const r = await promptsDeClips(projectId, asset.id, seleccionados.map(c => c.nombre))
+                        const m: Record<string, { prompt: string; segundos?: number }> = {}
+                        for (const c of r.clips) if (c.prompt) m[c.nombre] = { prompt: c.prompt, segundos: c.segundos }
+                        setPrompts(m)
+                        // Una animación sin prompt no cancela las demás: se dice cuál, y esa se
+                        // escribirá en el despacho como venía haciéndose.
+                        const fallaron = r.clips.filter(c => !c.prompt)
+                        if (fallaron.length) {
+                          setError(`No prompt came back for ${fallaron.map(c => c.etiqueta).join(', ')} —`
+                            + ' those will be written at dispatch time.')
+                        }
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : 'The prompts could not be written')
+                      }
+                      setPidiendo(false)
+                    }}
+                    style={{
+                      padding: '5px 10px', borderRadius: 7, whiteSpace: 'nowrap',
+                      cursor: pidiendo || busy ? 'default' : 'pointer',
+                      background: 'transparent', border: '1px solid var(--line-2)',
+                      color: pidiendo || busy ? 'var(--text-4)' : 'var(--text-2)',
+                      fontSize: 11, fontFamily: 'var(--font-sans)',
+                    }}
+                  >{pidiendo ? 'Writing…' : prompts ? 'Write them again' : 'Review prompts'}</button>
+                </div>
+
+                {prompts && seleccionados.map(c => {
+                  const v = prompts[c.nombre]
+                  return (
+                    <div key={c.nombre} style={{ marginTop: 9 }}>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 3 }}>
+                        <span style={{ flex: 1, fontSize: 11, color: 'var(--text-2)' }}>{c.etiqueta}</span>
+                        {!!v?.segundos && (
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)' }}>
+                            {v.segundos}s
+                          </span>
+                        )}
+                      </div>
+                      {v ? (
+                        <textarea
+                          value={v.prompt}
+                          onChange={e => setPrompts(p => ({ ...(p || {}), [c.nombre]: { ...v, prompt: e.target.value } }))}
+                          disabled={busy}
+                          rows={4}
+                          style={{
+                            width: '100%', padding: '7px 9px', borderRadius: 7, resize: 'vertical',
+                            background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+                            color: 'var(--text-0)', fontSize: 11.5, lineHeight: 1.5,
+                            fontFamily: 'var(--font-sans)', outline: 'none',
+                          }}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 10.5, color: 'var(--text-4)' }}>written at dispatch time</div>
+                      )}
                     </div>
                   )
                 })}

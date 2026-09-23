@@ -2122,7 +2122,11 @@ export async function getCorridasEnMarcha(projectId: string) {
 export async function advanceAsset(
   projectId: string, assetId: string,
   opts: { pasos?: number; prompt?: string | null; memberId?: string | null; limitePorCada?: number
-          opciones?: Record<string, unknown> | null; clips?: string[] | null } = {},
+          opciones?: Record<string, unknown> | null; clips?: string[] | null
+          /** Los prompts que el usuario revisó y corrigió, por clip. Van con sus segundos —los
+           *  devolvió la propia revisión— para que el despacho no le vuelva a pedir el párrafo al
+           *  modelo: saldría otro texto distinto del que se aprobó. */
+          promptsClips?: Record<string, { prompt: string; segundos?: number }> | null } = {},
 ) {
   return request<{ success: boolean; cadena: string; creados: { id: string; name: string; storage_url: string; format: string }[] }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/advance`,
@@ -2133,7 +2137,30 @@ export async function advanceAsset(
         limite_por_cada: opts.limitePorCada ?? 0,
         opciones: opts.opciones ?? null,
         clips: opts.clips ?? null,
+        prompts_clips: opts.promptsClips ?? null,
       }),
+    },
+  )
+}
+
+/** Los prompts que se van a usar para los vídeos de referencia, ANTES de generarlos.
+ *
+ *  Punto 5 del informe v4 de JuanK. No despacha vídeo: escribe los párrafos —una llamada de texto
+ *  por clip— para poder mirarlos y corregirlos. Su razón es concreta: dos clips le salieron
+ *  iguales porque el documento no los distingue, y si la fuente no lleva la diferencia, el prompt
+ *  es el único sitio donde meterla. */
+export async function promptsDeClips(projectId: string, assetId: string, clips?: string[] | null) {
+  return request<{
+    success: boolean
+    personaje: string
+    fuente: string
+    clips: { nombre: string; etiqueta: string; prompt?: string; segundos?: number
+             estimado?: boolean; es_prop?: boolean; error?: string }[]
+  }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/prompts-de-clips`,
+    {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clips: clips ?? null }),
     },
   )
 }
