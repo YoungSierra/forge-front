@@ -392,6 +392,12 @@ export interface UnifiedAsset {
    *  reusa al rehacerla: el workflow ya cambió de valores para entonces, así que leerlo de ahí
    *  diría con qué se generaría hoy, no con qué se generó esto. */
   opciones?: Record<string, unknown> | null
+  /** De qué página del deck es esta hoja, cuando está instanciada («18_CharacterSheet»). El
+   *  nombre no sirve: termina con el personaje, no con la página. */
+  instancia_pagina?: string | null
+  /** Si la produjo una cadena de producción. Una parte de un entorno también cuelga del 3.20 y
+   *  también es imagen; esto es lo que la separa de una página del deck. */
+  de_cadena?: boolean
   /** Los renders del nivel montado, cuando esta pieza es uno. El visor los enseña como galería
    *  debajo del modelo: se subieron juntos y se miran juntos (informe v9, §5). */
   montaje_renders?: { nombre: string; url: string }[] | null

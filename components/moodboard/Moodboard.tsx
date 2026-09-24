@@ -22,6 +22,7 @@ import ContextoModal from './ContextoModal'
 import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
+import InstanciarModal from './InstanciarModal'
 import SubirEdicionModal from './SubirEdicionModal'
 import SubirMontajeModal from './SubirMontajeModal'
 import VerticalSliceScope from './VerticalSliceScope'
@@ -97,7 +98,14 @@ const ITERABLE_NODO = '3.20'
 function paginaASG(a: UnifiedAsset): { n: number; nombre: string } | null {
   if (a.node_key !== ITERABLE_NODO) return null
   if (!esImagen(a.format)) return null
-  const out = outputOf(a) ?? ''
+  // Una hoja INSTANCIADA lleva su página en la instancia, no al final del nombre: ese último
+  // tramo es el personaje —«Art Style Guide — 18_CharacterSheet — Luma (Axolotl)»— así que se
+  // buscaba «Luma (Axolotl)» y el botón salía en gris sobre una página que sí es del ASG. Es el
+  // punto 1 del informe v13 de Miguel. El backend hace la misma lectura.
+  // Y una parte de cadena NO es una página del deck aunque cuelgue del mismo nodo: eso es el
+  // punto 2 del v13, que sigue en decisión de dirección de arte.
+  if (a.de_cadena) return null
+  const out = a.instancia_pagina || outputOf(a) || ''
   const m = /^(\d{1,3})[_\s.-]?(.*)$/.exec(out)
   return m ? { n: Number(m[1]), nombre: out } : null
 }
@@ -386,6 +394,9 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // El panel de alcance del Vertical Slice. Se abre a pedido: es una vista de producción, no algo
   // que uno quiera encima mientras acomoda hojas.
   const [alcanceAbierto, setAlcanceAbierto] = useState(false)
+  // La ventana que crea las hojas que faltan. Se abre desde el panel de alcance, que es donde
+  // se ve qué declara el slice y qué todavía no está producido.
+  const [instanciando, setInstanciando] = useState(false)
   // Los estados de los 22 elementos. Hoy viven en el navegador y a propósito: la spec dice que los
   // alimentan eventos reales de Forge —aprobar una página, cerrar un Run, pasar el gate— y ese
   // cableado todavía no existe. Guardarlos en la BD como si fueran producción real haría que el
@@ -2022,6 +2033,17 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
               accent={theme.accent}
               sinMedida={sinMedida}
               instancias={instanciasAlcance}
+              onInstanciar={() => setInstanciando(true)}
+            />
+          )}
+          {/* Crear las hojas que el alcance declara y aún no existen. La ventana dice cuántas son
+              y cuánto cuestan ANTES de despachar; cada instancia se paga. */}
+          {instanciando && (
+            <InstanciarModal
+              projectId={projectId}
+              accent={theme.accent}
+              onCerrar={() => setInstanciando(false)}
+              onListo={() => { setInstanciando(false); reload() }}
             />
           )}
           {/* Las cuatro páginas viven abajo, fijas. Antes había marcas laterales de «atrás» y
@@ -2931,7 +2953,13 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             onIterar={a => {
                               setMenu(null)
                               const pg = paginaASG(a)
+                              // Una PARTE de cadena no es una página de deck, pero desde el v13 sí
+                              // se puede re-rollear: el backend la manda a su propio workflow, que
+                              // devuelve otra instancia del mismo asset en el mismo estilo, y la
+                              // guarda como versión. Va sin página, que es lo que le dice al
+                              // backend por dónde ir.
                               if (pg) setIterando({ asset: a, pagina: pg })
+                              else if (a.de_cadena && esImagen(a.format)) setIterando({ asset: a, pagina: null })
                               else setAviso({
                                 titulo: 'Not available yet',
                                 tono: 'bloqueo',

@@ -29,6 +29,14 @@ type Props = {
   instancias?: Record<string, { nombre: string; tier?: string }[]> | null
   onPagina?:  (pagina: string | null) => void
   onCerrar?:  () => void
+  /** Crear las hojas que el alcance declara y todavía no existen.
+   *
+   *  El ASG las instancia solo cuando se renderiza el deck entero, y ese botón desaparece en
+   *  cuanto el output tiene imágenes. Así que un proyecto cuyo alcance crece después —seis hojas
+   *  de animación donde antes había dos— se quedaba sin forma de producirlas: la ventana que lo
+   *  hace existía desde el informe v6 y no la abría nadie. Va acá y no en la barra porque este
+   *  panel es justo donde se ve qué declara el alcance y qué falta. */
+  onInstanciar?: () => void
   /** Color de identidad del proyecto; el moodboard ya lo resuelve desde el 3.9. */
   accent?:    string
   /** Elementos que Forge no puede medir, y por qué. Los demás vienen de lo publicado, así que
@@ -82,7 +90,7 @@ function Barra ({ valor, accent }: { valor: number; accent: string }) {
 
 export default function VerticalSliceScope ({
   estados, onEstados, paginaActiva, onPagina, onCerrar, accent = '#7d8493', sinMedida,
-  instancias,
+  instancias, onInstanciar,
 }: Props) {
   // Qué instancias tiene una página del ASG, por NOMBRE: el número cambia entre maestros.
   const soloNombre = (s: string) => s.replace(/^\d+[_\s-]*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '')
@@ -171,6 +179,13 @@ export default function VerticalSliceScope ({
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-0)' }}>Vertical Slice</div>
           <div style={{ fontSize: 10, color: 'var(--text-3)' }}>Production scope</div>
         </div>
+        {onInstanciar && !plegado && (
+          <button
+            onClick={e => { e.stopPropagation(); onInstanciar() }}
+            title="Create the sheets the scope declares and do not exist yet — says how many and what it costs before dispatching"
+            style={botonIcono}
+          >＋</button>
+        )}
         <button
           onClick={() => setPlegado(p => !p)}
           title={plegado ? 'Expand' : 'Collapse'}
