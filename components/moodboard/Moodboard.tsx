@@ -5636,6 +5636,21 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
             <ul style={{ margin: '0 0 16px', paddingLeft: 16, fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.7 }}>
               {bloqueantes.map(f => <li key={f.que}>{f.dice}</li>)}
             </ul>
+
+            {/* Lo que falta bloquea EXPORTAR, no RECIBIR. Quien ya tiene el `.glb` del nivel armado
+                lo armó con todo lo necesario, y que Forge no haya producido el level map no dice
+                nada sobre ese archivo. JuanK lo reportó el 30-09: vio el botón una vez y después
+                esta ventana solo le ofrecía «Got it», así que preguntó si la función existía.
+                Existía, y era inalcanzable. */}
+            {onRecibir && (
+              <button onClick={onRecibir} style={{
+                width: '100%', padding: '8px 0', borderRadius: 8, marginBottom: 8,
+                cursor: 'pointer', background: 'transparent',
+                border: '1px dashed var(--line-2)', color: 'var(--text-2)',
+                fontSize: 11.5, fontFamily: 'var(--font-sans)',
+              }}>Already assembled it? Upload the level and its renders ↑</button>
+            )}
+
             <button onClick={onCancel} style={{
               width: '100%', padding: '9px 0', borderRadius: 8, cursor: 'pointer',
               background: 'transparent', border: `1px solid ${accent}66`, color: accent,
