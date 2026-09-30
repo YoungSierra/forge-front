@@ -2419,6 +2419,36 @@ export async function marcarPapelDeMontaje(projectId: string, assetId: string, p
   )
 }
 
+/** Un elemento que puede entrar al montaje: su imagen 2D, su modelo si ya existe, y su decisión. */
+export interface ElementoDeMontaje {
+  id: string
+  nombre: string
+  imagen_url: string | null
+  imagen_nombre: string | null
+  modelo_id: string | null
+  modelo_url: string | null
+  papel: string | null
+  /** `null` = nadie lo decidió todavía. Distinto de `true`, que es una decisión tomada. */
+  incluir: boolean | null
+  tiene_3d: boolean
+}
+
+/** Lo que puede entrar al pack del nivel. Solo lee: no genera ni cobra nada. */
+export async function getElementosDeMontaje(projectId: string) {
+  return request<{
+    success: boolean; elementos: ElementoDeMontaje[]
+    total: number; excluidos: number; sin_decidir: number; entra_por_omision: boolean
+  }>(`/api/projects/${projectId}/canvas/montaje/elementos`)
+}
+
+/** Marca si un elemento entra al pack. `null` borra la decisión y lo devuelve a lo de por omisión. */
+export async function marcarInclusionDeMontaje(projectId: string, assetId: string, incluir: boolean | null) {
+  return request<{ success: boolean; id: string; nombre: string; incluir: boolean | null }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/montaje/incluir`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ incluir }) },
+  )
+}
+
 /** Monta el nivel y devuelve el paquete que abre Blender. */
 export async function montarNivel(projectId: string, assetId: string, nivel?: string | null, desdeCadena = false) {
   return request<{ success: boolean } & ResultadoDeMontaje>(

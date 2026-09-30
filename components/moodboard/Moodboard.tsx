@@ -19,7 +19,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import ContextoModal from './ContextoModal'
-import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
+import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import InstanciarModal from './InstanciarModal'
@@ -5515,6 +5515,38 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
   const exterior  = modelos.find(m => m.papel === 'muro_exterior')
   const marcados  = modelos.filter(m => m.papel).length
 
+  // ── Qué entra al paquete ───────────────────────────────────────────────────
+  //
+  // Puntos 1 y 2 del informe v2 de Level Design de JuanK. Al montar sobran piezas —las simétricas,
+  // las bases que se arman con piezas menores, los props que el flujo trató como personajes— y no
+  // había forma de excluirlas. Cada elemento se enseña con su imagen 2D, que es como se reconoce:
+  // la cola del nombre distingue «parte_07» de «parte_08», pero no dice qué es ninguna de las dos.
+  //
+  // Desmarcar hace dos cosas: lo saca del paquete, y si su 3D todavía no existe, evita pagarlo.
+  // Por eso la lista incluye piezas que aún son solo 2D — son las únicas que se pueden ahorrar.
+  const [elementos, setElementos] = useState<ElementoDeMontaje[]>([])
+  const [verTodos, setVerTodos] = useState(false)
+  useEffect(() => {
+    let vivo = true
+    getElementosDeMontaje(projectId)
+      .then(r => { if (vivo) setElementos(r.elementos) })
+      .catch(() => { /* la selección es opcional: sin ella el paquete lleva todo, como antes */ })
+    return () => { vivo = false }
+  }, [projectId])
+
+  const entra = (e: ElementoDeMontaje) => e.incluir !== false
+  const fuera = elementos.filter(e => !entra(e)).length
+  const ahorrables = elementos.filter(e => !e.tiene_3d && entra(e)).length
+
+  // Igual que los papeles: se pinta antes de que conteste el servidor. Con cincuenta filas, una
+  // espera por clic convierte la pantalla en algo que nadie usa.
+  async function incluir(id: string, valor: boolean) {
+    const antes = elementos
+    setElementos(es => es.map(e => (e.id === id ? { ...e, incluir: valor } : e)))
+    try { await marcarInclusionDeMontaje(projectId, id, valor) }
+    catch (e) { setElementos(antes); setError(e instanceof Error ? e.message : 'could not save that choice') }
+  }
+
   // Se pinta el papel nuevo antes de que conteste el servidor: marcar veinte piezas con una espera
   // por cada una convierte cinco minutos de trabajo en veinte. Si falla, se revierte y se dice.
   async function marcar(id: string, papel: string | null) {
@@ -5632,6 +5664,64 @@ function AvisoMontaje({ asset, projectId, estado: dado, accent, onCancel, onList
                   ))}
                 </div>
               </div>
+            )}
+
+            {elementos.length > 0 && (
+              <>
+                <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 10 }}>
+                  <strong style={{ color: 'var(--text-1)' }}>What goes into the package.</strong> Everything
+                  is in by default. Uncheck what the assembly does not need — a mirrored half, a base built
+                  from smaller pieces, a prop already handled elsewhere. A piece with no 3D yet also skips
+                  its 3D generation while it stays unchecked, and you can check it back at any time.
+                </div>
+
+                <div style={{ maxHeight: 220, overflowY: 'auto', marginBottom: 8, border: '1px solid var(--line-2)', borderRadius: 9 }}>
+                  {(verTodos ? elementos : elementos.slice(0, 12)).map((e, i) => (
+                    <label key={e.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 9, padding: '5px 10px', cursor: 'pointer',
+                      borderTop: i ? '1px solid var(--line-1)' : 'none',
+                      opacity: entra(e) ? 1 : 0.45,
+                    }}>
+                      <input type="checkbox" checked={entra(e)} onChange={ev => incluir(e.id, ev.target.checked)}
+                        style={{ accentColor: accent, cursor: 'pointer', flexShrink: 0 }} />
+                      {/* La imagen es lo que lo identifica. Sin ella, cincuenta filas que empiezan
+                          igual obligan a adivinar cuál es la pieza simétrica que sobra. */}
+                      {e.imagen_url
+                        ? <img src={miniaturaUrl(e.imagen_url)} alt="" style={{
+                            width: 30, height: 30, objectFit: 'cover', borderRadius: 5,
+                            border: '1px solid var(--line-2)', flexShrink: 0, background: 'var(--bg-2)',
+                          }} />
+                        : <div style={{ width: 30, height: 30, borderRadius: 5, background: 'var(--bg-2)', flexShrink: 0 }} />}
+                      <span title={e.nombre} style={{
+                        flex: 1, minWidth: 0, fontSize: 11.5, color: 'var(--text-2)',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>{colaDeNombre(e.nombre)}</span>
+                      {/* Lo que todavía no tiene 3D es lo único que se puede ahorrar: se dice. */}
+                      <span style={{
+                        flexShrink: 0, fontSize: 8.5, fontFamily: 'var(--font-mono)',
+                        padding: '2px 5px', borderRadius: 4,
+                        background: e.tiene_3d ? 'var(--bg-2)' : `${accent}22`,
+                        color: e.tiene_3d ? 'var(--text-4)' : 'var(--text-1)',
+                      }}>{e.tiene_3d ? '3D' : 'NO 3D YET'}</span>
+                    </label>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                    {fuera > 0
+                      ? `${fuera} of ${elementos.length} left out of the package.`
+                      : `All ${elementos.length} pieces go in.`}
+                    {ahorrables > 0 && ` ${ahorrables} still have no 3D — unchecking those saves their generation.`}
+                  </span>
+                  {elementos.length > 12 && (
+                    <button onClick={() => setVerTodos(v => !v)} style={{
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      fontSize: 11, color: accent, fontFamily: 'var(--font-sans)', padding: 0,
+                    }}>{verTodos ? 'Show fewer' : `Show all ${elementos.length}`}</button>
+                  )}
+                </div>
+              </>
             )}
 
             <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 10 }}>
