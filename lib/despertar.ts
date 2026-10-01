@@ -51,6 +51,15 @@ const hayQueDespertar = () =>
   !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(BACKEND_URL)
 
 export function despertarBackend(): Promise<EstadoDelBackend> {
+  // El Laboratory se despierta IGUAL aunque el backend ya esté en pie.
+  //
+  // Vivía dentro del camino de abajo, que sale antes si el backend ya contestó una vez. Resultado:
+  // solo se le avisaba en la primerísima carga, con Render frío. Quien entraba con el backend ya
+  // caliente —o volvía a la pestaña— dejaba al Laboratory dormido, y el primero en tocarlo era
+  // quien pulsaba el botón: se comía sus ~22 s de arranque. Son los tres servicios que duermen, y
+  // este es el único aviso que recibe el tercero.
+  if (hayQueDespertar()) despertarLaboratorio()
+
   if (estado === 'despierto') return Promise.resolve(estado)
   if (!hayQueDespertar()) return Promise.resolve(estado)   // en local no se toca nada
   if (enCurso) return enCurso
@@ -72,7 +81,8 @@ export function despertarBackend(): Promise<EstadoDelBackend> {
         if (r.ok) {
           console.log(`[despertar] backend listo en ${((Date.now() - t0) / 1000).toFixed(1)} s`)
           anunciar('despierto')
-          despertarLaboratorio()
+          // El Laboratory ya se avisó arriba, antes de este camino: avisarlo otra vez solo mete
+          // ruido en los logs de Render y no acelera nada.
           return estado
         }
       } catch {
@@ -96,9 +106,12 @@ export function despertarBackend(): Promise<EstadoDelBackend> {
  * despertaba cuando alguien abría un proyecto, que es justo cuando ya está esperando. Se despierta
  * desde el login por la misma razón que Render.
  *
- * Va DESPUÉS y no en paralelo: quien despierta al Laboratory es el backend, así que pedirlo antes
- * de que el backend esté en pie sería una petición que nadie atiende. Y no se espera su respuesta:
- * el endpoint contesta al instante y el arranque corre del otro lado.
+ * Se pide SIN esperar a que el backend conteste, y a propósito. Antes iba después, razonando que
+ * una petición a un backend dormido no la atiende nadie; pero sí la atiende — la encola mientras
+ * Render arranca y se ejecuta en cuanto el proceso está en pie, que es antes de que nuestro propio
+ * `/api/health` haya vuelto y hubiéramos podido lanzarla. Esperar solo retrasaba el aviso.
+ *
+ * Y no se espera su respuesta: el endpoint contesta al instante y el arranque corre del otro lado.
  */
 function despertarLaboratorio() {
   fetch(`${BACKEND_URL}/api/health/lab`, { cache: 'no-store' })
