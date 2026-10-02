@@ -269,9 +269,22 @@ export function parseOutputItems(content: string, format: string, outputKey?: st
                       const x = r?.[campo]
                       if (typeof x === 'string' && x.trim()) return x.trim()
                     }
+                    // Espejo de `promptDeItem` en el backend: los campos con los que el modelo
+                    // justifica su decisión —el porqué, la sección de destino, las notas—
+                    // describen el encargo a una persona, no la imagen, y al generador le
+                    // llegaban como instrucción. El hueco que se dibuja tiene que ser el prompt
+                    // que se despacha, así que las dos listas se filtran igual.
                     const OCULTO = ['id', 'key', 'index']
-                    return Object.entries(r || {})
-                      .filter(([k, x]) => !OCULTO.includes(k) && typeof x === 'string' && x.trim())
+                    const RAZONAMIENTO = ['why', 'rationale', 'reason', 'justification', 'notes',
+                      'note', 'target_section', 'section', 'placement_in_concept_document',
+                      'placement', 'anchor', 'source']
+                    const visible = ([k, x]: [string, unknown]) =>
+                      !OCULTO.includes(k) && typeof x === 'string' && !!x.trim()
+                    const campos = Object.entries(r || {}).filter(visible)
+                    // Si al quitar el razonamiento no queda nada, vale más la descripción entera
+                    // que un hueco vacío: el filtro es para limpiar, no para dejar en cero.
+                    const utiles = campos.filter(([k]) => !RAZONAMIENTO.includes(k))
+                    return (utiles.length ? utiles : campos)
                       .map(([k, x]) => `${k.replace(/_/g, ' ')}: ${x}`)
                       .join('\n')
                   }).filter(x => x)
