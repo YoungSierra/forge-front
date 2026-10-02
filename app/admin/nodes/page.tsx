@@ -138,7 +138,10 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   together:   ['meta-llama/Llama-3-70b-chat-hf', 'mistralai/Mixtral-8x7B-Instruct-v0.1'],
   openrouter: ['meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-r1', 'anthropic/claude-3.5-sonnet'],
   minimax:    ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-Text-01', 'abab6.5s-chat'],
-  mimo:       ['xiaomi/mimo-v2.5-pro', 'xiaomi/mimo-v2.5'],
+  // El prefijo `xiaomi/` es nuestro, no suyo: su `/v1/models` los lista como `mimo-v2.6-pro`.
+  // Comprobado el 02-10 contra la API — acepta las dos formas, así que se conserva la grafía que
+  // ya estaba para no tener dos convenciones conviviendo.
+  mimo:       ['xiaomi/mimo-v2.6-pro', 'xiaomi/mimo-v2.5-pro', 'xiaomi/mimo-v2.5'],
   // Los diez que devuelve el catálogo de la cuenta (client.models.list), del más nuevo al más
   // viejo. Escribirlos a ojo no falla al guardar: falla el día que alguien corre ese nodo, con un
   // 404 después de haber armado todo el contexto. Verificar con scripts/probar-modelos-anthropic.js.
