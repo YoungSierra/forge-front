@@ -1607,10 +1607,21 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   }, [zoomUrl, zoomGallery])
   // outSession: sesión del tab activo en el modal de output
   const outSession         = outputSessions[outTab] ?? session ?? null
-  // Resolución del PDF URL: del asset (ya guardado) o generado on-demand en esta sesión
-  const effectivePdfUrl    = session?.output_asset?.storage_url || generatedPdfUrls['']
+  // Resolución del PDF URL: del asset (ya guardado) o generado on-demand en esta sesión.
+  //
+  // El `storage_url` de la pieza solo vale como PDF si la pieza es un DOCUMENTO. Hay outputs que
+  // son documento Y generan imágenes —`pitch_document` del 2.1 se declara `format: docx` con
+  // `image_gen: true`— y entonces la sesión de ese output guarda una png. Sin esta comprobación el
+  // botón PDF enseñaba la imagen directamente, sin llegar a pedirle nada al backend: Migue lo
+  // reportó el 02-10 en test_pinball_migue_v.10. Mismo criterio que `esDocumento` en la ruta.
+  const urlDeDocumento = (a: ForgeSession['output_asset']) =>
+    a?.storage_url && a.content?.trim()
+      && !/^(png|jpe?g|gif|webp|image|glb|gltf|mp4|mov|webm|mp3|wav)$/i.test(a.format || '')
+      ? a.storage_url : null
+
+  const effectivePdfUrl    = urlDeDocumento(session?.output_asset ?? null) || generatedPdfUrls['']
   // Solo el PDF de ESTA pestaña: sin la llave, un output sin documento heredaba el del vecino.
-  const effectiveOutPdfUrl = outSession?.output_asset?.storage_url || generatedPdfUrls[outTab]
+  const effectiveOutPdfUrl = urlDeDocumento(outSession?.output_asset ?? null) || generatedPdfUrls[outTab]
 
   // ── Drag / Resize / Maximize del modal de output ─────────────────────────
   const OUT_W = 720, OUT_H = 640, OUT_MARGIN = 12
@@ -2239,7 +2250,15 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       rel="noreferrer"
                       style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', textDecoration: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0 }}
                     >↓ {outSession.output_asset.format === 'pptx' ? 'PPTX' : 'PDF'}</a>
-                  ) : outSession.output_asset.content ? (
+                  ) : (
+                    // Sin exigir que la pieza DE ESTA SESIÓN tenga texto.
+                    //
+                    // El documento puede vivir en OTRA sesión del mismo nodo: un output que es
+                    // documento y además genera imágenes —`pitch_document` del 2.1— deja la sesión
+                    // del output con una png, y el docx en la del nodo entero. Exigiendo texto aquí
+                    // el botón desaparecía justo en ese caso, que es el que hay que resolver.
+                    // Quién tiene el documento lo decide el backend, que ya sabe buscarlo; si no
+                    // hay ninguno, lo dice y sale en `pdfError`.
                     <button
                       onMouseDown={e => e.stopPropagation()}
                       onClick={e => handleGeneratePdf(e, outTab)}
@@ -2247,7 +2266,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       title={`Generate & download the PDF of: ${outTab.replace(/_/g, ' ')}`}
                       style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#F59E0B', background: 'none', padding: '2px 8px', border: '1px solid color-mix(in srgb, #F59E0B 50%, transparent)', borderRadius: 3, flexShrink: 0, cursor: pdfLoading ? 'default' : 'pointer', opacity: pdfLoading ? 0.6 : 1 }}
                     >{pdfLoading ? '…' : '↓ PDF'}</button>
-                  ) : null}
+                  )}
                   {pdfError && (
                     <span
                       onMouseDown={e => e.stopPropagation()}
