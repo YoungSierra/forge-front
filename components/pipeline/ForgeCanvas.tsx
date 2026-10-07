@@ -18,7 +18,7 @@ import LaboratoryButton from './LaboratoryButton'
 import ModelViewer from '@/components/shared/ModelViewer'
 import { Media } from '@/components/shared/Media'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
-import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName, stopNodeRun } from '@/lib/api'
+import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, reopenNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName, stopNodeRun } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap, RunPlan, GateAuthMode } from '@/lib/api'
 import { unirOutputImages } from '@/lib/output-images'
@@ -5878,6 +5878,40 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             }
             return m
           })()}
+          // Deshacer la aprobación que tiene este chat en solo lectura.
+          //
+          // Qué reabrir no es obvio, porque el candado tiene dos orígenes: con el chat enfocado en
+          // una salida manda ESA sesión; sin foco manda la general, y si la general no está
+          // aprobada el candado viene de que TODAS las salidas lo están —que es justo el caso que
+          // reportó Migue: la conversación sigue abierta con su respuesta sin aceptar y las
+          // corridas por output la fueron aprobando por detrás—. Se reabre exactamente lo que
+          // cierra la puerta, ni más.
+          onReopen={async () => {
+            const claves: (string | null)[] = []
+            if (chatTargetOutputKey) claves.push(chatTargetOutputKey)
+            else {
+              const gs = chatNode.session?.status
+              if (gs === 'approved' || gs === 'auto_approved') claves.push(null)
+              else {
+                for (const o of (chatForgeNode.outputs ?? [])) {
+                  const k = (o as { key?: string; name?: string }).key || o.name || ''
+                  if (!k) continue
+                  const st = (chatNode.output_sessions ?? {})[k]?.status
+                  if (st === 'approved' || st === 'auto_approved') claves.push(k)
+                }
+              }
+            }
+            if (!claves.length) return null
+            for (const k of claves) {
+              await reopenNodeOutput(project.id, chatForgeNode.id, k, chatNode.project_node_id ?? null)
+            }
+            // `chatNode` es una foto en estado, no una vista del lienzo: sin volver a sentarla aquí
+            // el candado se queda puesto aunque la base ya diga otra cosa.
+            const data = await loadCanvas(true)
+            const fresco = data?.nodes?.find(n => n.project_node_id === chatNode.project_node_id)
+            if (fresco) setChatNode(fresco)
+            return claves.map(k => k ?? 'whole node').join(', ')
+          }}
           // Un output que declara `uses.inputs: []` NO consume nada de aguas arriba por contrato:
           // su única fuente es el hermano que nombra en `siblings_if_present`. Si ese hermano
           // todavía no existe —el nodo se limpió, o se corrió esta salida de primera— el modelo

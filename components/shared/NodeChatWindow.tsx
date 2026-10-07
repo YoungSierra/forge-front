@@ -1143,6 +1143,9 @@ export interface NodeChatWindowProps {
    *  arranca con las manos vacías y le pide al usuario que le pegue los documentos a mano, que es
    *  justo lo que pasó con `gdd_ref` del 3.8 el 07-oct. */
   missingSourceNote?:   string | null
+  /** Deshace la aprobación que tiene este chat en solo lectura. Devuelve el texto de lo que se
+   *  reabrió, o null si no había nada. Sin esta propiedad el botón no se dibuja. */
+  onReopen?:            () => Promise<string | null>
   // Prompt de sistema que se usará (solo lectura, para referencia del usuario)
   systemPrompt?:        string
   // Panel de contexto — solo para nodos gate
@@ -1163,9 +1166,10 @@ export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
   initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, onStop, docUrl, docFormat, imagesPending,
   approvedAsset, imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
-  targetOutputKey, targetOutputLabel, systemPrompt, siblingContent, missingSourceNote,
+  targetOutputKey, targetOutputLabel, systemPrompt, siblingContent, missingSourceNote, onReopen,
   isGate, projectNodeId, onOpenOutput,
 }: NodeChatWindowProps) {
+  const [reabriendo,      setReabriendo]      = useState(false)
   const [messages,        setMessages]        = useState<ChatMessage[]>(initialMessages ?? [])
   const [moodOpen,        setMoodOpen]        = useState(false)   // moodboard filtrado a este nodo
   const [input,           setInput]           = useState('')
@@ -1718,6 +1722,38 @@ export default function NodeChatWindow({
             }}>
               ✓ Read only
             </span>
+          )}
+          {/* Deshacer la aprobación. Va pegado al sello de solo lectura porque es su respuesta: el
+              sello dice por qué no puede escribir y el botón es cómo lo arregla. Hasta hoy el
+              producto pedía «Reopen it and undo the approval first» y no había dónde. */}
+          {locked && onReopen && (
+            <button
+              onMouseDown={e => e.stopPropagation()}
+              disabled={reabriendo}
+              onClick={async () => {
+                setReabriendo(true)
+                try {
+                  const que = await onReopen()
+                  if (!que) {
+                    setMessages(prev => [...prev, { role: 'assistant', aviso: true,
+                      content: '_Nothing to reopen: no approved session was found for this output._' }])
+                  }
+                } catch (e) {
+                  setMessages(prev => [...prev, { role: 'assistant', aviso: true,
+                    content: `_Could not reopen: ${e instanceof Error ? e.message : String(e)}_` }])
+                } finally { setReabriendo(false) }
+              }}
+              title="Undo the approval so you can keep working on this output"
+              style={{
+                fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                padding: '2px 7px', borderRadius: 4, flexShrink: 0,
+                cursor: reabriendo ? 'wait' : 'pointer',
+                background: 'color-mix(in srgb, #F59E0B 12%, var(--bg-3))',
+                color: '#F59E0B', border: '1px solid color-mix(in srgb, #F59E0B 30%, var(--line-2))',
+              }}
+            >
+              {reabriendo ? '⟳' : '↩ Reopen'}
+            </button>
           )}
           {/* Grip — mano blanca, igual al cursor grab del modal */}
           <span style={{ fontSize: 15, flexShrink: 0, lineHeight: 1, opacity: 0.55, userSelect: 'none', filter: 'brightness(0) invert(1)' }}>🖐️</span>

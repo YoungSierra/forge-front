@@ -1679,6 +1679,25 @@ export async function acceptNodeOutput(
   )
 }
 
+// Deshace una aprobación: devuelve esa sesión a `active` para poder seguir escribiendo en ella.
+// `outputKey` null reabre la sesión general del nodo (la del run entero). La PIEZA no se toca:
+// sigue aprobada, así que los nodos de abajo conservan su insumo.
+export async function reopenNodeOutput(
+  projectId:      string,
+  nodeId:         string,
+  outputKey?:     string | null,
+  projectNodeId?: string | null,
+): Promise<{ session_id: string; output_key: string | null; previous_status: string }> {
+  return request<{ success: boolean; session_id: string; output_key: string | null; previous_status: string }>(
+    `/api/projects/${projectId}/canvas/nodes/${nodeId}/reopen`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ output_key: outputKey ?? null, project_node_id: projectNodeId ?? null }),
+    },
+  )
+}
+
 // El PDF es de UN output: sin `outputKey` el backend devuelve el documento aprobado más
 // reciente del nodo, que en un nodo de varios outputs es casi siempre el equivocado.
 export async function generateNodePdf(
