@@ -18,7 +18,7 @@ import LaboratoryButton from './LaboratoryButton'
 import ModelViewer from '@/components/shared/ModelViewer'
 import { Media } from '@/components/shared/Media'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
-import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, reopenNodeOutput, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName, stopNodeRun } from '@/lib/api'
+import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, reopenNodeOutput, cleanNode, type CleanResult, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName, stopNodeRun } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap, RunPlan, GateAuthMode } from '@/lib/api'
 import { unirOutputImages } from '@/lib/output-images'
@@ -89,6 +89,9 @@ interface CanvasNode {
   session: ForgeSession | null
   output_sessions: Record<string, ForgeSession>
 }
+
+// «1 assets» se lee mal y este cartel es lo último que alguien mira antes de borrar.
+const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? '' : 's'}`
 
 // ¿El nodo está pendiente de correr? No aprobado, o auto_approved pero stale.
 // Fuente única de verdad — usada por runnableCount, runScope y el menú de run.
@@ -3432,12 +3435,13 @@ function MonoPair({ k, v, color }: { k: string; v: string; color?: string }) {
 
 const PANEL_POS_KEY = 'forge_node_panel_pos'
 
-function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutput, removing, locked, projectId, canvasNodes, edges }: {
+function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutput, onCleaned, removing, locked, projectId, canvasNodes, edges }: {
   canvasNode:          CanvasNode
   onClose:             () => void
   onRemove:            () => void
   onRun:               () => void
   onImportedAsOutput:  () => void
+  onCleaned:           () => void
   removing:            boolean
   locked:              boolean
   projectId:           string
@@ -3445,6 +3449,20 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
   edges:               Edge[]
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false)
+
+  // Limpiar el nodo. `cleanPreview` guarda lo que la RUTA contó en seco: la confirmación enseña
+  // esos números y no una cuenta hecha aparte, así que lo que el usuario lee es lo que se borra.
+  const [cleanOpen,    setCleanOpen]    = useState(false)
+  const [cleanWhole,   setCleanWhole]   = useState(false)
+  const [cleanKeys,    setCleanKeys]    = useState<Set<string>>(new Set())
+  const [cleanPreview, setCleanPreview] = useState<CleanResult | null>(null)
+  const [cleanDone,    setCleanDone]    = useState<CleanResult | null>(null)
+  const [cleanTyped,   setCleanTyped]   = useState('')
+  const [cleaning,     setCleaning]     = useState(false)
+  const [cleanError,   setCleanError]   = useState<string | null>(null)
+  const nodeOutputs = (canvasNode.node?.outputs ?? [])
+    .map(o => (o as { key?: string; name?: string }).key || o.name || '')
+    .filter(Boolean)
   const [pos, setPos] = useState<{ x: number; y: number }>(() => {
     if (typeof window === 'undefined') return { x: 0, y: 80 }
     try {
@@ -3706,6 +3724,175 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
               </button>
             )
           })()}
+          {/* ── Limpiar: dejar el nodo, o algunas de sus salidas, en cero ──
+              Va debajo del Run porque es su reverso, y plegado porque borra. Lo pidió el equipo:
+              hasta hoy limpiar un nodo para volver a correrlo era pedirlo y que alguien lo hiciera
+              a mano con un script contra producción.
+
+              OJO, esto NO es el Reopen. Reopen devuelve la escritura sobre lo que ya existe y no
+              cuesta nada; limpiar borra y la próxima corrida es una llamada nueva, que se paga. Se
+              dice en la ventana porque si no, van a limpiar cuando solo querían iterar. */}
+          {!locked && (nodeOutputs.length > 0 || canvasNode.session) && (
+            <div style={{ borderTop: '1px solid var(--line-2)', paddingTop: 8 }}>
+              <button
+                onClick={() => { setCleanOpen(o => !o); setCleanPreview(null); setCleanTyped('') }}
+                style={{
+                  width: '100%', height: 32, borderRadius: 5, cursor: 'pointer',
+                  fontSize: 12, fontWeight: 600, letterSpacing: '.01em',
+                  background: 'color-mix(in srgb, #EF4444 10%, var(--bg-2))',
+                  color: '#EF4444',
+                  border: '1px solid color-mix(in srgb, #EF4444 32%, var(--line-2))',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 11px',
+                  transition: 'all 120ms',
+                }}
+              >
+                <span>🗑 Clean node or outputs</span><span style={{ fontSize: 10, opacity: 0.8 }}>{cleanOpen ? '▴' : '▾'}</span>
+              </button>
+
+              {cleanOpen && (
+                <div style={{ marginTop: 7, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-1)', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={cleanWhole}
+                      onChange={e => { setCleanWhole(e.target.checked); setCleanKeys(new Set()); setCleanPreview(null); setCleanTyped('') }}
+                    />
+                    <strong>Whole node</strong>
+                  </label>
+                  {nodeOutputs.map(k => (
+                    <label key={k} style={{
+                      display: 'flex', alignItems: 'center', gap: 6, fontSize: 11,
+                      color: cleanWhole ? 'var(--text-4)' : 'var(--text-2)',
+                      cursor: cleanWhole ? 'not-allowed' : 'pointer', paddingLeft: 10,
+                    }}>
+                      <input
+                        type="checkbox"
+                        disabled={cleanWhole}
+                        checked={cleanKeys.has(k)}
+                        onChange={e => {
+                          setCleanKeys(prev => {
+                            const n = new Set(prev)
+                            if (e.target.checked) n.add(k); else n.delete(k)
+                            return n
+                          })
+                          setCleanPreview(null); setCleanTyped('')
+                        }}
+                      />
+                      {k}
+                    </label>
+                  ))}
+
+                  {/* Paso 1: contar. Nunca se ofrece borrar sin haber dicho antes qué se borra. */}
+                  {!cleanPreview && (
+                    <button
+                      disabled={cleaning || (!cleanWhole && cleanKeys.size === 0)}
+                      onClick={async () => {
+                        setCleaning(true); setCleanError(null)
+                        try {
+                          const r = await cleanNode(projectId, canvasNode.node!.id, {
+                            outputKeys:    cleanWhole ? null : [...cleanKeys],
+                            projectNodeId: canvasNode.project_node_id,
+                            dryRun:        true,
+                          })
+                          setCleanPreview(r)
+                        } catch (e) {
+                          setCleanError(e instanceof Error ? e.message : String(e))
+                        } finally { setCleaning(false) }
+                      }}
+                      style={{
+                        marginTop: 3, height: 28, borderRadius: 5, fontSize: 11, fontWeight: 600,
+                        cursor: cleaning || (!cleanWhole && cleanKeys.size === 0) ? 'not-allowed' : 'pointer',
+                        background: 'var(--bg-2)', color: 'var(--text-2)', border: '1px solid var(--line-2)',
+                        opacity: cleaning || (!cleanWhole && cleanKeys.size === 0) ? 0.5 : 1,
+                      }}
+                    >
+                      {cleaning ? '⟳' : 'Clean selected'}
+                    </button>
+                  )}
+
+                  {/* Paso 2: la confirmación, con los números de la propia ruta y la clave escrita. */}
+                  {cleanPreview && (
+                    <div style={{
+                      marginTop: 4, padding: '9px 10px', borderRadius: 6,
+                      background: 'color-mix(in srgb, #EF4444 8%, var(--bg-2))',
+                      border: '1px solid color-mix(in srgb, #EF4444 28%, var(--line-2))',
+                      display: 'flex', flexDirection: 'column', gap: 7,
+                    }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.5 }}>
+                        This deletes from <strong>{cleanPreview.node_key}</strong>
+                        {cleanPreview.whole_node ? ' (whole node)' : `: ${(cleanPreview.outputs ?? []).join(', ')}`}
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, marginTop: 4, color: '#EF4444' }}>
+                          {plural(cleanPreview.assets, 'asset')} · {plural(cleanPreview.sessions, 'session')} · {plural(cleanPreview.messages, 'message')}
+                        </div>
+                      </div>
+                      {cleanPreview.derived_elsewhere.length > 0 && (
+                        <div style={{ fontSize: 10, color: '#F59E0B', lineHeight: 1.45 }}>
+                          ⚠ Other nodes have assets derived from these: {cleanPreview.derived_elsewhere.join(', ')}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.45 }}>
+                        A backup is saved before deleting. To write again without losing what is
+                        there, use <strong>Reopen</strong> in the chat — cleaning forces a new run, and that costs.
+                      </div>
+                      <input
+                        value={cleanTyped}
+                        onChange={e => setCleanTyped(e.target.value)}
+                        placeholder={`Type ${cleanPreview.node_key} to confirm`}
+                        style={{
+                          height: 26, borderRadius: 4, padding: '0 8px', fontSize: 11,
+                          background: 'var(--bg-3)', color: 'var(--text-0)', border: '1px solid var(--line-2)',
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      />
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          onClick={() => { setCleanPreview(null); setCleanTyped('') }}
+                          style={{
+                            flex: 1, height: 28, borderRadius: 5, fontSize: 11, cursor: 'pointer',
+                            background: 'var(--bg-2)', color: 'var(--text-2)', border: '1px solid var(--line-2)',
+                          }}
+                        >Cancel</button>
+                        <button
+                          disabled={cleaning || cleanTyped.trim() !== cleanPreview.node_key}
+                          onClick={async () => {
+                            setCleaning(true); setCleanError(null)
+                            try {
+                              const r = await cleanNode(projectId, canvasNode.node!.id, {
+                                outputKeys:    cleanPreview.whole_node ? null : cleanPreview.outputs,
+                                projectNodeId: canvasNode.project_node_id,
+                              })
+                              setCleanDone(r)
+                              setCleanPreview(null); setCleanTyped(''); setCleanKeys(new Set()); setCleanWhole(false)
+                              onCleaned()
+                            } catch (e) {
+                              setCleanError(e instanceof Error ? e.message : String(e))
+                            } finally { setCleaning(false) }
+                          }}
+                          style={{
+                            flex: 1, height: 28, borderRadius: 5, fontSize: 11, fontWeight: 700,
+                            cursor: cleaning || cleanTyped.trim() !== cleanPreview.node_key ? 'not-allowed' : 'pointer',
+                            background: cleaning || cleanTyped.trim() !== cleanPreview.node_key ? 'var(--bg-3)' : '#EF4444',
+                            color: cleaning || cleanTyped.trim() !== cleanPreview.node_key ? 'var(--text-4)' : '#fff',
+                            border: 'none',
+                          }}
+                        >{cleaning ? '⟳' : 'Delete'}</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {cleanDone && (
+                    <div style={{ fontSize: 10, color: '#34D399', lineHeight: 1.45, marginTop: 2 }}>
+                      ✓ Deleted {plural(cleanDone.assets, 'asset')} and {plural(cleanDone.sessions, 'session')}.
+                      {cleanDone.backup_url && <> Backup saved.</>}
+                    </div>
+                  )}
+                  {cleanError && (
+                    <div style={{ fontSize: 10, color: '#EF4444', lineHeight: 1.45, marginTop: 2 }}>{cleanError}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {(effectiveStatus === 'approved' || effectiveStatus === 'auto_approved') ? (
             <div style={{
               height: 32, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -5757,6 +5944,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           onRemove={handleRemoveNode}
           onRun={() => handleRunNode(selectedNode)}
           onImportedAsOutput={() => { setSelectedNode(null); loadCanvas(true) }}
+          onCleaned={() => loadCanvas(true)}
           removing={removing}
           locked={lockedNodeIds.has(selectedNode.project_node_id)}
           projectId={project.id}

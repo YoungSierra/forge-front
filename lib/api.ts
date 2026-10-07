@@ -1698,6 +1698,37 @@ export async function reopenNodeOutput(
   )
 }
 
+export interface CleanResult {
+  node_key: string; title: string
+  outputs: string[] | null; whole_node: boolean
+  sessions: number; assets: number; versions: number; messages: number
+  derived_elsewhere: string[]
+  backup_url?: string | null
+}
+
+// Deja un nodo —o solo algunas salidas— en cero. Solo admins.
+//
+// `dryRun` cuenta y no borra, y es el MISMO camino que el borrado de verdad: los números que
+// enseña la confirmación son literalmente los de lo que se va a borrar, no una cuenta parecida.
+export async function cleanNode(
+  projectId: string,
+  nodeId:    string,
+  opts: { outputKeys?: string[] | null; projectNodeId?: string | null; dryRun?: boolean } = {},
+): Promise<CleanResult> {
+  return request<{ success: boolean } & CleanResult>(
+    `/api/projects/${projectId}/canvas/nodes/${nodeId}/clean`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        output_keys:     opts.outputKeys ?? null,
+        project_node_id: opts.projectNodeId ?? null,
+        dry_run:         !!opts.dryRun,
+      }),
+    },
+  )
+}
+
 // El PDF es de UN output: sin `outputKey` el backend devuelve el documento aprobado más
 // reciente del nodo, que en un nodo de varios outputs es casi siempre el equivocado.
 export async function generateNodePdf(
