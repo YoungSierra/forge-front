@@ -15,6 +15,7 @@
 // desplegado, y no hay forma de saber cuál de los tres es. Apagado y diciendo qué falta, sí.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { guardarLocal } from '@/lib/local-store'
 import { getLaboratorio, abrirLaboratorio } from '@/lib/api'
 import LaboratoryPanel from './LaboratoryPanel'
 
@@ -89,7 +90,7 @@ export default function LaboratoryButton({ projectId }: Props) {
     }
     const onUp = () => {
       setDrag(false)
-      setPos(p => { if (p) localStorage.setItem(KEY, JSON.stringify(p)); return p })
+      setPos(p => { if (p) guardarLocal(KEY, JSON.stringify(p)); return p })
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup',   onUp)

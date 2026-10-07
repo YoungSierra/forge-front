@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { guardarLocal } from '@/lib/local-store'
 
 export type Theme = 'dark' | 'light'
 
@@ -12,7 +13,7 @@ export function useTheme() {
 
   function setTheme(t: Theme) {
     setThemeState(t)
-    localStorage.setItem('forge-theme', t)
+    guardarLocal('forge-theme', t)
     if (t === 'light') {
       document.documentElement.setAttribute('data-theme', 'light')
     } else {

@@ -1,3 +1,4 @@
+import { guardarLocal } from '@/lib/local-store'
 // Miniatura de un modelo .glb SIN bajar el modelo.
 //
 // Un .glb es: cabecera de 12 bytes · chunk JSON · chunk binario. El JSON declara en qué byte
@@ -224,10 +225,12 @@ export async function glbThumb(url: string, id: string, rampa: Rampa = RAMPA_NEU
     const pos   = new Float32Array(buf.slice(0, Math.floor(buf.byteLength / 12) * 12))
 
     const data = pintar(pos, elegirVista(acc.min, acc.max), rampa)
-    try { localStorage.setItem(key, data) } catch { /* se pasó la cuota */ }
+    // `guardarLocal` hace sitio tirando miniaturas viejas: antes esto se rendía en silencio y
+    // dejaba el cupo lleno para siempre, de modo que reventaba la siguiente escritura de cualquier otro.
+    guardarLocal(key, data)
     return data
   } catch {
-    try { localStorage.setItem(key, `x:${Date.now()}`) } catch { /* nada */ }
+    guardarLocal(key, `x:${Date.now()}`)
     return null
   }
 }

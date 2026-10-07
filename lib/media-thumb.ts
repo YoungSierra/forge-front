@@ -1,3 +1,4 @@
+import { guardarLocal } from '@/lib/local-store'
 // Miniaturas de video y audio, en el cliente y cacheadas en localStorage.
 //
 // Video: el primer fotograma con contenido. Se pide por el proxy same-origin porque dibujar un
@@ -35,7 +36,9 @@ function leerCache(id: string): string | null | undefined {
   } catch { return undefined }
 }
 function guardarCache(id: string, data: string | null) {
-  try { localStorage.setItem(PREFIX + id, data ?? `x:${Date.now()}`) } catch { /* cuota llena o modo privado */ }
+  // Pasa por `guardarLocal` para que desaloje en vez de rendirse: rindiéndose dejaba el cupo
+  // lleno y la que reventaba era la siguiente escritura de cualquier otro.
+  guardarLocal(PREFIX + id, data ?? `x:${Date.now()}`)
 }
 
 // ── Video ────────────────────────────────────────────────────────────────────

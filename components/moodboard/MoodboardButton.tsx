@@ -1,5 +1,7 @@
 'use client'
 
+import { guardarLocal } from '@/lib/local-store'
+
 // Botón flotante que lanza el Moodboard. Se arrastra a donde el usuario quiera y la posición
 // queda guardada: es una herramienta siempre disponible sobre el canvas, y según en qué esté
 // trabajando cada quien la va a querer en un lado distinto.
@@ -81,7 +83,7 @@ export default function MoodboardButton({ projectId, projectName, nodeKey }: Pro
     }
     const onUp = () => {
       setDrag(false)
-      setPos(p => { if (p) localStorage.setItem(KEY, JSON.stringify(p)); return p })
+      setPos(p => { if (p) guardarLocal(KEY, JSON.stringify(p)); return p })
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup',   onUp)

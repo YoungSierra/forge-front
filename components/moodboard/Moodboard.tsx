@@ -12,6 +12,7 @@
 // herramientas de edición son Iteración 2 y 3.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { guardarLocal } from '@/lib/local-store'
 import ModelViewer from '@/components/shared/ModelViewer'
 import { glbThumb, glbThumbCached, type Rampa } from '@/lib/glb-thumb'
 import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type AudioThumb } from '@/lib/media-thumb'
@@ -444,7 +445,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   }, [projectId, assets.length, corridas.length])
   useEffect(() => {
     try {
-      if (Object.keys(alcance).length) window.localStorage.setItem(claveAlcance, JSON.stringify(alcance))
+      if (Object.keys(alcance).length) guardarLocal(claveAlcance, JSON.stringify(alcance))
       else window.localStorage.removeItem(claveAlcance)
     } catch { /* idem */ }
   }, [alcance, claveAlcance])
@@ -1876,7 +1877,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           {/* Maximizar: en pantallas chicas el margen y el tope de 1720 se comen el área útil, y
               este panel es donde se mira el arte. Se recuerda entre sesiones. */}
           <button
-            onClick={() => setMaximizado(v => { localStorage.setItem('forge:mb:max', v ? '0' : '1'); return !v })}
+            onClick={() => setMaximizado(v => { guardarLocal('forge:mb:max', v ? '0' : '1'); return !v })}
             title={maximizado ? 'Restore' : 'Maximize'}
             style={{
               width: 27, height: 27, borderRadius: 6, cursor: 'pointer', background: 'transparent',

@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { guardarLocal } from '@/lib/local-store'
 import { createClient } from '@/lib/supabase'
 import { getMemberByAuth } from '@/lib/api'
 import type { User } from '@supabase/supabase-js'
@@ -45,7 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const m = await getMemberByAuth(authUser.id)
       setMember(m)
-      if (m?.id) localStorage.setItem(MEMBER_ID_KEY, m.id)
+      if (m?.id) guardarLocal(MEMBER_ID_KEY, m.id)
     } catch {
       setMember(null)
     }

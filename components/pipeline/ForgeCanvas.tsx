@@ -18,6 +18,7 @@ import LaboratoryButton from './LaboratoryButton'
 import ModelViewer from '@/components/shared/ModelViewer'
 import { Media } from '@/components/shared/Media'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
+import { guardarLocal } from '@/lib/local-store'
 import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, reopenNodeOutput, cleanNode, type CleanResult, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName, stopNodeRun } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap, RunPlan, GateAuthMode } from '@/lib/api'
@@ -3491,7 +3492,7 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
     function onMouseUp() {
       if (!draggingRef.current) return
       draggingRef.current = false
-      setPos(prev => { localStorage.setItem(PANEL_POS_KEY, JSON.stringify(prev)); return prev })
+      setPos(prev => { guardarLocal(PANEL_POS_KEY, JSON.stringify(prev)); return prev })
     }
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup',   onMouseUp)
@@ -4840,7 +4841,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
   function applyTextSize(size: TextSize) {
     setTextSize(size)
-    localStorage.setItem(TEXT_SIZE_KEY, size)
+    guardarLocal(TEXT_SIZE_KEY, size)
   }
 
   function resetLayout() {
@@ -4964,7 +4965,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   function toggleEdgeStyle() {
     setEdgeStyle(prev => {
       const next: EdgeStyle = prev === 'bezier' ? 'orthogonal' : 'bezier'
-      localStorage.setItem(EDGE_STYLE_KEY, next)
+      guardarLocal(EDGE_STYLE_KEY, next)
       const nextType = next === 'orthogonal' ? 'orthogonalEdge' : 'forgeEdge'
       setEdges(es => es.map(e => ({ ...e, type: nextType })))
       return next
@@ -5466,7 +5467,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   async function handleNameChange(name: string) {
     await updateProjectName(project.id, name)
     setLocalName(name)
-    localStorage.setItem('forge_last_project', JSON.stringify({ id: project.id, name }))
+    guardarLocal('forge_last_project', JSON.stringify({ id: project.id, name }))
   }
 
   // Corre el pipeline completo — alias del scope 'pipeline'

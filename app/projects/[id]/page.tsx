@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { guardarLocal } from '@/lib/local-store'
 import { useRouter } from 'next/navigation'
 import { getProject } from '@/lib/api'
 import type { Project } from '@/lib/types'
@@ -25,7 +26,7 @@ export default function ProjectPage({ params }: PageProps) {
     try {
       const p = await getProject(id)
       setProject(p)
-      localStorage.setItem('forge_last_project', JSON.stringify({ id, name: p.name }))
+      guardarLocal('forge_last_project', JSON.stringify({ id, name: p.name }))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load project')
     } finally {

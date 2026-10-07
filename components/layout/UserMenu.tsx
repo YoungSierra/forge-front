@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { guardarLocal } from '@/lib/local-store'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
@@ -94,7 +95,7 @@ export default function UserMenu() {
     setWhatsNew(true)
     // Marca como visto: guarda el released_at más reciente
     const latest = changelog[0]?.released_at
-    if (latest && typeof window !== 'undefined') localStorage.setItem(CHANGELOG_SEEN_KEY, latest)
+    if (latest && typeof window !== 'undefined') guardarLocal(CHANGELOG_SEEN_KEY, latest)
     setHasUnseen(false)
   }
 

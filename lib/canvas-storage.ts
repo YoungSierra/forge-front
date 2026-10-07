@@ -1,4 +1,5 @@
 import type { Node, Edge, Viewport } from '@xyflow/react'
+import { guardarLocal } from '@/lib/local-store'
 import { saveCanvasLayout } from './api'
 
 export interface CanvasLayout {
@@ -69,7 +70,7 @@ export function saveLayout(projectId: string, layout: CanvasLayout, immediate = 
   try {
     // También en `localStorage`, que tiene un tope de unos 5 MB por origen: con dos proyectos
     // gordos abiertos se llenaba y el `catch` se lo tragaba en silencio.
-    localStorage.setItem(key(projectId), JSON.stringify(magro))
+    guardarLocal(key(projectId), JSON.stringify(magro))
   } catch { /* storage full or SSR */ }
 
   if (dbTimers[projectId]) clearTimeout(dbTimers[projectId])
@@ -101,7 +102,7 @@ export function seedLayoutFromDB(projectId: string, layout: CanvasLayout): void 
         targetHandle: e.targetHandle?.startsWith('in-')  ? 'in'  : e.targetHandle,
       })),
     }
-    localStorage.setItem(key(projectId), JSON.stringify(normalized))
+    guardarLocal(key(projectId), JSON.stringify(normalized))
   } catch { /* noop */ }
 }
 
@@ -119,7 +120,7 @@ export function saveContainerLayout(
 ): void {
   const data: ContainerLayoutData = { positions, viewport }
   try {
-    localStorage.setItem(ctrKey(projectId, containerKey), JSON.stringify(data))
+    guardarLocal(ctrKey(projectId, containerKey), JSON.stringify(data))
   } catch { /* noop */ }
 
   const timerKey = `${projectId}_${containerKey}`
@@ -166,6 +167,6 @@ export function seedContainerLayoutFromDB(
     ? raw as ContainerLayoutData
     : { positions: rawAny as unknown as Record<string, { x: number; y: number }> }
   try {
-    localStorage.setItem(ctrKey(projectId, containerKey), JSON.stringify(data))
+    guardarLocal(ctrKey(projectId, containerKey), JSON.stringify(data))
   } catch { /* noop */ }
 }
