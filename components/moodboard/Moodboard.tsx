@@ -5871,6 +5871,15 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
   onSaltar?: (assetId: string) => void
 }) {
   const [paso,  setPaso]  = useState<PasoDeCadena | null | undefined>(undefined)
+  // La pose elegida, cuando el paso ofrece variantes (Character Sheet · Concept art).
+  //
+  // Arranca en la que YA produjo esta pieza, si la produjo: la segunda corrida abre con lo que se
+  // eligio la vez pasada y se puede cambiar. En la primera arranca vacia a proposito — sin
+  // preseleccion, para que nadie lance la pose equivocada por inercia. Cada corrida se paga.
+  const [pose, setPose] = useState<string | null>(() => {
+    const p = (asset as { metadata?: { pose?: string } })?.metadata?.pose
+    return typeof p === 'string' && p ? p : null
+  })
   const [texto, setTexto] = useState('')
   const [busy,  setBusy]  = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -5995,7 +6004,11 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
           : null,
         // Solo lo que el usuario CAMBIÓ. Mandar el catálogo entero reescribiría cada nodo con lo
         // que ya tenía y convertiría cualquier futuro cambio del workflow en letra muerta.
-        opciones: Object.keys(cambiadas).length ? cambiadas : null,
+        // La pose NO es una opcion de generacion: elige QUE workflow se lanza. Viaja por el mismo
+        // canal porque ya existe, y el backend la separa antes de validar el resto contra ComfyUI.
+        opciones: (Object.keys(cambiadas).length || pose)
+          ? { ...cambiadas, ...(pose ? { pose } : {}) }
+          : null,
       })
       onListo(r.creados.map(c => c.id))
     } catch (e) {
@@ -6126,6 +6139,13 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
 
             <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 10 }}>
               <strong style={{ color: 'var(--text-1)' }}>What this generates.</strong> {paso.que}
+              {/* Y en que pose, en cuanto se elige. El texto tiene que seguir a la eleccion: si
+                  dice lo mismo con una pose y con la otra, el selector parece decorativo. */}
+              {!!paso.poses?.length && pose && (
+                <> <span style={{ color: accent }}>
+                  In {paso.poses.find(o => o.clave === pose)?.etiqueta ?? pose}.
+                </span></>
+              )}
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 14 }}>
               <strong style={{ color: 'var(--text-1)' }}>Why it is needed.</strong> {paso.porque}
@@ -6145,6 +6165,43 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
                   resize: 'vertical',
                 }}
               />
+            )}
+
+            {/* La pose, cuando el paso ofrece variantes (Migue Leon, 06-10).
+                Va ARRIBA de las opciones y del costo, visible sin desplegar nada: es una decision
+                obligatoria, no un ajuste fino. Las opciones de generacion van plegadas porque
+                tienen defaults razonables; esto no tiene default a proposito. */}
+            {!!paso.poses?.length && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-1)', marginBottom: 8, fontWeight: 600 }}>
+                  Should the character be in T-Pose or Neutral Pose?
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {paso.poses.map(o => {
+                    const activa = pose === o.clave
+                    return (
+                      <button
+                        key={o.clave}
+                        onClick={() => setPose(o.clave)}
+                        disabled={busy}
+                        title={o.ayuda}
+                        style={{
+                          flex: 1, textAlign: 'left', padding: '10px 12px', borderRadius: 8,
+                          cursor: busy ? 'default' : 'pointer',
+                          background: activa ? `color-mix(in srgb, ${accent} 14%, var(--bg-2))` : 'var(--bg-2)',
+                          border: `1px solid ${activa ? accent : 'var(--line-2)'}`,
+                          color: 'var(--text-1)', fontFamily: 'var(--font-sans)',
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3 }}>
+                          {activa ? '● ' : '○ '}{o.etiqueta}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-3)', lineHeight: 1.45 }}>{o.ayuda}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             )}
 
             {/* Opciones de generación. Plegadas: quien solo quiere correr no tiene que leerlas,
@@ -6421,7 +6478,10 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
               >Cancel</button>
               <button
                 onClick={() => correr(0)}
-                disabled={busy || (paso.pide_prompt && !texto.trim())}
+                // Y sin pose elegida no se corre, cuando el paso la pide. Lanzar la pose
+                // equivocada cuesta cuatro despachos y hay que tirarlos: mas vale un boton apagado
+                // que una corrida pagada que nadie queria.
+                disabled={busy || (paso.pide_prompt && !texto.trim()) || (!!paso.poses?.length && !pose)}
                 style={{
                   flex: 1, padding: '9px 0', borderRadius: 8,
                   cursor: busy || (paso.pide_prompt && !texto.trim()) ? 'default' : 'pointer',

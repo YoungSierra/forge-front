@@ -2085,6 +2085,10 @@ export type PasoDeCadena = {
   /** Las animaciones que produciría este paso, para poder elegir cuáles correr (informe de JuanK,
    *  punto 1). Vacío = todavía no se han leído del ADI; el Run las lee al correr. */
   clips?: { nombre: string; etiqueta: string }[]
+  /** Las poses entre las que hay que elegir antes de correr, cuando el paso tiene variantes
+   *  (Character Sheet · Concept art). Viene del backend, no escrito acá: si una cadena gana otra
+   *  variante, la ventana se entera sola. Ausente = este paso no pregunta nada. */
+  poses?: { clave: string; etiqueta: string; ayuda: string }[]
   por_cada_salida_de?: string | null
   /** La cadena entera, para dibujarla antes de correr: solo pasos de producción, con sus
    *  nombres llanos. Las herramientas de edición no entran — no son pasos de la cadena. */
