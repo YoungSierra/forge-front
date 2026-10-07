@@ -1138,6 +1138,11 @@ export interface NodeChatWindowProps {
    *  imágenes en un hermano —el pitch document las declara en su plan— necesita ese hermano, y
    *  corriendo output por output el hermano no viene en la respuesta: vive en su propio asset. */
   siblingContent?:      Record<string, string>
+  /** Aviso de que el output enfocado se quedó sin fuente: declara `uses.inputs: []` —no consume
+   *  nada de aguas arriba— y su hermano, del que sí deriva, todavía no existe. Sin esto el modelo
+   *  arranca con las manos vacías y le pide al usuario que le pegue los documentos a mano, que es
+   *  justo lo que pasó con `gdd_ref` del 3.8 el 07-oct. */
+  missingSourceNote?:   string | null
   // Prompt de sistema que se usará (solo lectura, para referencia del usuario)
   systemPrompt?:        string
   // Panel de contexto — solo para nodos gate
@@ -1158,7 +1163,7 @@ export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
   initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, onStop, docUrl, docFormat, imagesPending,
   approvedAsset, imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
-  targetOutputKey, targetOutputLabel, systemPrompt, siblingContent,
+  targetOutputKey, targetOutputLabel, systemPrompt, siblingContent, missingSourceNote,
   isGate, projectNodeId, onOpenOutput,
 }: NodeChatWindowProps) {
   const [messages,        setMessages]        = useState<ChatMessage[]>(initialMessages ?? [])
@@ -1857,6 +1862,18 @@ export default function NodeChatWindow({
             if (f) { setPendingFile(f); setPendingUrl(null) }
           }}
         >
+          {missingSourceNote && (
+            <div style={{
+              fontSize: 11, lineHeight: 1.55, color: 'var(--text-1)',
+              background: 'color-mix(in srgb, #F59E0B 10%, var(--bg-3))',
+              border: '1px solid color-mix(in srgb, #F59E0B 30%, var(--line-2))',
+              borderRadius: 6, padding: '9px 11px', flexShrink: 0,
+            }}>
+              <span style={{ color: '#F59E0B', fontWeight: 700 }}>⚠ No source yet.</span>{' '}
+              {missingSourceNote}
+            </div>
+          )}
+
           {messages.length === 0 && (
             <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 280, padding: '12px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <img src="/forgy/forgyi.png" alt="Forge" style={{ width: 36, height: 36, objectFit: 'contain', marginBottom: 10, opacity: 0.6 }} />

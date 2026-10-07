@@ -5878,6 +5878,45 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             }
             return m
           })()}
+          // Un output que declara `uses.inputs: []` NO consume nada de aguas arriba por contrato:
+          // su única fuente es el hermano que nombra en `siblings_if_present`. Si ese hermano
+          // todavía no existe —el nodo se limpió, o se corrió esta salida de primera— el modelo
+          // arranca sin nada y termina pidiéndole al usuario que le pegue los documentos a mano.
+          // Pasó con `gdd_ref` del 3.8 en Wort el 07-oct, y vuelve a pasar con cualquiera que
+          // corra las salidas en el orden en que aparecen: `gdd_ref` está de primera y es la única
+          // que no puede ir de primera. Esto lo dice ANTES, no lo impide.
+          missingSourceNote={(() => {
+            if (!chatTargetOutputKey) return null
+            const def = (chatForgeNode.outputs ?? []).find(
+              (o: { key?: string; name?: string }) => (o.key || o.name) === chatTargetOutputKey,
+            ) as { uses?: { inputs?: string[]; siblings?: string[]; siblings_if_present?: string[] } } | undefined
+            const usa = def?.uses
+            // La clave ausente significa «sin acotar» y deja pasar todo: solo el array VACÍO es la
+            // declaración explícita de que esta salida no bebe de aguas arriba.
+            if (!Array.isArray(usa?.inputs) || usa.inputs.length > 0) return null
+            const hermanos = usa.siblings_if_present ?? usa.siblings ?? []
+            if (!hermanos.length) return null
+            // El nodo corrido ENTERO guarda TODOS sus outputs dentro de un solo documento, y el
+            // mapa por-clave queda vacío: el hermano existe, solo que no tiene sesión propia.
+            // Medido contra la base viva — de 72 avisos, 55 eran de este caso. Es la séptima
+            // mordida de «exigir la clave rompe el modo nodo entero», así que acá se comprueba
+            // primero y el aviso se calla.
+            if (chatNode.session?.output_asset?.content) return null
+            const sesiones = chatNode.output_sessions ?? {}
+            const faltan = hermanos.filter(k => {
+              const c = (sesiones as Record<string, { output_asset?: { content?: string | null } }>)[k]?.output_asset?.content
+              return !c
+            })
+            if (faltan.length < hermanos.length) return null   // al menos uno existe: hay de dónde
+            const rotulo = (k: string) => {
+              const o = (chatForgeNode.outputs ?? []).find(
+                (x: { key?: string; name?: string }) => (x.key || x.name) === k,
+              ) as { label?: string; name?: string } | undefined
+              return o?.label || o?.name || k
+            }
+            const lista = faltan.map(rotulo).join(', ')
+            return `This output takes nothing from upstream — it is written from ${lista}, which has not been produced yet. Run ${lista} first, then come back here. Running it now leaves the model with an empty desk.`
+          })()}
           imageGenOutputs={(() => {
             const defs: ImageOutputDef[] = []
             for (const out of (chatForgeNode.outputs ?? [])) {
