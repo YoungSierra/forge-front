@@ -1116,12 +1116,16 @@ export interface NodeChatWindowProps {
   validateOutput?:   (data: unknown) => string | null  // null = válido, string = mensaje de error
   onClose:           () => void
   // Si se provee, reemplaza la llamada interna a chatWithNode
-  onSend?:          (userMessage: string, file?: File | null, attachmentUrl?: string, signal?: AbortSignal) => Promise<{ reply: string; attachment?: ChatAttachment; messageId?: string }>
+  onSend?:          (userMessage: string, file?: File | null, attachmentUrl?: string, signal?: AbortSignal) => Promise<{ reply: string; attachment?: ChatAttachment; messageId?: string; truncated?: boolean }>
   onAccept?:        (content: string) => Promise<void>
   /** Le pide al backend que corte la generación. Es una petición aparte y no «cerrar el fetch»:
    *  el backend ya no deduce el Stop de una conexión caída, porque una corrida larga la pierde
    *  sola y así se tiraba trabajo ya pagado. */
   onStop?:          () => Promise<unknown>
+  /** Tras una conexión caída: qué fue de la corrida en el servidor. `abandoned` = falló (con el
+   *  aviso `system` que explica la causa); `active` = sigue; otro estado = ya terminó. Sin esta
+   *  prop se mantiene el texto genérico de antes. */
+  onRunStatus?:     () => Promise<{ status: string; lastMessage?: string | null } | null>
   docUrl?:          string
   docFormat?:       string
   /** Hay imágenes de este nodo renderizándose: el documento todavía no las tiene. */
@@ -1164,7 +1168,7 @@ function esConexionCaida (err: unknown): boolean {
 
 export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
-  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, onStop, docUrl, docFormat, imagesPending,
+  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, onStop, onRunStatus, docUrl, docFormat, imagesPending,
   approvedAsset, imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
   targetOutputKey, targetOutputLabel, systemPrompt, siblingContent, missingSourceNote, onReopen,
   isGate, projectNodeId, onOpenOutput,
@@ -1491,7 +1495,12 @@ export default function NodeChatWindow({
                 : m
               )
             : [...prev]
-          return [...updated, { id: result.messageId, role: 'assistant', content: result.reply }]
+          // Respuesta cortada por el límite de salida: el texto va intacto y el aviso aparte, como
+          // `aviso` — Accept no lo toma.
+          return result.truncated
+            ? [...updated, { id: result.messageId, role: 'assistant', content: result.reply },
+               { role: 'assistant', aviso: true, content: '_TRUNCATED — the model reached its output limit. The reply above is incomplete: review it, then run again or ask for the missing part._' }]
+            : [...updated, { id: result.messageId, role: 'assistant', content: result.reply }]
         })
         setHasNewResponse(true)
       } else {
@@ -1517,9 +1526,18 @@ export default function NodeChatWindow({
         // el usuario hace después — esperar, o volver a intentar.
         let vivo = false
         try { await checkHealth(); vivo = true } catch { vivo = false }
-        setMessages(prev => [...prev, { role: 'assistant', aviso: true, content: vivo
-          ? '_The connection dropped, but the run kept going on the server. It will appear here when it finishes — reopening this node also shows it._'
-          : '_The server was unreachable, so the run never started. Nothing was lost and nothing is running — try again once it is back._' }])
+        // «Sigue corriendo» solo si es verdad. Con el servidor vivo se le pregunta por la sesión: si
+        // el back la marcó `abandoned`, falló y se enseña la causa; si ya no está `active`, terminó.
+        let estado: { status: string; lastMessage?: string | null } | null = null
+        if (vivo && onRunStatus) { try { estado = await onRunStatus() } catch { estado = null } }
+        const texto = !vivo
+          ? '_The server was unreachable, so the run never started. Nothing was lost and nothing is running — try again once it is back._'
+          : estado?.status === 'abandoned'
+            ? `_The run failed on the server: ${estado.lastMessage?.replace(/^_|_$/g, '') || 'see the session for details'}_`
+            : estado && estado.status !== 'active'
+              ? '_The connection dropped, but the run already finished on the server. Reopen this node to see the result._'
+              : '_The connection dropped, but the run kept going on the server. It will appear here when it finishes — reopening this node also shows it._'
+        setMessages(prev => [...prev, { role: 'assistant', aviso: true, content: texto }])
       } else {
         setError(err instanceof Error ? err.message : 'Error contacting assistant')
       }
@@ -2264,7 +2282,8 @@ export default function NodeChatWindow({
           <div style={{ padding: '6px 12px 0', borderTop: effectiveDocUrl ? 'none' : '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
             <button
               onClick={async () => {
-                const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
+                // Un aviso (fallo, truncado, Stop) no es la respuesta del nodo: Accept toma la última de verdad.
+                const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && !m.aviso)
                 if (!lastAssistant || accepting || sending) return
                 setAccepting(true)
                 setError(null)

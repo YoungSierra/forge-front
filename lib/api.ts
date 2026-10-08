@@ -1596,7 +1596,7 @@ export async function chatWithForgeNode(
   projectNodeId?:   string | null,
   /** Para el botón Stop: al abortarlo se cierra la conexión y el back corta la generación. */
   signal?:          AbortSignal,
-): Promise<{ reply: string; session_id: string; message_id?: string; output_images?: OutputImagesMap; doc_url?: string; doc_format?: string; attachment?: ChatAttachment; images_dispatched?: string[] }> {
+): Promise<{ reply: string; session_id: string; message_id?: string; output_images?: OutputImagesMap; doc_url?: string; doc_format?: string; attachment?: ChatAttachment; images_dispatched?: string[]; truncated?: boolean }> {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
 
   let body: BodyInit
@@ -2360,9 +2360,15 @@ export interface PlanDeInstancias {
   hay:      boolean
   motivo?:  string
   paginas:  { pagina: string; indice: number; kind: string
-              items: { nombre: string; de: string; cuenta: number }[] }[]
+              /** `hecha`: ese ítem YA tiene su hoja. El motor la reconoce por `metadata.instancia`,
+               *  no por el nombre del asset, así que renombrarla a mano no engaña a la cuenta. */
+              items: { nombre: string; de: string; cuenta: number; hecha?: boolean }[]
+              hechas?: number; faltan?: number }[]
   /** Cuántos despachos son en total. Cada uno se paga. */
   despachos: number
+  /** De esos, los que de verdad habría que pagar hoy: lo que falta por hacer. */
+  faltan?: number
+  hechas?: number
   ausentes?:       string[]
   sin_clasificar?: { nombre: string; cuenta: number; de: string }[]
   no_son_laminas?: { nombre: string; cuenta: number }[]

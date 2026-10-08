@@ -2371,8 +2371,17 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                   {outTab && (() => {
                     const o = (node.outputs ?? []).find(x => (x as {key?:string;name:string}).key === outTab || x.name === outTab) as
                       { key?: string; name?: string; label?: string; image_gen?: boolean; image_count?: CuentaDeclarada; production?: string } | undefined
-                    if (!o?.image_gen || o.production === 'deferred') return null
+                    if (!o?.image_gen) return null
                     const clave = o.key || o.name || outTab
+                    // `production: deferred` se produce en otra etapa — y esa etapa llega cuando el
+                    // usuario aprueba los prompts (`deferred_until`), que se aceptan bajo la MISMA
+                    // clave del output. Hasta hoy nadie leía esa condición y el botón no existía:
+                    // en Wort el 3.7 tenía sus prompts aprobados desde el 02-10 y cero imágenes.
+                    // Con la sesión de texto aprobada, el botón aparece; sin ella sigue oculto.
+                    if (o.production === 'deferred') {
+                      const sTxt = outputSessions[clave]
+                      if (!(sTxt?.status === 'approved' || sTxt?.status === 'auto_approved')) return null
+                    }
                     const vivo  = vivos[clave]
                     // El botón es para PRODUCIR lo que falta, no para rehacer lo que ya está: con
                     // imágenes en el output desaparece. Rehacer cuesta crédito y además no
@@ -4141,6 +4150,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   const [chatLoading,       setChatLoading]       = useState(false)
   const [chatDocUrl,        setChatDocUrl]        = useState<string | null>(null)
   const [chatDocFormat,     setChatDocFormat]     = useState<string | null>(null)
+  // Avisos de la última respuesta del chat (deck no generado, deck sin imágenes, tipos de slide
+  // pintados como texto). El back los devolvía en `warnings` y aquí no se mostraban.
+  const [chatAvisos,        setChatAvisos]        = useState<string[]>([])
   const [chatOutputImages,     setChatOutputImages]     = useState<OutputImagesMap>({})
   // Fuerza el recálculo de `imagesPending`, que se lee de localStorage en cada render
   const [tickDespacho,         setTickDespacho]         = useState(0)
@@ -5954,6 +5966,15 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         />
       )}
 
+      {/* Avisos de la última respuesta del chat */}
+      {chatNode && chatAvisos.length > 0 && (
+        <div role="status" style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 10010, maxWidth: 420, background: '#2a1f0a', border: '1px solid #f59e0b', borderRadius: 8, padding: '10px 32px 10px 12px', color: '#fde68a', fontSize: 12, lineHeight: 1.45, boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Notice</div>
+          {chatAvisos.map((a, i) => <div key={i} style={{ marginTop: i ? 4 : 0 }}>{a}</div>)}
+          <button aria-label="Dismiss" onClick={() => setChatAvisos([])} style={{ position: 'absolute', top: 6, right: 8, background: 'none', border: 'none', color: '#fde68a', cursor: 'pointer', fontSize: 14 }}>×</button>
+        </div>
+      )}
+
       {/* Ventana de chat con el nodo */}
       {chatNode && chatNode.node && !chatLoading && (() => {
         const chatForgeNode = chatNode.node
@@ -6002,6 +6023,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             const docAMedias = !!r.images_dispatched?.length
             setChatDocUrl(docAMedias ? null : (r.doc_url ?? null))
             setChatDocFormat(docAMedias ? null : (r.doc_format ?? null))
+            const avisos = (r as { warnings?: unknown }).warnings
+            setChatAvisos(Array.isArray(avisos) ? avisos.filter((a): a is string => typeof a === 'string') : [])
             // Actualizar sesión en el estado local si es nueva
             chatSessionIdRef.current = r.session_id
             if (!chatSessionId) {
@@ -6025,7 +6048,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             } else {
               setChatSessionId(r.session_id)
             }
-            return { reply: r.reply, attachment: r.attachment, messageId: r.message_id }
+            return { reply: r.reply, attachment: r.attachment, messageId: r.message_id, truncated: r.truncated }
           }}
           // Parar de verdad: se le pide al backend que corte, que es lo que deja de gastar. Cerrar
           // el fetch ya no cancela nada — una corrida larga pierde la conexión sola y así se
@@ -6034,6 +6057,15 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             const sid = chatSessionIdRef.current ?? chatSessionId
             if (!sid) return
             return stopNodeRun(project.id, chatForgeNode.id, sid)
+          }}
+          // Tras una conexión caída, la ventana pregunta qué fue de la corrida: el back ahora marca
+          // la sesión `abandoned` con la causa cuando el proveedor falla, así que el aviso puede
+          // decir la verdad en vez de prometer siempre que «sigue corriendo».
+          onRunStatus={async () => {
+            const r = await getNodeSession(project.id, chatForgeNode.id, chatTargetOutputKey, chatNode.project_node_id)
+            if (!r.session) return null
+            const ultimo = [...(r.messages ?? [])].reverse().find(m => m.role === 'assistant')
+            return { status: r.session.status, lastMessage: ultimo?.content?.slice(0, 240) ?? null }
           }}
           onAccept={async (content) => {
             if (!chatSessionId) return
