@@ -20,7 +20,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
 import ContextoModal from './ContextoModal'
-import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance } from '@/lib/api'
+import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import InstanciarModal from './InstanciarModal'
@@ -466,6 +466,21 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
       .catch(() => {})
     return () => { vivo = false }
   }, [projectId])
+  // Cuántas hojas declara el alcance y todavía no existen.
+  //
+  // El botón de instanciar era un «＋» mudo en la cabecera: estaba ahí, pero nada decía que hubiera
+  // trabajo pendiente detrás. El 08-oct el ASG de Wort se cortó a mitad y Migue preguntó «dónde le
+  // doy a continuar» — no es que no encontrara el botón, es que el botón no se anunciaba. Con el
+  // número puesto, una corrida interrumpida se ve desde fuera. Leer el plan no cuesta nada: no
+  // despacha, solo cuenta.
+  const [faltanHojas, setFaltanHojas] = useState<number | null>(null)
+  useEffect(() => {
+    let vivo = true
+    getPlanDeInstancias(projectId)
+      .then(r => { if (vivo && r.hay) setFaltanHojas(r.faltan ?? null) })
+      .catch(() => {})
+    return () => { vivo = false }
+  }, [projectId, instanciando])
   // Y qué hoja quedó señalada por esa página, para dibujarle el aro. Se guarda aparte del nombre
   // de página porque la hoja puede no existir todavía: la guía señala pasos que aún no se han
   // producido, y en ese caso no hay nada que iluminar.
@@ -2034,6 +2049,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
               accent={theme.accent}
               sinMedida={sinMedida}
               instancias={instanciasAlcance}
+              faltan={faltanHojas}
               onInstanciar={() => setInstanciando(true)}
             />
           )}

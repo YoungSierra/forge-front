@@ -29,7 +29,19 @@ export default function InstanciarModal({ projectId, accent, onCerrar, onListo }
   useEffect(() => {
     let vivo = true
     getPlanDeInstancias(projectId)
-      .then(r => vivo && setPlan(r))
+      .then(r => {
+        if (!vivo) return
+        setPlan(r)
+        // Lo que YA tiene su hoja entra DESMARCADO. Marcándolo, el número grande de arriba decía
+        // 33 cuando solo se iban a pagar 14 —el motor se salta lo hecho al despachar, pero la
+        // ventana no lo decía— y nadie se atreve a pulsar un botón que promete cobrar el doble de
+        // lo que cobra. Tras una corrida cortada, esto es justo lo que la convierte en «continuar».
+        const hechas = new Set<string>()
+        for (const p of r.paginas || []) for (const i of p.items || []) {
+          if (i.hecha) hechas.add(`${p.pagina}::${i.nombre}`)
+        }
+        if (hechas.size) setFuera(hechas)
+      })
       .catch(e => vivo && setError(e instanceof Error ? e.message : 'could not read the scope'))
     return () => { vivo = false }
   }, [projectId])
