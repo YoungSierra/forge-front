@@ -95,6 +95,32 @@ interface CanvasNode {
 // «1 assets» se lee mal y este cartel es lo último que alguien mira antes de borrar.
 const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? '' : 's'}`
 
+/**
+ * Quita del mapa de imágenes lo que el usuario borró.
+ *
+ * El borrado es SUAVE —la variación queda marcada, no desaparece— para poder depurar después y
+ * porque el archivo sigue en R2. Pero una marca que nadie mira no borra nada: Migue Amez borró una
+ * pieza el 13-oct y reportó «no hubo cambio a nivel visual». Tenía razón: el borrado había entrado
+ * y los nodos de abajo ya la excluían; la vista era la única que no se había enterado.
+ *
+ * Se filtra UNA vez, acá, donde se arma el mapa que todos leen. Media docena de sitios pintan
+ * variaciones —la tarjeta, el modal, la rejilla, el contador— y parchearlos uno a uno es como se
+ * arreglan tres de cuatro y el cuarto queda mintiendo durante semanas.
+ *
+ * Un ítem al que no le queda ninguna viva se queda con la lista vacía, no se borra del mapa: así
+ * el hueco vuelve a ofrecer «generar», que es lo que el usuario espera después de borrar.
+ */
+function sinBorradas(mapa: OutputImagesMap): OutputImagesMap {
+  const salida: OutputImagesMap = {}
+  for (const [clave, items] of Object.entries(mapa ?? {})) {
+    salida[clave] = (items ?? []).map(it => ({
+      ...it,
+      variations: (it.variations ?? []).filter(v => !(v as { deleted?: boolean }).deleted),
+    }))
+  }
+  return salida
+}
+
 // ¿El nodo está pendiente de correr? No aprobado, o auto_approved pero stale.
 // Fuente única de verdad — usada por runnableCount, runScope y el menú de run.
 function isNodeRunnable(n: CanvasNode): boolean {
@@ -1506,7 +1532,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
     for (const s of Object.values(canvasNode.output_sessions ?? {})) {
       Object.assign(merged, (s.output_images as OutputImagesMap) ?? {})
     }
-    return merged
+    return sinBorradas(merged)
   })
   // Sincronizar cuando session o output_sessions cambian — merge general + todas las por-output
   useEffect(() => {
@@ -1514,7 +1540,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
     for (const s of Object.values(canvasNode.output_sessions ?? {})) {
       Object.assign(merged, (s.output_images as OutputImagesMap) ?? {})
     }
-    setLocalOutputImages(merged)
+    setLocalOutputImages(sinBorradas(merged))
   }, [session?.output_images, canvasNode.output_sessions])
   const [generatingImgKey,  setGeneratingImgKey]  = useState<string | null>(null)
   const [zoomUrl,           setZoomUrl]           = useState<string | null>(null)
