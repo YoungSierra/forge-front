@@ -3,11 +3,28 @@
 import { useEffect, useState, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { getProjectAssets, getProjects, assetUrl } from '@/lib/api'
-import type { UnifiedAsset, UnifiedAssetVersion } from '@/lib/api'
+import { getProjectAssets, getProjects, assetUrl, getAssetContent } from '@/lib/api'
+import type { UnifiedAsset, UnifiedAssetVersion, DocumentData, DocumentFile } from '@/lib/api'
 import type { Project } from '@/lib/types'
 import ModelViewer from '@/components/shared/ModelViewer'
 import { MD_COMPONENTS } from '@/lib/md-components'
+import DataAccordion, { DocumentFiles } from '@/components/shared/DataAccordion'
+
+// Engine v1.9 — la vista de documento de una pieza (`view=document`): lo que se lee y, aparte, lo que
+// lleva para el motor. Mientras llega se muestra el texto crudo del listado, como antes.
+function useDocView(id: string, activo: boolean) {
+  const [vista, setVista] = useState<{ content: string; data: DocumentData[]; files: DocumentFile[] } | null>(null)
+  useEffect(() => {
+    setVista(null)
+    if (!activo || !id) return
+    let vivo = true
+    getAssetContent(id, 'document')
+      .then(r => { if (vivo) setVista({ content: r.content, data: r.data ?? [], files: r.files ?? [] }) })
+      .catch(() => { /* queda el texto crudo */ })
+    return () => { vivo = false }
+  }, [id, activo])
+  return vista
+}
 
 // Mapeo de node_key → etiqueta legible
 const NODE_KEY_LABEL: Record<string, string> = {
@@ -231,6 +248,7 @@ function Lightbox({ asset, onClose, projects }: { asset: UnifiedAsset; onClose: 
   const hasDoc   = isPdf(url) || asset.format === 'document' || asset.format === 'markdown'
   const catColor = assetColor(asset)
   const sortedVersions = [...(asset.versions ?? [])].sort((a, b) => b.version_number - a.version_number)
+  const vista = useDocView(asset.id, !hasImage && !has3D && !!asset.content)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
@@ -265,8 +283,10 @@ function Lightbox({ asset, onClose, projects }: { asset: UnifiedAsset; onClose: 
             // Markdown / documento de texto — render completo con scroll
             <div style={{ width: '100%', height: '100%', overflowY: 'auto', padding: '28px 32px', fontSize: 12, color: 'var(--text-1)', lineHeight: 1.7, alignSelf: 'flex-start' }}>
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                {asset.content}
+                {vista ? vista.content : asset.content}
               </ReactMarkdown>
+              {vista && vista.files.length > 0 && <DocumentFiles files={vista.files} />}
+              {vista && vista.data.length > 0 && <DataAccordion data={vista.data} />}
             </div>
           ) : hasDoc && url ? (
             // PDF / DOCX con URL — iframe para PDFs, fallback descarga para otros

@@ -523,11 +523,18 @@ export async function getProjectMedia(
 
 // El texto completo de UN documento, para cuando se abre en el moodboard. El listado va sin
 // `content` a propósito; esto lo trae de a uno y solo cuando hace falta.
+// Engine v1.9 — con `view: 'document'` el back separa lo que se lee (`content`) de lo que es para el
+// motor (`data[]`: outputs internal y bloques de máquina), según el `audience` de la DNA.
+export type DocumentData = { key: string | null; label: string | null; kind: 'output' | 'block'; content: string }
+// los archivos que son el entregable de un output document de imagen o deck (visual_pitch, el .pptx)
+export type DocumentFile = { key: string | null; label: string | null; name: string; url: string; format: string; kind: 'image' | 'file' }
+
 export async function getAssetContent(
   assetId: string,
-): Promise<{ name: string; format: string; content: string }> {
-  return request<{ success: boolean; name: string; format: string; content: string }>(
-    `/api/assets/${assetId}/content`,
+  view?: 'document',
+): Promise<{ name: string; format: string; content: string; data?: DocumentData[]; files?: DocumentFile[]; hidden?: number }> {
+  return request<{ success: boolean; name: string; format: string; content: string; data?: DocumentData[]; files?: DocumentFile[]; hidden?: number }>(
+    `/api/assets/${assetId}/content${view ? `?view=${view}` : ''}`,
   )
 }
 
@@ -1725,6 +1732,24 @@ export async function cleanNode(
         project_node_id: opts.projectNodeId ?? null,
         dry_run:         !!opts.dryRun,
       }),
+    },
+  )
+}
+
+// Borra UNA imagen del chat. Borrado SUAVE y en los tres sitios donde una imagen existe: la
+// sesión, el turno que la produjo y la pieza que consumen los nodos de abajo. El archivo de R2 se
+// queda donde está — borrarlo no se deshace, y lo que estorba es la referencia, no el byte.
+export async function deleteChatImage(
+  projectId: string, nodeId: string, sessionId: string,
+  outputKey: string, url: string, itemIndex?: number | null, messageId?: string | null,
+): Promise<{ output_images: OutputImagesMap; variations_marked: number; assets_marked: number }> {
+  const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+  return request<{ success: boolean; output_images: OutputImagesMap; variations_marked: number; assets_marked: number }>(
+    `/api/projects/${projectId}/canvas/nodes/${nodeId}/images/delete`,
+    {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, output_key: outputKey, url,
+        index: itemIndex ?? null, message_id: messageId ?? null, member_id: memberId }),
     },
   )
 }

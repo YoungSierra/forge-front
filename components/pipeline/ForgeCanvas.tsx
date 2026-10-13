@@ -19,7 +19,7 @@ import ModelViewer from '@/components/shared/ModelViewer'
 import { Media } from '@/components/shared/Media'
 import { saveLayout, loadLayout, seedLayoutFromDB } from '@/lib/canvas-storage'
 import { guardarLocal } from '@/lib/local-store'
-import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, reopenNodeOutput, cleanNode, type CleanResult, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName, stopNodeRun } from '@/lib/api'
+import { BACKEND_URL, authHeaders, chatWithForgeNode, getNodeSession, acceptNodeOutput, reopenNodeOutput, cleanNode, type CleanResult, deleteChatImage, generateNodePdf, generateItemImage, runValidate, runPlan, saveRunConfig, autoRunNode, updateProjectName, stopNodeRun } from '@/lib/api'
 import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap, RunPlan, GateAuthMode } from '@/lib/api'
 import { unirOutputImages } from '@/lib/output-images'
@@ -37,6 +37,7 @@ import { forDisplay } from '@/lib/json-display'
 import { downloadTextFile, mdFilename } from '@/lib/download'
 import { compareNodeKey } from '@/lib/node-order'
 import { techoDeclarado, textoDeCuenta, type CuentaDeclarada } from '@/lib/image-count'
+import { esDeDatos, pestanaDe, DATA_TAB } from '@/lib/audience'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1383,7 +1384,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   useEffect(() => {
     if (pendingOutputId === canvasNode.project_node_id) {
       setOutputOpen(true)
-      if (pendingOutputKey) setOutTab(pendingOutputKey)
+      if (pendingOutputKey) setOutTab(pestanaDe(node?.outputs, pendingOutputKey))
       clearPendingOutput()
     }
   }, [pendingOutputId, pendingOutputKey, canvasNode.project_node_id, clearPendingOutput])
@@ -1649,8 +1650,10 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
     outSizeRef.current = { w, h }
     setOutSize({ w, h })
     setOutPos({ x, y })
-    const firstOut = node.outputs?.[0]
-    setOutTab((firstOut as {key?:string} | undefined)?.key || firstOut?.name || '')
+    // Engine v1.9 — la primera pestaña VISIBLE: los outputs de datos (internal, sin imagen) viven juntos en «Data»
+    const outs = node.outputs ?? []
+    const firstOut = outs.find(o => !esDeDatos(o)) ?? outs[0]
+    setOutTab(firstOut ? (esDeDatos(firstOut) ? DATA_TAB : ((firstOut as {key?:string}).key || firstOut.name || '')) : '')
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outputOpen])
 
@@ -2242,8 +2245,8 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                   {(() => {
                     const def = (node.outputs ?? []).find(x => (x as {key?: string; name?: string}).key === outTab || x.name === outTab) as
                       { type?: string; format?: string } | undefined
-                    const esDoc = !def
-                      || ['docx', 'pdf', 'document', 'markdown', 'md', 'pptx'].includes(String(def.format || '').toLowerCase())
+                    const esDoc = outTab !== DATA_TAB && (!def
+                      || ['docx', 'pdf', 'document', 'markdown', 'md', 'pptx'].includes(String(def.format || '').toLowerCase()))
                     return esDoc
                   })() && (<>
                   {effectiveOutPdfUrl && (outSession.output_asset.format === 'pptx' || !outSession.output_asset.content) ? (
@@ -2329,9 +2332,10 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
             {/* Tab bar — una tab por output + toggle gallery/list */}
             {(node.outputs ?? []).length > 0 && (
               <div style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
-                {/* Tabs scrollables */}
+                {/* Tabs scrollables. Engine v1.9 — los outputs de datos (audience internal, sin imagen) van
+                    en una sola pestaña «Data»; los documentos y las galerías de imágenes siguen como hoy. */}
                 <div style={{ display: 'flex', overflowX: 'auto', flex: 1 }}>
-                  {(node.outputs ?? []).map(o => {
+                  {(node.outputs ?? []).filter(o => !esDeDatos(o)).map(o => {
                     const oKey    = (o as {key?:string}).key   || o.name || ''
                     const oLabel  = (o as {label?:string}).label || o.name || ''
                     const isConn  = (o as {type?:string}).type === 'connection'
@@ -2362,6 +2366,26 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       </button>
                     )
                   })}
+                  {(node.outputs ?? []).some(esDeDatos) && (
+                    <button
+                      key={DATA_TAB}
+                      onClick={() => { setOutTab(DATA_TAB); setViewMode('list') }}
+                      title="Data for the pipeline: connections, plans and image envelopes"
+                      style={{
+                        padding: '8px 14px', border: 'none', borderBottom: outTab === DATA_TAB ? '2px solid var(--action)' : '2px solid transparent',
+                        marginBottom: -1, background: 'none', cursor: 'pointer',
+                        fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: outTab === DATA_TAB ? 700 : 400,
+                        color: outTab === DATA_TAB ? 'var(--action)' : 'var(--text-3)',
+                        flexShrink: 0, whiteSpace: 'nowrap', transition: 'color 120ms, border-color 120ms',
+                        display: 'flex', alignItems: 'center', gap: 5,
+                      }}
+                    >
+                      Data
+                      <span style={{ fontSize: 7, fontWeight: 700, color: 'var(--text-4)', border: '1px solid var(--line-2)', borderRadius: 3, padding: '1px 4px', lineHeight: 1.4 }}>
+                        {(node.outputs ?? []).filter(esDeDatos).length}
+                      </span>
+                    </button>
+                  )}
                 </div>
                 {/* Focus output en chat + toggle gallery/list */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '0 8px', borderLeft: '1px solid var(--line-2)', flexShrink: 0 }}>
@@ -2416,7 +2440,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       >{vivo ? '◷ RENDERING…' : runningOutput === clave ? '…' : `▶ RENDER${techoDeclarado(o.image_count) ? ` ${textoDeCuenta(o.image_count)?.replace(/ images?$/, '')}` : ''}`}</button>
                     )
                   })()}
-                  {onOpenChat && outTab && (
+                  {onOpenChat && outTab && outTab !== DATA_TAB && (
                     <button
                       onClick={() => {
                         const activeO = (node.outputs ?? []).find(o => (o as {key?:string;name:string}).key === outTab || o.name === outTab)
@@ -2452,6 +2476,46 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
             {/* Contenido del tab activo */}
             {(() => {
               const outputs    = node.outputs ?? []
+              // Engine v1.9 — la pestaña «Data»: cada output de datos plegado, con su sección de la pieza
+              // (o la pieza de su propia sesión), JSON en monoespaciada y el resto como markdown.
+              if (outTab === DATA_TAB) {
+                const deDatos = outputs.filter(esDeDatos)
+                const cuerpo  = session?.output_asset?.content ?? null
+                const claves  = outputs.map(o => (o as {key?:string}).key || o.name || '')
+                return (
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
+                    <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', marginBottom: 10 }}>
+                      Data for the pipeline — read by the engine and the next nodes; not part of the document.
+                    </div>
+                    {deDatos.map(o => {
+                      const k = (o as {key?:string}).key || o.name || ''
+                      const propio = outputSessions[k]?.output_asset
+                      const texto  = propio?.content ?? (cuerpo ? extractSection(cuerpo, k, claves.filter(x => x !== k)) : null)
+                      const isConn = (o as {type?:string}).type === 'connection'
+                      return (
+                        <details key={k} style={{ marginBottom: 8, border: '1px solid var(--line-2)', borderRadius: 6, background: 'var(--bg-2)' }}>
+                          <summary style={{ cursor: 'pointer', padding: '7px 10px', fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {((o as {label?:string}).label || o.name || k).replace(/_/g, ' ')}
+                            {isConn && (
+                              <span style={{ fontSize: 7, fontWeight: 700, letterSpacing: '.05em', color: '#34D399', background: 'color-mix(in srgb, #34D399 15%, var(--bg-1))', border: '1px solid color-mix(in srgb, #34D399 35%, transparent)', borderRadius: 3, padding: '1px 4px', lineHeight: 1.4 }}>WIRE</span>
+                            )}
+                            {!texto && <span style={{ fontSize: 8, color: 'var(--text-4)', fontWeight: 400 }}>— not generated yet</span>}
+                          </summary>
+                          {texto && (
+                            <div style={{ padding: '4px 12px 12px', fontSize: 11, lineHeight: 1.6, color: 'var(--text-1)' }}>
+                              {(/^\s*```/.test(texto) || /^\s*[\[{]/.test(texto)) ? (
+                                <pre style={{ margin: 0, fontFamily: 'var(--font-mono)', fontSize: 10.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{texto}</pre>
+                              ) : (
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>{forDisplay(texto)}</ReactMarkdown>
+                              )}
+                            </div>
+                          )}
+                        </details>
+                      )
+                    })}
+                  </div>
+                )
+              }
               // Buscar por key (v1.3.0) o name (legacy)
               const activeOut  = outputs.find(o => ((o as {key?:string}).key || o.name) === outTab) ?? outputs[0]
               if (!activeOut) return null
@@ -6227,6 +6291,14 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
               }),
             } : null)
             return r
+          }}
+          // Borrar una imagen del hilo. Lo pidió Migue Amez: con una tanda descartada el chat se
+          // satura y no había forma de quitar una sola sin rehacer el nodo entero.
+          onDeleteItemImage={async (outputKey, itemIndex, url, messageId) => {
+            const sid = chatSessionIdRef.current ?? chatSessionId
+            if (!sid) return
+            const r = await deleteChatImage(project.id, chatForgeNode.id, sid, outputKey, url, itemIndex, messageId)
+            setChatOutputImages(r.output_images)
           }}
           approvedAsset={chatApprovedAsset ?? undefined}
           isGate={chatForgeNode.role === 'gate'}

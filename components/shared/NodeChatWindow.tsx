@@ -481,7 +481,11 @@ export interface InlineImageItem {
   index:        number
   text:         string
   imageUrl:     string | null                // última variación generada (null si ninguna)
-  allVariations: { url: string; condition?: string | null }[]
+  allVariations: { url: string; condition?: string | null; deleted?: boolean }[]
+  /** Borra UNA imagen del hilo. Borrado suave: la referencia se marca y el archivo se queda, así
+   *  que el historial del chat no pierde su forma y la pieza deja de alimentar a los nodos de
+   *  abajo. Sin esta función no se dibuja la papelera. */
+  onDelete?:    (url: string) => Promise<void>
   isGenerating: boolean
   onGenerate:   (condition?: string) => void
   onZoom:       (url: string) => void
@@ -748,21 +752,108 @@ function InlineGenButton({ item }: { item: InlineImageItem }) {
 function ThumbnailCard({ item }: { item: InlineImageItem }) {
   const [showPanel, setShowPanel] = useState(false)
   const S = 80
+  // Qué miniatura tiene el cursor encima: la papelera sale solo sobre la suya.
+  const [sobre,      setSobre]      = useState<number | null>(null)
+  const [borrando,   setBorrando]   = useState<string | null>(null)
+  // Qué imagen está esperando el sí. Se guarda la URL y no un booleano: con varias miniaturas en
+  // fila, un booleano pondría el cartel sobre todas y uno diría que sí mirando la que no es.
+  const [confirmando, setConfirmando] = useState<string | null>(null)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end' }}>
         {/* Una thumbnail por variación */}
-        {item.allVariations.map((v, i) => (
+        {item.allVariations.map((v, i) => v.deleted ? (
+          // La lápida ocupa el hueco exacto de la imagen. Quitarla del todo movería el resto del
+          // hilo hacia arriba y se perdería la noción de que ahí hubo algo: el documento de Migue
+          // lo pide así, «para mantener la coherencia semántica del historial».
           <div
             key={i}
-            style={{ width: S, height: S, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--line-2)', flexShrink: 0 }}
+            title="Deleted by the user — the file is kept, only the reference was removed"
+            style={{
+              width: S, height: S, borderRadius: 6, flexShrink: 0,
+              border: '1px dashed var(--line-2)', background: 'var(--bg-2)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
+            }}
+          >
+            <span style={{ fontSize: 15, opacity: 0.45 }}>🖼</span>
+            <span style={{ fontSize: 8, color: 'var(--text-4)', textAlign: 'center', lineHeight: 1.25, padding: '0 4px' }}>
+              Image deleted
+            </span>
+          </div>
+        ) : (
+          <div
+            key={i}
+            onMouseEnter={() => setSobre(i)}
+            onMouseLeave={() => setSobre(null)}
+            style={{ width: S, height: S, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--line-2)', flexShrink: 0, position: 'relative' }}
           >
             <Media
               src={v.url} alt="" compact
               onClick={() => item.onZoom(v.url)}
               style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
             />
+            {item.onDelete && sobre === i && confirmando !== v.url && (
+              <button
+                onClick={e => { e.stopPropagation(); setConfirmando(v.url) }}
+                title="Delete this image"
+                style={{
+                  position: 'absolute', top: 3, right: 3, width: 20, height: 20,
+                  borderRadius: 5, cursor: 'pointer',
+                  border: '1px solid rgba(255,255,255,0.22)',
+                  background: 'rgba(17,17,17,0.72)', color: '#fff',
+                  fontSize: 10, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >🗑</button>
+            )}
+
+            {/* Se confirma SIEMPRE, no solo sobre las importantes.
+                Su documento pedía preguntar cuando la imagen estuviera marcada como «key asset»,
+                y esa marca no existe: las piezas de imagen están todas en el mismo estado y su
+                metadata solo guarda de dónde vinieron, nunca cuánto valen. Decisión de Young
+                (13-oct): preguntar siempre. Un clic de más es barato; una imagen que desaparece
+                sin preguntar, no — y aunque el archivo se queda en R2, recuperarlo no es algo que
+                el usuario pueda hacer desde el producto.
+                La confirmación va ENCIMA de la miniatura y no en un modal aparte: así se ve cuál
+                es la que se va, que es justo lo que uno necesita saber antes de decir que sí. */}
+            {confirmando === v.url && (
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                  position: 'absolute', inset: 0, background: 'rgba(10,10,10,0.86)',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                <span style={{ fontSize: 9, color: '#fff', fontWeight: 600 }}>
+                  {borrando === v.url ? 'Deleting…' : 'Delete?'}
+                </span>
+                {borrando !== v.url && (
+                  <div style={{ display: 'flex', gap: 5 }}>
+                    <button
+                      onClick={async e => {
+                        e.stopPropagation()
+                        setBorrando(v.url)
+                        try { await item.onDelete!(v.url) } finally { setBorrando(null); setConfirmando(null) }
+                      }}
+                      title="Yes, delete it"
+                      style={{
+                        width: 26, height: 22, borderRadius: 4, cursor: 'pointer', border: 'none',
+                        background: '#EF4444', color: '#fff', fontSize: 11, lineHeight: 1,
+                      }}
+                    >✓</button>
+                    <button
+                      onClick={e => { e.stopPropagation(); setConfirmando(null) }}
+                      title="Keep it"
+                      style={{
+                        width: 26, height: 22, borderRadius: 4, cursor: 'pointer',
+                        border: '1px solid rgba(255,255,255,0.3)', background: 'transparent',
+                        color: '#fff', fontSize: 11, lineHeight: 1,
+                      }}
+                    >✕</button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ))}
 
@@ -1135,6 +1226,8 @@ export interface NodeChatWindowProps {
   imageGenOutputs?:     ImageOutputDef[]
   outputImages?:        OutputImagesMap
   onGenerateItemImage?: (outputKey: string, itemIndex: number, itemText: string, condition?: string, messageId?: string) => Promise<{ image_url: string; output_images: OutputImagesMap }>
+  /** Borra UNA imagen del hilo, sin romper el historial. Si no se pasa, no hay papelera. */
+  onDeleteItemImage?:   (outputKey: string, itemIndex: number, url: string, messageId?: string) => Promise<void>
   // Output enfocado: el chat trabaja sobre un output específico del nodo
   targetOutputKey?:     string | null
   targetOutputLabel?:   string | null
@@ -1170,7 +1263,7 @@ export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
   initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, onStop, onRunStatus, docUrl, docFormat, imagesPending,
   approvedAsset, imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
-  targetOutputKey, targetOutputLabel, systemPrompt, siblingContent, missingSourceNote, onReopen,
+  targetOutputKey, targetOutputLabel, systemPrompt, siblingContent, missingSourceNote, onReopen, onDeleteItemImage,
   isGate, projectNodeId, onOpenOutput,
 }: NodeChatWindowProps) {
   const [reabriendo,      setReabriendo]      = useState(false)
@@ -1428,7 +1521,9 @@ export default function NodeChatWindow({
 
       const previos = textoItemsPrevios(def.outputKey, def.format)
       parseOutputItems(section, def.format, def.outputKey, true).forEach((text, idx) => {
-        const tieneImagen = (outputImages[def.outputKey] ?? []).some(s => s.index === idx && s.variations?.length > 0)
+        // Una variación borrada no cuenta como imagen: si contara, el ítem seguiría dándose por
+        // ilustrado y el botón de generar no volvería a aparecer nunca.
+        const tieneImagen = (outputImages[def.outputKey] ?? []).some(s => s.index === idx && (s.variations ?? []).some(v => !(v as { deleted?: boolean }).deleted))
         // Antes bastaba con tener imagen para saltarlo, y eso volvía inútil TODA iteración: la
         // primera corrida llenaba los N ítems y de ahí en más ninguna respuesta generaba nada,
         // así que el prompt nuevo se seguía mostrando con la imagen vieja. Ahora lo que decide es
@@ -1631,8 +1726,9 @@ export default function NodeChatWindow({
         const key = `${def.outputKey}:${idx}`
         items.push({
           itemKey: key, index: idx, text: itemText,
-          imageUrl: variations.at(-1)?.url ?? null,
+          imageUrl: [...variations].reverse().find(v => !(v as { deleted?: boolean }).deleted)?.url ?? null,
           allVariations: variations,
+          onDelete: onDeleteItemImage ? (url: string) => onDeleteItemImage(def.outputKey, idx, url) : undefined,
           isGenerating: generatingImgKeys.has(key),
           onZoom: url => setZoomImageUrl(url),
           onGenerate: async (condition?: string) => {
@@ -2071,8 +2167,9 @@ export default function NodeChatWindow({
                     itemKey:      key,
                     index:        idx,
                     text:         itemText,
-                    imageUrl:     variations.at(-1)?.url ?? null,
+                    imageUrl:     [...variations].reverse().find(v => !(v as { deleted?: boolean }).deleted)?.url ?? null,
                     allVariations: variations,
+                    onDelete:     onDeleteItemImage ? (url: string) => onDeleteItemImage(def.outputKey, idx, url, msg.id) : undefined,
                     isGenerating: generatingImgKeys.has(key),
                     onZoom:       url => setZoomImageUrl(url),
                     onGenerate:   async (condition?: string) => {

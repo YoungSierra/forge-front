@@ -19,6 +19,8 @@ import { videoThumb, videoThumbCached, audioThumb, audioThumbCached, mmss, type 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/lib/md-components'
+import DataAccordion, { DocumentFiles } from '@/components/shared/DataAccordion'
+import type { DocumentData, DocumentFile } from '@/lib/api'
 import ContextoModal from './ContextoModal'
 import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias } from '@/lib/api'
 
@@ -3425,19 +3427,23 @@ function useGlbThumb(url: string, id: string, r: Rampa) {
 
 // El documento entero, pedido de a uno cuando se abre. Se cachea en memoria por sesión: abrir
 // y cerrar el mismo documento no vuelve a pegarle al backend.
-const docCache = new Map<string, string>()
+// Engine v1.9 — se pide la VISTA DE DOCUMENTO (`view=document`): `content` es lo que se lee y
+// `data[]` lo que la pieza lleva para el motor (outputs internal, bloques de máquina), que va al
+// acordeón «Data» debajo del documento.
+type DocView = { content: string; data: DocumentData[]; files: DocumentFile[] }
+const docCache = new Map<string, DocView>()
 
 function useDocContent(id: string) {
-  const [texto, setTexto] = useState<string | null>(() => (id ? docCache.get(id) ?? null : null))
+  const [doc, setDoc] = useState<DocView | null>(() => (id ? docCache.get(id) ?? null : null))
   useEffect(() => {
-    if (!id || docCache.has(id)) { setTexto(id ? docCache.get(id)! : null); return }
+    if (!id || docCache.has(id)) { setDoc(id ? docCache.get(id)! : null); return }
     let vivo = true
-    getAssetContent(id)
-      .then(r => { docCache.set(id, r.content); if (vivo) setTexto(r.content) })
+    getAssetContent(id, 'document')
+      .then(r => { const v = { content: r.content, data: r.data ?? [], files: r.files ?? [] }; docCache.set(id, v); if (vivo) setDoc(v) })
       .catch(() => { /* sin contenido: queda el asomo de la tarjeta */ })
     return () => { vivo = false }
   }, [id])
-  return texto
+  return doc
 }
 
 function useVideoThumb(url: string, id: string) {
@@ -3930,7 +3936,8 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
   const esVigente = !vers.length || !!verSel?.is_current
   const [aprobando, setAprobando] = useState(false)
   const url = (verSel?.storage_url ?? asset.storage_url) ?? ''
-  const texto = useDocContent(kindOf(asset) === 'doc' ? asset.id : '')
+  const vistaDoc = useDocContent(kindOf(asset) === 'doc' ? asset.id : '')
+  const texto    = vistaDoc ? vistaDoc.content : null
   const [open,  setOpen]  = useState(false)
   // Zoom dentro de la card, para mirar el detalle fino de un arte sin abrir otra ventana.
   // Rueda para acercar sobre el puntero, arrastre para desplazar, doble clic para volver.
@@ -4128,6 +4135,10 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
                   {texto ?? asset.preview ?? ''}
                 </ReactMarkdown>
               )}
+              {/* Engine v1.9 — los archivos entregables (visual_pitch, el .pptx) y, plegado, lo que la pieza
+                  lleva para el motor */}
+              {vistaDoc && vistaDoc.files.length > 0 && <DocumentFiles files={vistaDoc.files} />}
+              {vistaDoc && vistaDoc.data.length > 0 && <DataAccordion data={vistaDoc.data} />}
             </div>
 
             {url && (
