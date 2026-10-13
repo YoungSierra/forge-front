@@ -2160,6 +2160,10 @@ export type PasoDeCadena = {
   /** Las animaciones que produciría este paso, para poder elegir cuáles correr (informe de JuanK,
    *  punto 1). Vacío = todavía no se han leído del ADI; el Run las lee al correr. */
   clips?: { nombre: string; etiqueta: string }[]
+  /** Si el paso pide el Brief y la descripción del efecto antes de correr (VFX Sheet). Viene del
+   *  backend y no escrito acá: una condición contra el nombre del paso se queda muda en silencio
+   *  el día que el paso cambia de nombre, que es exactamente lo que ya pasó una vez. */
+  pide_vfx?: boolean
   /** Las poses entre las que hay que elegir antes de correr, cuando el paso tiene variantes
    *  (Character Sheet · Concept art). Viene del backend, no escrito acá: si una cadena gana otra
    *  variante, la ventana se entera sola. Ausente = este paso no pregunta nada. */
@@ -2211,7 +2215,11 @@ export async function advanceAsset(
           /** Los prompts que el usuario revisó y corrigió, por clip. Van con sus segundos —los
            *  devolvió la propia revisión— para que el despacho no le vuelva a pedir el párrafo al
            *  modelo: saldría otro texto distinto del que se aprobó. */
-          promptsClips?: Record<string, { prompt: string; segundos?: number }> | null } = {},
+          promptsClips?: Record<string, { prompt: string; segundos?: number }> | null
+          /** El Brief, la descripción y la duración del efecto, como quedaron en la ventana. Si no
+           *  van, el despacho los deriva de los `asg_fills` — pero entonces lo que se revisó no es
+           *  lo que corre. */
+          vfx?: { brief: string; descripcion: string; segundos?: number } | null } = {},
 ) {
   return request<{ success: boolean; cadena: string; creados: { id: string; name: string; storage_url: string; format: string }[] }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/advance`,
@@ -2223,6 +2231,7 @@ export async function advanceAsset(
         opciones: opts.opciones ?? null,
         clips: opts.clips ?? null,
         prompts_clips: opts.promptsClips ?? null,
+        vfx: opts.vfx ?? null,
       }),
     },
   )
@@ -2248,6 +2257,33 @@ export async function promptsDeClips(projectId: string, assetId: string, clips?:
       body: JSON.stringify({ clips: clips ?? null }),
     },
   )
+}
+
+/** El Brief y la descripción del efecto, ANTES de generar el video.
+ *
+ *  A diferencia de los prompts de los clips, esto NO cuesta: no llama a ningún modelo, lee el
+ *  documento de fills que el 3.20 ya escribió y reparte sus campos por la tabla de equivalencias
+ *  de Miguel. Por eso se pide al abrir la ventana y no detrás de un botón.
+ *
+ *  Puede venir casi vacío, y entonces `avisos` dice por qué: hoy los fills no traen los campos de
+ *  la VFX Sheet. Vacío es la respuesta correcta —la regla de Miguel es dejar en blanco antes que
+ *  inventar— y por eso los dos textos son editables. */
+export async function vfxBrief(projectId: string, assetId: string) {
+  return request<{
+    success: boolean
+    brief: string; descripcion: string
+    /** Lo derivado de la hoja, aunque haya algo guardado: para poder volver a ello. */
+    brief_derivado?: string; descripcion_derivada?: string
+    segundos?: number | null
+    /** Si lo que viene se escribió a mano en una corrida anterior de esta misma instancia. */
+    editado?: boolean
+    campos?: Record<string, string>
+    avisos?: string[]
+    /** Ediciones de la lámina POSTERIORES al texto del que sale el Brief: el video se pediría con
+     *  la descripción de una página que ya no se ve así. */
+    ediciones_posteriores?: { version: number; editor: string; cuando: string }[]
+    item?: string | null; fuente?: string
+  }>(`/api/projects/${projectId}/canvas/assets/${assetId}/vfx-brief`)
 }
 
 /** Una opción de generación que el workflow expone, con los valores que ComfyUI declara válidos.

@@ -22,7 +22,7 @@ import { MD_COMPONENTS } from '@/lib/md-components'
 import DataAccordion, { DocumentFiles } from '@/components/shared/DataAccordion'
 import type { DocumentData, DocumentFile } from '@/lib/api'
 import ContextoModal from './ContextoModal'
-import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias } from '@/lib/api'
+import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias, vfxBrief } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import InstanciarModal from './InstanciarModal'
@@ -5930,6 +5930,34 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
   // fuente no lleva la diferencia, el prompt es el único sitio donde meterla.
   const [prompts,  setPrompts]  = useState<Record<string, { prompt: string; segundos?: number }> | null>(null)
   const [pidiendo, setPidiendo] = useState(false)
+
+  // El efecto, para el paso de la VFX Sheet: el Brief que se le pasa al grafo, la descripción del
+  // movimiento y cuántos segundos dura el bucle.
+  //
+  // Se piden al abrir la ventana y no detrás de un botón, al revés que los prompts de los clips:
+  // esto no llama a ningún modelo, lee el documento con el que se dibujó la hoja. Lo caro es el
+  // video.
+  //
+  // Puede venir casi todo en blanco —hoy los fills no traen los campos de la VFX Sheet— y eso es
+  // correcto: la regla de Miguel es dejar vacío antes que inventar. Por eso son editables y por
+  // eso el aviso explica que falta rellenar, en vez de parecer que algo se rompió.
+  const [vfx, setVfx] = useState<{ brief: string; descripcion: string; segundos: number } | null>(null)
+  const [vfxInfo, setVfxInfo] = useState<Awaited<ReturnType<typeof vfxBrief>> | null>(null)
+
+  useEffect(() => {
+    if (!paso?.pide_vfx) return
+    let vivo = true
+    vfxBrief(projectId, asset.id)
+      .then(r => {
+        if (!vivo) return
+        setVfxInfo(r)
+        setVfx({ brief: r.brief || '', descripcion: r.descripcion || '', segundos: r.segundos || 5 })
+      })
+      // Sin Brief se corre igual: el backend lo deriva de la misma fuente al despachar. Quedarse
+      // sin Run porque no se pudo pintar un recuadro sería peor que correr sin él.
+      .catch(() => { if (vivo) setVfx({ brief: '', descripcion: '', segundos: 5 }) })
+    return () => { vivo = false }
+  }, [projectId, asset.id, paso?.pide_vfx])
   const [ops,      setOps]      = useState<OpcionWorkflow[] | null>(null)
   const [tamano,   setTamano]   = useState<{ porDespacho: number; usd: number } | null>(null)
   const [elegidas, setElegidas] = useState<Record<string, unknown>>({})
@@ -6037,6 +6065,9 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
         opciones: (Object.keys(cambiadas).length || pose)
           ? { ...cambiadas, ...(pose ? { pose } : {}) }
           : null,
+        // Lo que se revisó es lo que corre. Sin esto el despacho volvería a derivarlo de los
+        // fills y saldría otro texto distinto del que se aprobó.
+        vfx: paso.pide_vfx && vfx ? vfx : null,
       })
       onListo(r.creados.map(c => c.id))
     } catch (e) {
@@ -6453,6 +6484,96 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
               </div>
             )}
 
+            {/* El efecto, para la VFX Sheet. Dos textos y una duración, todos corregibles antes
+                de pagar — es la misma idea que revisar los prompts de los clips, pero acá no
+                cuesta nada mirarlos: salen del documento, no de una llamada al modelo.
+                La descripción es obligatoria. Dentro del grafo manda sobre el Brief, así que vacía
+                deja al modelo animando lo que se le ocurra con el video ya pagado. */}
+            {paso.pide_vfx && vfx && (
+              <div style={{ marginBottom: 14, border: '1px solid var(--line-2)', borderRadius: 9, padding: '9px 11px' }}>
+                <div style={{ fontSize: 11.5, color: 'var(--text-1)', marginBottom: 2 }}>What this effect is</div>
+                <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginBottom: 7, lineHeight: 1.45 }}>
+                  Taken from the text this sheet was drawn with. Correct anything before running —
+                  what you leave here is what the video is made from.
+                </div>
+
+                {/* Lo que la hoja no dice. No se rellena solo: un valor inventado es justo lo que
+                    el workflow tiene prohibido dibujar. */}
+                {!!vfxInfo?.avisos?.length && vfxInfo.avisos.map((a, i) => (
+                  <div key={i} style={{
+                    fontSize: 10.5, lineHeight: 1.45, marginBottom: 7, padding: '6px 8px', borderRadius: 6,
+                    color: 'var(--text-2)',
+                    background: 'color-mix(in srgb, #F59E0B 7%, transparent)',
+                    border: '1px solid color-mix(in srgb, #F59E0B 22%, var(--line-2))',
+                  }}>{a}</div>
+                ))}
+
+                <div style={{ fontSize: 10.5, color: 'var(--text-2)', marginBottom: 3 }}>
+                  Description
+                  <span style={{ color: '#F87171' }}> *</span>
+                </div>
+                <textarea
+                  value={vfx.descripcion} disabled={busy} rows={4}
+                  placeholder="What the effect does, in plain language: how it starts, peaks and fades."
+                  onChange={e => setVfx(v => v && ({ ...v, descripcion: e.target.value }))}
+                  style={{
+                    width: '100%', padding: '7px 9px', borderRadius: 7, resize: 'vertical',
+                    background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+                    color: 'var(--text-0)', fontSize: 11.5, lineHeight: 1.5,
+                    fontFamily: 'var(--font-sans)', outline: 'none',
+                  }}
+                />
+
+                <div style={{ fontSize: 10.5, color: 'var(--text-2)', margin: '9px 0 3px' }}>Brief</div>
+                <textarea
+                  value={vfx.brief} disabled={busy} rows={7}
+                  onChange={e => setVfx(v => v && ({ ...v, brief: e.target.value }))}
+                  style={{
+                    width: '100%', padding: '7px 9px', borderRadius: 7, resize: 'vertical',
+                    background: 'var(--bg-2)', border: '1px solid var(--line-2)',
+                    color: 'var(--text-0)', fontSize: 11, lineHeight: 1.5,
+                    fontFamily: 'var(--font-mono)', outline: 'none',
+                  }}
+                />
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9 }}>
+                  <span style={{ flex: 1, fontSize: 10.5, color: 'var(--text-2)' }}>
+                    Loop length
+                    <span style={{ color: 'var(--text-4)' }}> — the graph turns this into frames</span>
+                  </span>
+                  <input
+                    type="number" min={1} max={20} step={1} disabled={busy}
+                    value={vfx.segundos}
+                    onChange={e => setVfx(v => v && ({ ...v, segundos: Number(e.target.value) }))}
+                    style={{
+                      width: 68, padding: '5px 8px', borderRadius: 6,
+                      background: 'var(--bg-3)', border: '1px solid var(--line-2)',
+                      color: 'var(--text-0)', fontSize: 11.5,
+                    }}
+                  />
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-3)' }}>s</span>
+                </div>
+
+                {/* Volver a lo que dice la hoja, cuando lo de arriba se escribió a mano en una
+                    corrida anterior. Sin esto, recuperar el texto original obliga a acordarse. */}
+                {vfxInfo?.editado && (
+                  <button
+                    disabled={busy}
+                    onClick={() => setVfx(v => v && ({
+                      ...v,
+                      brief: vfxInfo.brief_derivado ?? v.brief,
+                      descripcion: vfxInfo.descripcion_derivada ?? v.descripcion,
+                    }))}
+                    style={{
+                      marginTop: 9, padding: '4px 9px', borderRadius: 6, cursor: busy ? 'default' : 'pointer',
+                      background: 'transparent', border: '1px solid var(--line-2)',
+                      color: 'var(--text-3)', fontSize: 10.5, fontFamily: 'var(--font-sans)',
+                    }}
+                  >Back to what the sheet says</button>
+                )}
+              </div>
+            )}
+
             <div style={{
               fontSize: 11.5, color: 'var(--text-3)', lineHeight: 1.55, marginBottom: 18,
               padding: '9px 11px', borderRadius: 8,
@@ -6509,7 +6630,10 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
                 // Y sin pose elegida no se corre, cuando el paso la pide. Lanzar la pose
                 // equivocada cuesta cuatro despachos y hay que tirarlos: mas vale un boton apagado
                 // que una corrida pagada que nadie queria.
-                disabled={busy || (paso.pide_prompt && !texto.trim()) || (!!paso.poses?.length && !pose)}
+                // Y sin descripcion del efecto tampoco: dentro del grafo es la que manda sobre
+                // el Brief, asi que vacia deja al modelo animando lo que se le ocurra — con el
+                // video ya pagado.
+                disabled={busy || (paso.pide_prompt && !texto.trim()) || (!!paso.poses?.length && !pose) || (!!paso.pide_vfx && !vfx?.descripcion.trim())}
                 style={{
                   flex: 1, padding: '9px 0', borderRadius: 8,
                   cursor: busy || (paso.pide_prompt && !texto.trim()) ? 'default' : 'pointer',
