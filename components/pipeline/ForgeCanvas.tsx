@@ -24,11 +24,11 @@ import type { ApprovedAsset } from '@/lib/api'
 import type { ChatMessage, OutputImageItem, OutputImagesMap, RunPlan, GateAuthMode } from '@/lib/api'
 import { unirOutputImages } from '@/lib/output-images'
 import type { Project, RunScope } from '@/lib/types'
-import NodeChatWindow, { parseOutputItems, buildImageGenComponents, ImageThumbnailRow, VariationPanel } from '@/components/shared/NodeChatWindow'
+import NodeChatWindow, { parseOutputItems, buildImageGenComponents, ImageThumbnailRow, VariationPanel, entradasDelSobre, guardadaDelItem } from '@/components/shared/NodeChatWindow'
 import type { ImageOutputDef, InlineImageItem } from '@/components/shared/NodeChatWindow'
 import AssetCardDeck, { invalidateAssetDeckCache } from './AssetCardDeck'
 import ForgeToolbar, { type RunMenuItem } from './ForgeToolbar'
-import RegenerateSliceButton, { mensajeDeRegeneracion } from '@/components/shared/RegenerateSliceButton'
+import RegenerateSliceButton, { mensajeDeRegeneracion, seccionesDelSlice } from '@/components/shared/RegenerateSliceButton'
 import ExportModal from '@/components/shared/ExportModal'
 import { CopyButton } from '@/components/shared/CopyButton'
 import ReactMarkdown from 'react-markdown'
@@ -38,7 +38,7 @@ import { forDisplay } from '@/lib/json-display'
 import { downloadTextFile, mdFilename } from '@/lib/download'
 import { compareNodeKey } from '@/lib/node-order'
 import { techoDeclarado, textoDeCuenta, type CuentaDeclarada } from '@/lib/image-count'
-import { esDeDatos, pestanaDe, DATA_TAB } from '@/lib/audience'
+import { esDeDatos, pestanaDe, DATA_TAB, pestanasEnOrden, pestanaInicial } from '@/lib/audience'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1677,10 +1677,8 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
     outSizeRef.current = { w, h }
     setOutSize({ w, h })
     setOutPos({ x, y })
-    // Engine v1.9 — la primera pestaña VISIBLE: los outputs de datos (internal, sin imagen) viven juntos en «Data»
-    const outs = node.outputs ?? []
-    const firstOut = outs.find(o => !esDeDatos(o)) ?? outs[0]
-    setOutTab(firstOut ? (esDeDatos(firstOut) ? DATA_TAB : ((firstOut as {key?:string}).key || firstOut.name || '')) : '')
+    // Engine v1.10 — la pestaña inicial es el primer output document; las pestañas van documentos → «Data» → imágenes
+    setOutTab(pestanaInicial(node.outputs))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outputOpen])
 
@@ -1748,7 +1746,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
 
   // `outputKey` = la pestaña en la que está parado el usuario. Vacío desde la tarjeta, que no
   // tiene pestañas. El backend genera el PDF si ese output todavía no lo tenía y lo deja guardado.
-  const handleGeneratePdf = useCallback(async (e?: React.MouseEvent, outputKey = '') => {
+  const handleGeneratePdf = useCallback(async (e?: React.MouseEvent, outputKey = '', forzar = false) => {
     e?.stopPropagation()
     if (pdfLoading) return
 
@@ -1757,9 +1755,22 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
     // despacho todavía está vacío. Un documento a medias que alguien manda sin mirarlo es peor que
     // esperar, así que no se entrega hasta que el render termine.
     const pref = `${canvasNode.project_node_id}:`
-    const enCurso = Object.keys(leerDespachos())
+    let enCurso = Object.keys(leerDespachos())
       .filter(k => k.startsWith(pref)).map(k => k.slice(pref.length))
       .filter(k => !outputKey || k === outputKey)
+    // Engine v1.10 — C: una nota cuya sesión ya no está `active` (terminó, o se abandonó) no bloquea: se borra. Un
+    // despacho que terminó mal dejaba la nota puesta y el PDF bloqueado hasta recargar.
+    if (enCurso.length) {
+      const siguen: string[] = []
+      for (const k of enCurso) {
+        try {
+          const r = await getNodeSession(projectId, node.id, k, canvasNode.project_node_id)
+          if ((r.session?.status ?? 'active') === 'active') siguen.push(k)
+          else { const n = leerDespachos(); delete n[pref + k]; guardarDespachos(n) }
+        } catch { siguen.push(k) }
+      }
+      enCurso = siguen
+    }
     if (enCurso.length) {
       setPdfError(`Images are still rendering (${enCurso.join(', ')}). The PDF would print the [ IMAGE: … ] markers as text — wait for the render to finish.`)
       return
@@ -1767,7 +1778,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
 
     setPdfLoading(true); setPdfError(null)
     try {
-      const r = await generateNodePdf(projectId, node.id, outputKey || null, canvasNode.project_node_id)
+      const r = await generateNodePdf(projectId, node.id, outputKey || null, canvasNode.project_node_id, forzar)
       setGeneratedPdfUrls(prev => ({ ...prev, [outputKey]: r.url }))
       window.open(r.url, '_blank')
     } catch (err) {
@@ -2088,21 +2099,24 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       title="View output"
                       style={{ border: 'none', background: 'none', color: '#34D399', cursor: 'pointer', fontSize: 12, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}
                     >👁</button>
-                    {effectivePdfUrl ? (
+                    {effectivePdfUrl && (
                       <a
                         href={effectivePdfUrl}
                         target="_blank"
                         rel="noreferrer"
                         onClick={e => e.stopPropagation()}
-                        title="Download PDF"
+                        title="Download PDF (as it was generated)"
                         style={{ color: '#34D399', fontSize: 12, textDecoration: 'none', lineHeight: 1, padding: '0 2px', flexShrink: 0 }}
                       >⬇</a>
-                    ) : session.output_asset.content ? (
+                    )}
+                    {/* Engine v1.10 — C: rehacer el PDF siempre a mano junto al enlace. El enlace guardado puede ser el PDF que
+                        salió con la respuesta, antes de las imágenes; antes solo se podía rehacer desaprobando. */}
+                    {session.output_asset.content ? (
                       <button
-                        onClick={handleGeneratePdf}
-                        title={pdfLoading ? 'Generating PDF…' : 'Generate & Download PDF'}
+                        onClick={e => handleGeneratePdf(e, '', !!effectivePdfUrl)}
+                        title={pdfLoading ? 'Generating PDF…' : effectivePdfUrl ? 'Rebuild the PDF with the current images' : 'Generate & Download PDF'}
                         style={{ border: 'none', background: 'none', color: '#34D399', cursor: pdfLoading ? 'default' : 'pointer', fontSize: pdfLoading ? 9 : 12, padding: '0 2px', lineHeight: 1, flexShrink: 0, fontFamily: 'var(--font-mono)' }}
-                      >{pdfLoading ? '…' : '⬇'}</button>
+                      >{pdfLoading ? '…' : effectivePdfUrl ? '↻' : '⬇'}</button>
                     ) : null}
                   </div>
                 </div>
@@ -2362,7 +2376,29 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 {/* Tabs scrollables. Engine v1.9 — los outputs de datos (audience internal, sin imagen) van
                     en una sola pestaña «Data»; los documentos y las galerías de imágenes siguen como hoy. */}
                 <div style={{ display: 'flex', overflowX: 'auto', flex: 1 }}>
-                  {(node.outputs ?? []).filter(o => !esDeDatos(o)).map(o => {
+                  {/* Engine v1.10 — orden de PRESENTACIÓN: documentos (audience document), «Data» (internos de datos) e
+                      imágenes, cada grupo en el orden de la DNA. El orden de ejecución no cambia. */}
+                  {pestanasEnOrden(node.outputs).map(o => {
+                    if (o === DATA_TAB) return (
+                      <button
+                        key={DATA_TAB}
+                        onClick={() => { setOutTab(DATA_TAB); setViewMode('list') }}
+                        title="Data for the pipeline: connections, plans and image envelopes"
+                        style={{
+                          padding: '8px 14px', border: 'none', borderBottom: outTab === DATA_TAB ? '2px solid var(--action)' : '2px solid transparent',
+                          marginBottom: -1, background: 'none', cursor: 'pointer',
+                          fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: outTab === DATA_TAB ? 700 : 400,
+                          color: outTab === DATA_TAB ? 'var(--action)' : 'var(--text-3)',
+                          flexShrink: 0, whiteSpace: 'nowrap', transition: 'color 120ms, border-color 120ms',
+                          display: 'flex', alignItems: 'center', gap: 5,
+                        }}
+                      >
+                        Data
+                        <span style={{ fontSize: 7, fontWeight: 700, color: 'var(--text-4)', border: '1px solid var(--line-2)', borderRadius: 3, padding: '1px 4px', lineHeight: 1.4 }}>
+                          {(node.outputs ?? []).filter(esDeDatos).length}
+                        </span>
+                      </button>
+                    )
                     const oKey    = (o as {key?:string}).key   || o.name || ''
                     const oLabel  = (o as {label?:string}).label || o.name || ''
                     const isConn  = (o as {type?:string}).type === 'connection'
@@ -2393,26 +2429,6 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       </button>
                     )
                   })}
-                  {(node.outputs ?? []).some(esDeDatos) && (
-                    <button
-                      key={DATA_TAB}
-                      onClick={() => { setOutTab(DATA_TAB); setViewMode('list') }}
-                      title="Data for the pipeline: connections, plans and image envelopes"
-                      style={{
-                        padding: '8px 14px', border: 'none', borderBottom: outTab === DATA_TAB ? '2px solid var(--action)' : '2px solid transparent',
-                        marginBottom: -1, background: 'none', cursor: 'pointer',
-                        fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: outTab === DATA_TAB ? 700 : 400,
-                        color: outTab === DATA_TAB ? 'var(--action)' : 'var(--text-3)',
-                        flexShrink: 0, whiteSpace: 'nowrap', transition: 'color 120ms, border-color 120ms',
-                        display: 'flex', alignItems: 'center', gap: 5,
-                      }}
-                    >
-                      Data
-                      <span style={{ fontSize: 7, fontWeight: 700, color: 'var(--text-4)', border: '1px solid var(--line-2)', borderRadius: 3, padding: '1px 4px', lineHeight: 1.4 }}>
-                        {(node.outputs ?? []).filter(esDeDatos).length}
-                      </span>
-                    </button>
-                  )}
                 </div>
                 {/* Focus output en chat + toggle gallery/list */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '0 8px', borderLeft: '1px solid var(--line-2)', flexShrink: 0 }}>
@@ -2677,6 +2693,9 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
               // image_gen, y sin `docx` acá la ventana mostraba las imágenes y escondía el texto.
               const PROSE_FORMATS = ['markdown', 'md', 'document', 'docx', 'text', 'pptx', 'pdf']
               const parsedItems = section ? parseOutputItems(section, activeOut.format) : []
+              // Engine v1.10 — A1/E: el id y el título de cada ítem del sobre (el seed del 1.1 se rotula por su id, no
+              // «Item N»), y con ids guardados la imagen se empareja por id.
+              const entradasSobre = section ? entradasDelSobre(section, activeOutKey, true) : null
               const isGallery   = parsedItems.length >= 2 && !!activeOut.image_gen && !PROSE_FORMATS.includes(activeOut.format ?? '')
               // Construir image items si el output tiene image_gen
               const imageItems: InlineImageItem[] = []
@@ -2685,13 +2704,17 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                 const savedItems = localOutputImages[activeOutKey] ?? []
                 for (let idx = 0; idx < parsedItems.length; idx++) {
                   const itemText   = parsedItems[idx]
-                  const saved      = savedItems.find(s => s.index === idx)
+                  const idItem     = entradasSobre?.[idx]?.id ?? null
+                  const saved      = guardadaDelItem(savedItems, idx, idItem)
                   const variations = saved?.variations ?? []
                   const key        = `${activeOutKey}:${idx}`
                   imageItems.push({
                     itemKey:       key,
                     index:         idx,
                     text:          itemText,
+                    itemId:        idItem,
+                    titulo:        entradasSobre?.[idx]?.titulo ?? null,
+                    outdated:      !!saved?.outdated,
                     imageUrl:      variations.at(-1)?.url ?? null,
                     allVariations: variations,
                     isGenerating:  generatingImgKey === key,
@@ -2700,7 +2723,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       if (!outSession?.id) return
                       setGeneratingImgKey(key)
                       try {
-                        const r = await generateItemImage(projectId, node.id, outSession.id, activeOutKey, idx, itemText, condition)
+                        const r = await generateItemImage(projectId, node.id, outSession.id, activeOutKey, idx, itemText, condition, undefined, idItem)
                         const imgs = r.output_images
                         setLocalOutputImages(imgs)
                         onImagesUpdate?.(imgs, activeOutKey)
@@ -2774,12 +2797,24 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                               </div>
                             </div>
                             {/* Texto — click abre modal de lectura */}
+                            {/* Engine v1.10 — A2: el prompt cambió al iterar el nodo entero; la imagen es la del texto viejo */}
+                            {item.outdated && (
+                              <button
+                                onClick={() => item.onGenerate?.()}
+                                disabled={item.isGenerating}
+                                title="The prompt of this item changed after the image was generated — regenerate it"
+                                style={{ margin: '6px 8px 0', border: '1px solid color-mix(in srgb, #F59E0B 45%, var(--line-2))', background: 'color-mix(in srgb, #F59E0B 12%, var(--bg-2))', color: '#F59E0B', borderRadius: 5, padding: '2px 7px', fontSize: 9, fontFamily: 'var(--font-mono)', cursor: item.isGenerating ? 'default' : 'pointer', opacity: item.isGenerating ? 0.5 : 1 }}
+                              >{item.isGenerating ? 'Regenerating…' : 'Image outdated — regenerate ✦'}</button>
+                            )}
                             <div
-                              onClick={() => setTextModal({ text: item.text, label: `Item ${item.index + 1}` })}
+                              onClick={() => setTextModal({ text: item.text, label: item.titulo ?? `Item ${item.index + 1}` })}
                               title="Click to read full text"
                               style={{ padding: '9px 11px', fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-2)', lineHeight: 1.5, flex: 1, cursor: 'zoom-in', position: 'relative', display: 'flex', alignItems: 'flex-start', gap: 4 }}
                             >
-                              <span style={{ flex: 1 }}>{item.text.length > 120 ? item.text.slice(0, 120) + '…' : item.text}</span>
+                              <span style={{ flex: 1 }}>
+                                {item.titulo && <strong style={{ display: 'block', color: 'var(--text-0)', marginBottom: 2 }}>{item.titulo}</strong>}
+                                {item.text.length > 120 ? item.text.slice(0, 120) + '…' : item.text}
+                              </span>
                               <span style={{ fontSize: 9, color: 'var(--text-4)', flexShrink: 0, paddingTop: 1 }}>⊕</span>
                             </div>
                           </div>
@@ -2787,10 +2822,10 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                         : parsedItems.map((text, i) => (
                           <div
                             key={i}
-                            onClick={() => setTextModal({ text, label: `Item ${i + 1}` })}
+                            onClick={() => setTextModal({ text, label: entradasSobre?.[i]?.titulo ?? `Item ${i + 1}` })}
                             style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 10, padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'zoom-in' }}
                           >
-                            <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', letterSpacing: '0.08em' }}>#{i + 1}</span>
+                            <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-4)', letterSpacing: '0.08em' }}>{entradasSobre?.[i]?.titulo ?? `#${i + 1}`}</span>
                             <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6 }}>{text.length > 120 ? text.slice(0, 120) + '…' : text}</div>
                           </div>
                         ))
@@ -3831,7 +3866,7 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
           {node.node_key === '3.9' && !locked && canvasNodes.some(cn => cn.node?.node_key === '3.13'
             && (cn.session?.status === 'approved' || cn.session?.status === 'auto_approved'
               || Object.values(cn.output_sessions ?? {}).some(s => s.status === 'approved' || s.status === 'auto_approved'))) && (
-            <RegenerateSliceButton projectId={projectId} projectNodeId={canvasNode.project_node_id} onDone={onImportedAsOutput} />
+            <RegenerateSliceButton projectId={projectId} projectNodeId={canvasNode.project_node_id} onDone={onImportedAsOutput} secciones={seccionesDelSlice(node.outputs)} />
           )}
           {/* ── Limpiar: dejar el nodo, o algunas de sus salidas, en cero ──
               Va debajo del Run porque es su reverso, y plegado porque borra. Lo pidió el equipo:
@@ -5789,7 +5824,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
       // Engine v1.8 — un Run que aprueba el VS Spec dispara en el back la regeneración de los desgloses del ADD
       const disparos = results.flatMap(r => r.status === 'fulfilled' ? (r.value.slice_regeneration ?? []) : [])
-      if (disparos.length) setSliceAviso(mensajeDeRegeneracion(disparos))
+      // Engine v1.11 — las § del aviso, de la DNA del nodo regenerado (el 3.9 del canvas), no escritas a mano
+      if (disparos.length) setSliceAviso(mensajeDeRegeneracion(disparos, (k, o) => seccionesDelSlice(canvasData?.nodes.find(cn => cn.node?.node_key === k)?.node?.outputs, o)))
 
       // Marcar nodos completados como auto_approved en el estado local — inmediato
       const succeeded = results
@@ -6139,6 +6175,11 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             setChatDocFormat(docAMedias ? null : (r.doc_format ?? null))
             const avisos = (r as { warnings?: unknown }).warnings
             setChatAvisos(Array.isArray(avisos) ? avisos.filter((a): a is string => typeof a === 'string') : [])
+            // Engine v1.10 — A2: el motor comparó el sobre nuevo con el anterior por id y reescribió esas listas
+            // (outdated / pending / deleted). Se REEMPLAZAN, no se unen: unir por índice traería de vuelta lo viejo.
+            if (r.imagenes_actualizadas && Object.keys(r.imagenes_actualizadas).length) {
+              setChatOutputImages(prev => ({ ...prev, ...r.imagenes_actualizadas }))
+            }
             // Actualizar sesión en el estado local si es nueva
             chatSessionIdRef.current = r.session_id
             if (!chatSessionId) {
@@ -6185,7 +6226,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             if (!chatSessionId) return
             const aceptado = await acceptNodeOutput(project.id, chatForgeNode.id, chatSessionId, content, chatDocUrl ?? undefined, chatDocFormat ?? undefined, chatNode.project_node_id)
             // Engine v1.8 — si lo aceptado era el VS Spec, el back ya está rehaciendo los desgloses del ADD
-            setSliceAviso(mensajeDeRegeneracion(aceptado.slice_regeneration))
+            setSliceAviso(mensajeDeRegeneracion(aceptado.slice_regeneration, (k, o) => seccionesDelSlice(canvasData?.nodes.find(cn => cn.node?.node_key === k)?.node?.outputs, o)))
             invalidateAssetDeckCache(project.id, chatForgeNode.id)
             setChatNode(null)
             setChatMessages([])
@@ -6320,10 +6361,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
             return defs.length > 0 ? defs : undefined
           })()}
           outputImages={chatOutputImages}
-          onGenerateItemImage={async (outputKey, itemIndex, itemText, condition, messageId) => {
+          onGenerateItemImage={async (outputKey, itemIndex, itemText, condition, messageId, itemId) => {
             const sid = chatSessionIdRef.current ?? chatSessionId
             if (!sid) return { output_images: {} } as never
-            const r = await generateItemImage(project.id, chatForgeNode.id, sid, outputKey, itemIndex, itemText, condition, messageId)
+            const r = await generateItemImage(project.id, chatForgeNode.id, sid, outputKey, itemIndex, itemText, condition, messageId, itemId)
             const imgs = r.output_images
             setChatOutputImages(prev => unirOutputImages(prev, imgs))
             setCanvasData(prev => prev ? {

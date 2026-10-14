@@ -18,11 +18,14 @@ export function unirOutputImages(base: OutputImagesMap, extra?: OutputImagesMap 
   const out: OutputImagesMap = { ...base }
   for (const [clave, lista] of Object.entries(extra)) {
     if (!Array.isArray(lista)) continue
-    const porIndice = new Map<number, OutputImageItem>((out[clave] ?? []).map(it => [it.index, it]))
+    // Engine v1.10 — A1: la entrada que trae `id` se une por su id (tras iterar, la misma imagen puede estar en otra
+    // posición); sin id, por índice como hasta ahora.
+    const claveDe = (it: OutputImageItem) => ((it.id ?? it.name) ? `id:${it.id ?? it.name}` : `i:${it.index}`)
+    const porIndice = new Map<string, OutputImageItem>((out[clave] ?? []).map(it => [claveDe(it), it]))
     for (const it of lista) {
-      const previo = porIndice.get(it.index)
+      const previo = porIndice.get(claveDe(it))
       const gana = !previo || (it.variations?.length ?? 0) > (previo.variations?.length ?? 0)
-      if (gana) porIndice.set(it.index, previo ? { ...previo, ...it } : it)
+      if (gana) porIndice.set(claveDe(it), previo ? { ...previo, ...it } : it)
     }
     out[clave] = [...porIndice.values()].sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
   }

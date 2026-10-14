@@ -1603,7 +1603,7 @@ export async function chatWithForgeNode(
   projectNodeId?:   string | null,
   /** Para el botón Stop: al abortarlo se cierra la conexión y el back corta la generación. */
   signal?:          AbortSignal,
-): Promise<{ reply: string; session_id: string; message_id?: string; output_images?: OutputImagesMap; doc_url?: string; doc_format?: string; attachment?: ChatAttachment; images_dispatched?: string[]; truncated?: boolean }> {
+): Promise<{ reply: string; session_id: string; message_id?: string; output_images?: OutputImagesMap; doc_url?: string; doc_format?: string; attachment?: ChatAttachment; images_dispatched?: string[]; truncated?: boolean; imagenes_actualizadas?: OutputImagesMap }> {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
 
   let body: BodyInit
@@ -1761,13 +1761,15 @@ export async function generateNodePdf(
   nodeId:         string,
   outputKey?:     string | null,
   projectNodeId?: string | null,
+  // Engine v1.10 — C: rehacer aunque la pieza ya tenga un PDF guardado
+  force = false,
 ): Promise<{ url: string }> {
   return request<{ success: boolean; url: string }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/generate-pdf`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ output_key: outputKey ?? null, project_node_id: projectNodeId ?? null }),
+      body: JSON.stringify({ output_key: outputKey ?? null, project_node_id: projectNodeId ?? null, force }),
     },
   )
 }
@@ -1883,8 +1885,10 @@ export async function approveAssetVersion(projectId: string, assetId: string, ve
   )
 }
 
-export interface OutputImageVariation { url: string; condition?: string | null }
-export interface OutputImageItem     { index: number; variations: OutputImageVariation[] }
+export interface OutputImageVariation { url: string; condition?: string | null; deleted?: boolean }
+// Engine v1.10 — `id`: el id del encargo en el sobre (A1, se empareja por él); `outdated`: el prompt cambió al iterar
+// (A2); `pending`: id nueva sin imagen todavía (A2); `removed`: el sobre ya no la nombra (índice negativo, A2).
+export interface OutputImageItem     { index: number; variations: OutputImageVariation[]; id?: string | null; name?: string | null; outdated?: boolean; pending?: boolean; removed?: boolean }
 export type    OutputImagesMap       = Record<string, OutputImageItem[]>
 
 export async function generateItemImage(
@@ -1896,10 +1900,12 @@ export async function generateItemImage(
   itemText:   string,
   condition?: string,
   messageId?: string,
+  // Engine v1.10 — A1: el id del ítem en el sobre; el motor empareja por él (el índice queda de respaldo)
+  itemId?:    string | null,
 ): Promise<{ image_url: string; output_images: OutputImagesMap }> {
   return request<{ success: boolean; image_url: string; output_images: OutputImagesMap }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/sessions/${sessionId}/generate-item-image`,
-    { method: 'POST', body: JSON.stringify({ output_key: outputKey, item_index: itemIndex, item_text: itemText, condition, message_id: messageId ?? null }) },
+    { method: 'POST', body: JSON.stringify({ output_key: outputKey, item_index: itemIndex, item_text: itemText, condition, message_id: messageId ?? null, item_id: itemId ?? null }) },
   )
 }
 

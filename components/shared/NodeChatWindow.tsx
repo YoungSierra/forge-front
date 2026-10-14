@@ -191,6 +191,97 @@ function parseDeclaredImagePrompts(content: string): string[] | null {
   return null
 }
 
+// ─── Engine v1.10 · el sobre de un output, como lo lee el back ────────────────────────────────────────────────────
+// Un sobre son entradas-objeto que se identifican (`id`) y se describen (algún texto con cuerpo). Se busca primero el
+// arreglo NOMBRADO por la clave («"concept_seeds": [»); si no hay, el primer sobre dentro de la sección del output,
+// cortada en el siguiente `## <output>`. Un arreglo con url / caption / source_node es un INVENTARIO de arte ya
+// aprobado (`approved_images` de concept_data), nunca un encargo.
+type EntradaSobre = Record<string, unknown>
+const esEntrada = (o: unknown): o is EntradaSobre => !!o && typeof o === 'object' && !Array.isArray(o)
+const describeEntrada = (o: EntradaSobre) => Object.entries(o).some(([k, x]) => k !== 'id' && typeof x === 'string' && x.trim().length >= 40)
+const esInventario = (v: unknown[]) => v.some(o => esEntrada(o) && ['url', 'caption', 'source_node'].some(k => k in o))
+const esSobreDeImagenes = (v: unknown): v is EntradaSobre[] => Array.isArray(v) && v.length > 0
+  && v.every(esEntrada)
+  && v.filter(o => typeof o.id === 'string' && String(o.id).trim()).length >= Math.ceil(v.length / 2)
+  && v.some(describeEntrada)
+  && !esInventario(v)
+// El arreglo balanceado que empieza en `ini` (cierre por conteo de corchetes), o undefined si no se lee.
+function arregloDesde(texto: string, ini: number): unknown {
+  let nivel = 0
+  for (let i = ini; i < texto.length; i++) {
+    if (texto[i] === '[') nivel++
+    else if (texto[i] === ']' && --nivel === 0) {
+      try { return JSON.parse(texto.slice(ini, i + 1)) } catch { return undefined }
+    }
+  }
+  return undefined
+}
+export function sobreDelOutput(content: string, outputKey: string, yaEsSeccion = false): EntradaSobre[] | null {
+  if (!content || !outputKey) return null
+  const esc = outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // 1 · el arreglo nombrado por la clave del output
+  const nom = new RegExp(`"${esc}"\\s*:\\s*\\[`).exec(content)
+  if (nom) {
+    const v = arregloDesde(content, content.indexOf('[', nom.index))
+    if (esSobreDeImagenes(v)) return v
+  }
+  // 2 · el primer sobre dentro de su sección, cortada en el siguiente `## <output>` (clave en snake_case)
+  const anc = new RegExp(`^#{1,4}[ \\t]+\\**\\s*${esc}\\b.*$`, 'im').exec(content)
+  if (!anc && !yaEsSeccion) return null
+  let desde = anc ? content.slice(anc.index + anc[0].length) : content
+  const corte = /^#{1,2}[ \t]+\**\s*[a-z][a-z0-9_]*\**[ \t]*$/m.exec(desde)
+  if (corte) desde = desde.slice(0, corte.index)
+  for (let ini = desde.indexOf('['); ini !== -1; ini = desde.indexOf('[', ini + 1)) {
+    const v = arregloDesde(desde, ini)
+    if (esSobreDeImagenes(v)) return v
+  }
+  return null
+}
+/** La sección `## <clave>` (cualquier nivel de encabezado) cortada en el siguiente `## <output>`; null si no está. */
+export function seccionDelOutput(content: string, outputKey: string): string | null {
+  const esc = outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const anc = new RegExp(`^#{1,4}[ \\t]+\\**\\s*${esc}\\b.*$`, 'im').exec(content)
+  if (!anc) return null
+  const desde = content.slice(anc.index + anc[0].length)
+  const corte = /^#{1,2}[ \t]+\**\s*[a-z][a-z0-9_]*\**[ \t]*$/m.exec(desde)
+  return corte ? desde.slice(0, corte.index) : desde
+}
+// Lo que se manda a renderizar de una entrada: su `prompt` tal cual o, sin él, sus campos SIN el razonamiento (espejo
+// de `promptDeItem` del back: el porqué, la sección de destino o las notas describen el encargo a una persona).
+export function textoDeEntradaDelSobre(r: EntradaSobre): string {
+  for (const campo of ['prompt', 'image_prompt']) {
+    const x = r?.[campo]
+    if (typeof x === 'string' && x.trim()) return x.trim()
+  }
+  const OCULTO = ['id', 'key', 'index']
+  const RAZONAMIENTO = ['why', 'rationale', 'reason', 'justification', 'notes', 'note', 'target_section', 'section',
+    'placement_in_concept_document', 'placement', 'anchor', 'source']
+  const campos = Object.entries(r || {}).filter(([k, x]) => !OCULTO.includes(k) && typeof x === 'string' && !!x.trim())
+  const utiles = campos.filter(([k]) => !RAZONAMIENTO.includes(k))
+  return (utiles.length ? utiles : campos).map(([k, x]) => `${k.replace(/_/g, ' ')}: ${x}`).join('\n')
+}
+/** El id y un título legible de cada entrada del sobre, por posición (null si no hay sobre). */
+export function entradasDelSobre(content: string, outputKey: string, yaEsSeccion = false): { id: string | null; titulo: string | null }[] | null {
+  const v = sobreDelOutput(content, outputKey, yaEsSeccion)
+  if (!v) return null
+  const texto = (x: unknown) => (typeof x === 'string' && x.trim() ? x.trim() : null)
+  return v.map(o => {
+    const id = texto(o.id)
+    const nombre = texto(o.title) ?? texto(o.name) ?? texto(o.working_title) ?? texto(o.label)
+    return { id, titulo: id && nombre ? `${id} · ${nombre}` : (nombre ?? id) }
+  })
+}
+/**
+ * Engine v1.10 — A1: la imagen guardada de la posición `idx`. Si la lista guarda ids y el ítem tiene id, se empareja SOLO
+ * por id (tras iterar, la posición puede haber cambiado y el índice colgaría la imagen de otro ítem); si no, por índice.
+ */
+export function guardadaDelItem<T extends { index: number; id?: string | null; name?: string | null }>(lista: T[], idx: number, id?: string | null): T | undefined {
+  // `name` es el id en las entradas del camino de los planos anteriores a v1.10
+  const idDe = (s: T) => s.id ?? s.name ?? null
+  if (id && lista.some(s => !!idDe(s))) return lista.find(s => idDe(s) === id)
+  return lista.find(s => s.index === idx)
+}
+
 // `yaEsSeccion` lo dice el llamador cuando el texto YA viene recortado a la sección del output.
 // El chat corta la sección antes de parsear, y con eso se lleva el encabezado en el que el lector
 // del sobre se ancla: sin saberlo, el ancla no aparece, se cae a la prosa, y el 2.4 ofrecía UN
@@ -226,75 +317,21 @@ export function parseOutputItems(content: string, format: string, outputKey?: st
     // Espejo exacto del backend: se ancla en la sección DEL OUTPUT y se lee el primer arreglo
     // balanceado, cerrando por conteo de corchetes. El hueco que se ve tiene que ser el prompt
     // que se paga.
+    // Engine v1.10 — A3: la guarda del sobre del back (image-gen.service), más estricta: se lee solo el arreglo NOMBRADO
+    // por la clave del output, o el primer sobre DENTRO de su sección, cortada en el siguiente `## <output>`; y se rechaza
+    // el inventario (entradas con url / caption / source_node: arte ya aprobado, no encargos). Antes se recorrían todos
+    // los arreglos hasta el final de la respuesta: en el 2.2 de Vertical Slice QA el `approved_images` de concept_data
+    // (6 entradas) dio 6 huecos, y el 4º mandó a ComfyUI «source node… depicts…» como prompt.
     if (outputKey) {
-      const esc = outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      const anc = new RegExp(`^#{1,4}[ \\t]+\\**\\s*${esc}\\b.*$`, 'im').exec(content)
-      if (anc || yaEsSeccion) {
-        // Sin ancla pero con el texto ya recortado, la sección empieza donde empieza el texto.
-        const desde = anc ? content.slice(anc.index + anc[0].length) : content
-        // No vale «el primer arreglo de la sección»: la del 2.4 abre con su tabla de paleta y una
-        // lista de tres hex, que se llevaba el cupo. Un sobre se reconoce por dentro — objetos con
-        // `prompt`/`image_prompt`/`depicts`—, así que se recorren todos y se toma el primero que
-        // lo parezca. Mismo criterio que el backend, para que ambos vean lo mismo.
-        // No se exige NINGÚN nombre de campo. Cuatro corridas del 2.2 con la misma DNA emitieron
-        // cuatro esquemas distintos —`subject`+`composition_notes`, `prompt`,
-        // `subject`+`composition`+`mood`, y `purpose`+`type`+`style_inheritance`—: perseguir
-        // nombres dejaba el output en cero cada vez que aparecía uno nuevo.
-        //
-        // Lo que define un sobre no cambia: entradas que son objetos, que se identifican con `id`
-        // y se describen con algún texto con cuerpo. La lista de paleta del 2.4 —hex sueltos— no
-        // pasa: ni son objetos ni tienen id. Mismo criterio que el backend.
-        const esObj = (o: unknown): o is Record<string, unknown> => !!o && typeof o === 'object' && !Array.isArray(o)
-        const describe = (o: Record<string, unknown>) => Object.entries(o).some(([k, v]) =>
-          k !== 'id' && typeof v === 'string' && v.trim().length >= 40)
-        const esSobre = (v: unknown) => Array.isArray(v) && v.length > 0
-          && v.every(esObj)
-          && v.filter(o => typeof (o as Record<string, unknown>).id === 'string' && String((o as Record<string, unknown>).id).trim()).length >= Math.ceil(v.length / 2)
-          && v.some(o => describe(o as Record<string, unknown>))
-        for (let ini = desde.indexOf('['); ini !== -1; ini = desde.indexOf('[', ini + 1)) {
-          let nivel = 0
-          let cerrado = false
-          for (let i = ini; i < desde.length && !cerrado; i++) {
-            if (desde[i] === '[') nivel++
-            else if (desde[i] === ']' && --nivel === 0) {
-              cerrado = true
-              try {
-                const v = JSON.parse(desde.slice(ini, i + 1))
-                if (esSobre(v)) {
-                  // Un `prompt` declarado va tal cual. Sin el, la entrada se arma con sus campos
-                  // -sujeto, composicion, animo, paleta-, que es lo que describe la imagen.
-                  const items = (v as unknown[]).map(o => {
-                    const r = o as Record<string, unknown>
-                    for (const campo of ['prompt', 'image_prompt']) {
-                      const x = r?.[campo]
-                      if (typeof x === 'string' && x.trim()) return x.trim()
-                    }
-                    // Espejo de `promptDeItem` en el backend: los campos con los que el modelo
-                    // justifica su decisión —el porqué, la sección de destino, las notas—
-                    // describen el encargo a una persona, no la imagen, y al generador le
-                    // llegaban como instrucción. El hueco que se dibuja tiene que ser el prompt
-                    // que se despacha, así que las dos listas se filtran igual.
-                    const OCULTO = ['id', 'key', 'index']
-                    const RAZONAMIENTO = ['why', 'rationale', 'reason', 'justification', 'notes',
-                      'note', 'target_section', 'section', 'placement_in_concept_document',
-                      'placement', 'anchor', 'source']
-                    const visible = ([k, x]: [string, unknown]) =>
-                      !OCULTO.includes(k) && typeof x === 'string' && !!x.trim()
-                    const campos = Object.entries(r || {}).filter(visible)
-                    // Si al quitar el razonamiento no queda nada, vale más la descripción entera
-                    // que un hueco vacío: el filtro es para limpiar, no para dejar en cero.
-                    const utiles = campos.filter(([k]) => !RAZONAMIENTO.includes(k))
-                    return (utiles.length ? utiles : campos)
-                      .map(([k, x]) => `${k.replace(/_/g, ' ')}: ${x}`)
-                      .join('\n')
-                  }).filter(x => x)
-                  if (items.length) return items
-                }
-              } catch { /* no era legible; se prueba el siguiente */ }
-            }
-          }
-        }
+      const v = sobreDelOutput(content, outputKey, yaEsSeccion)
+      if (v) {
+        const items = v.map(textoDeEntradaDelSobre).filter(x => x)
+        if (items.length) return items
       }
+      // Sin sobre legible, los lectores de respaldo de abajo (prompts declarados, listas) leen SOLO la sección de este
+      // output: fuera de ella están los demás outputs, y ahí vive el inventario (el `approved_images` de concept_data).
+      const propia = seccionDelOutput(content, outputKey)
+      if (propia !== null) content = propia
     }
 
     const declarados = parseDeclaredImagePrompts(content)
@@ -489,6 +526,11 @@ export interface InlineImageItem {
   isGenerating: boolean
   onGenerate:   (condition?: string) => void
   onZoom:       (url: string) => void
+  /** Engine v1.10 — A1/E: id del encargo en el sobre y un título legible (id · título) para rotular la tarjeta */
+  itemId?:      string | null
+  titulo?:      string | null
+  /** Engine v1.10 — A2: el prompt del ítem cambió después de generar su imagen; se regenera con ✦ */
+  outdated?:    boolean
 }
 
 const VP_W = 480
@@ -761,6 +803,20 @@ function ThumbnailCard({ item }: { item: InlineImageItem }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {/* Engine v1.10 — A2: al iterar el nodo entero, el prompt de este ítem cambió y la imagen es la del texto viejo */}
+      {item.outdated && (
+        <button
+          onClick={() => item.onGenerate()}
+          disabled={item.isGenerating}
+          title="The prompt of this item changed after the image was generated — regenerate it"
+          style={{
+            alignSelf: 'flex-start', border: '1px solid color-mix(in srgb, #F59E0B 45%, var(--line-2))',
+            background: 'color-mix(in srgb, #F59E0B 12%, var(--bg-2))', color: '#F59E0B',
+            borderRadius: 5, padding: '2px 7px', fontSize: 9, fontFamily: 'var(--font-mono)',
+            cursor: item.isGenerating ? 'default' : 'pointer', opacity: item.isGenerating ? 0.5 : 1,
+          }}
+        >{item.isGenerating ? 'Regenerating…' : 'Image outdated — regenerate ✦'}</button>
+      )}
       <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end' }}>
         {/* Una thumbnail por variación */}
         {item.allVariations.map((v, i) => v.deleted ? (
@@ -1066,13 +1122,47 @@ function ToolCallChips({ calls }: { calls: ChatToolCall[] }) {
   )
 }
 
+// ─── Engine v1.10 · Execute y resumen del nodo entero ─────────────────────────────────────────────────────────────
+// El mensaje implícito de ejecución: el mismo que manda «▶ Run» (auto-run) para producir los outputs del nodo.
+const MENSAJE_EJECUTAR = 'Generate the output for this step'
+
+/**
+ * Resumen de una respuesta del nodo ENTERO para el chat: cada sección `## <output>` con sus primeras líneas, y los
+ * bloques de datos (```json…) contados en vez de pegados. El documento completo no cambia: se ve con «Show full».
+ * null si la respuesta no tiene al menos dos secciones o ya es corta.
+ */
+function resumenPorSecciones(texto: string, lineas = 6): { texto: string; secciones: number } | null {
+  if (!texto || texto.length < 1500) return null
+  const partes = texto.split(/^(?=##[ \t]+\S)/m)
+  const secciones = partes.filter(p => /^##[ \t]+\S/.test(p))
+  if (secciones.length < 2) return null
+  const cabeza = partes[0].startsWith('##') ? '' : partes[0].trim().split('\n').slice(0, 3).join('\n')
+  const cuerpo = secciones.map(s => {
+    const [titulo, ...resto] = s.split('\n')
+    const visibles: string[] = []
+    let enBloque = false, datos = 0
+    for (const l of resto) {
+      if (/^\s*```/.test(l)) { enBloque = !enBloque; if (enBloque) datos++; continue }
+      if (enBloque || !l.trim()) continue
+      if (visibles.length < lineas) visibles.push(l)
+    }
+    const total = resto.filter(l => l.trim()).length
+    const nota = [datos ? `_${datos} data block${datos > 1 ? 's' : ''}_` : '', total > visibles.length ? '_…_' : ''].filter(Boolean).join(' · ')
+    return [titulo, ...visibles, nota].filter(Boolean).join('\n')
+  })
+  return { texto: [cabeza, ...cuerpo].filter(Boolean).join('\n\n'), secciones: secciones.length }
+}
+
 // ─── Burbuja ──────────────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, onExpand }: {
+function MessageBubble({ msg, onExpand, resumir = false }: {
   msg:       ChatMessage
   onExpand?: () => void
+  /** Engine v1.10 — nodo entero: el chat enseña el documento recortado (secciones + primeras líneas) */
+  resumir?:  boolean
 }) {
   const isUser = msg.role === 'user'
+  const resumen = resumir && !isUser ? resumenPorSecciones(forDisplay(msg.content)) : null
   // Texto a copiar: la versión legible (markdown), igual a lo que se muestra
   const copyText = forDisplay(msg.content)
   return (
@@ -1102,16 +1192,23 @@ function MessageBubble({ msg, onExpand }: {
             border: `1px solid ${isUser
               ? 'color-mix(in srgb, var(--action) 30%, transparent)'
               : 'var(--line-2)'}`,
-            fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65,
+            fontSize: 'var(--chat-font, 12px)', color: 'var(--text-0)', lineHeight: 1.65,
             wordBreak: 'break-word',
           }}>
             {isUser ? (
               <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
             ) : (
-              <div style={{ fontSize: 12, color: 'var(--text-0)', lineHeight: 1.65 }}>
+              <div style={{ fontSize: 'var(--chat-font, 12px)', color: 'var(--text-0)', lineHeight: 1.65 }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                  {forDisplay(msg.content)}
+                  {resumen ? resumen.texto : forDisplay(msg.content)}
                 </ReactMarkdown>
+                {resumen && onExpand && (
+                  <button
+                    onClick={onExpand}
+                    title="The chat shows each section trimmed; the full document is unchanged"
+                    style={{ marginTop: 6, border: '1px solid var(--line-2)', background: 'var(--bg-3)', color: 'var(--text-2)', borderRadius: 6, padding: '3px 9px', fontSize: 10, fontFamily: 'var(--font-mono)', cursor: 'pointer' }}
+                  >Show full response · {resumen.secciones} sections</button>
+                )}
               </div>
             )}
           </div>
@@ -1225,7 +1322,7 @@ export interface NodeChatWindowProps {
   // Image gen por item
   imageGenOutputs?:     ImageOutputDef[]
   outputImages?:        OutputImagesMap
-  onGenerateItemImage?: (outputKey: string, itemIndex: number, itemText: string, condition?: string, messageId?: string) => Promise<{ image_url: string; output_images: OutputImagesMap }>
+  onGenerateItemImage?: (outputKey: string, itemIndex: number, itemText: string, condition?: string, messageId?: string, itemId?: string | null) => Promise<{ image_url: string; output_images: OutputImagesMap }>
   /** Borra UNA imagen del hilo, sin romper el historial. Si no se pasa, no hay papelera. */
   onDeleteItemImage?:   (outputKey: string, itemIndex: number, url: string, messageId?: string) => Promise<void>
   // Output enfocado: el chat trabaja sobre un output específico del nodo
@@ -1279,6 +1376,16 @@ export default function NodeChatWindow({
   const [hasNewResponse,  setHasNewResponse]  = useState(!approvedAsset)
   const [error,           setError]           = useState<string | null>(null)
   const [expandedContent, setExpandedContent] = useState<{ content: string; imageItems?: InlineImageItem[]; pngImages?: OutputImagesMap } | null>(null)
+  // Engine v1.10 — E: tamaño de letra del chat, del usuario (se recuerda en este navegador). Va como variable CSS
+  // `--chat-font` en la ventana: las burbujas y la caja de texto la leen; el resto del layout no se mueve.
+  const [chatFont, setChatFont] = useState<number>(() => {
+    try { const v = Number(localStorage.getItem('forge:chat-font')); return v >= 10 && v <= 20 ? v : 12 } catch { return 12 }
+  })
+  const cambiarFuente = (d: number) => setChatFont(f => {
+    const n = Math.min(20, Math.max(10, f + d))
+    try { localStorage.setItem('forge:chat-font', String(n)) } catch { /* modo privado */ }
+    return n
+  })
   // Modal expand: arrastrable (offset desde el centro). El resize lo hace CSS (resize: both).
   const [expandPos, setExpandPos] = useState({ x: 0, y: 0 })
   useEffect(() => { if (expandedContent) setExpandPos({ x: 0, y: 0 }) }, [expandedContent])  // re-centrar al abrir
@@ -1559,15 +1666,20 @@ export default function NodeChatWindow({
 
   // ── Chat ──────────────────────────────────────────────────────────────────
 
-  const send = async () => {
-    const text = input.trim()
+  // Engine v1.10 — `implicito`: el texto que manda Execute, sin tocar lo que el usuario esté escribiendo ni sus adjuntos.
+  // Desde el botón de enviar llega el evento del clic, que no es texto: ahí se manda lo escrito, como siempre.
+  const send = async (implicito?: unknown) => {
+    const esImplicito = typeof implicito === 'string'
+    const text = (esImplicito ? implicito : input).trim()
     if (!text || sending) return
-    const file    = pendingFile
-    const urlAtt  = pendingUrl
+    const file    = esImplicito ? null : pendingFile
+    const urlAtt  = esImplicito ? null : pendingUrl
     setMessages(prev => [...prev, { role: 'user', content: text }])
-    setInput('')
-    setPendingFile(null)
-    setPendingUrl(null)
+    if (!esImplicito) {
+      setInput('')
+      setPendingFile(null)
+      setPendingUrl(null)
+    }
     setSending(true)
     setError(null)
     // Abortarlo suelta al cliente. Parar de verdad la generación es otra cosa —`onStop`, que le
@@ -1719,13 +1831,17 @@ export default function NodeChatWindow({
       if (!sectionMatch && !isPng) fullMsgUsed = true
       const parsed = parseOutputItems(section, def.format, def.outputKey, true)
       const savedList = outputImages[def.outputKey] ?? []
+      // Engine v1.10 — A1: el id de cada posición del sobre; con ids en la lista se empareja por id
+      const entradas = entradasDelSobre(section, def.outputKey, true)
       for (let idx = 0; idx < parsed.length; idx++) {
         const itemText = parsed[idx]
-        const saved = savedList.find(s => s.index === idx)
+        const saved = guardadaDelItem(savedList, idx, entradas?.[idx]?.id ?? null)
         const variations = saved?.variations ?? []
         const key = `${def.outputKey}:${idx}`
         items.push({
           itemKey: key, index: idx, text: itemText,
+          itemId: entradas?.[idx]?.id ?? null, titulo: entradas?.[idx]?.titulo ?? null,
+          outdated: !!(saved as { outdated?: boolean } | undefined)?.outdated,
           imageUrl: [...variations].reverse().find(v => !(v as { deleted?: boolean }).deleted)?.url ?? null,
           allVariations: variations,
           onDelete: onDeleteItemImage ? (url: string) => onDeleteItemImage(def.outputKey, idx, url) : undefined,
@@ -1734,7 +1850,7 @@ export default function NodeChatWindow({
           onGenerate: async (condition?: string) => {
             setGeneratingImgKeys(prev => new Set(prev).add(key))
             try {
-              const r = await onGenerateItemImage(def.outputKey, idx, itemText, condition)
+              const r = await onGenerateItemImage(def.outputKey, idx, itemText, condition, undefined, entradas?.[idx]?.id ?? null)
               setOutputImages(r.output_images)
             } catch (e) {
               setError(e instanceof Error ? e.message : 'Image generation failed')
@@ -1784,6 +1900,7 @@ export default function NodeChatWindow({
         display:      'flex', flexDirection: 'column', overflow: 'hidden',
         userSelect:   dragging || resizing ? 'none' : 'auto',
         transition:   maximized ? 'none' : undefined,
+        ...({ '--chat-font': `${chatFont}px` } as React.CSSProperties),
       }}>
 
         {/* Header — drag handle */}
@@ -1884,6 +2001,11 @@ export default function NodeChatWindow({
           >
             <img src="/forgy/forgyi.png" alt="" width={17} height={17} draggable={false} style={{ objectFit: 'contain', display: 'block' }} />
           </button>
+          {/* Engine v1.10 — E: tamaño de letra del chat */}
+          <div onMouseDown={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }} title={`Chat text size: ${chatFont}px`}>
+            <button onClick={() => cambiarFuente(-1)} disabled={chatFont <= 10} style={{ border: 'none', background: 'transparent', cursor: chatFont <= 10 ? 'default' : 'pointer', color: 'var(--text-2)', fontSize: 10, padding: '2px 4px', opacity: chatFont <= 10 ? 0.35 : 0.85 }}>A−</button>
+            <button onClick={() => cambiarFuente(1)} disabled={chatFont >= 20} style={{ border: 'none', background: 'transparent', cursor: chatFont >= 20 ? 'default' : 'pointer', color: 'var(--text-2)', fontSize: 13, padding: '2px 4px', opacity: chatFont >= 20 ? 0.35 : 0.85 }}>A+</button>
+          </div>
           {/* Botón maximizar */}
           <button
             onMouseDown={e => e.stopPropagation()}
@@ -2141,6 +2263,8 @@ export default function NodeChatWindow({
                 }
 
                 const parsed = parseOutputItems(fuente, def.format, def.declaradasPor || def.outputKey, true)
+                // Engine v1.10 — A1: el id (y un título) de cada posición del sobre, para emparejar la imagen por id
+                const entradas = entradasDelSobre(fuente, def.declaradasPor || def.outputKey, true)
 
                 // Lo que generó ESTE turno manda. Iterar reescribe los prompts sin mover los
                 // índices, así que leer siempre el mapa de la sesión emparejaba la respuesta nueva
@@ -2160,13 +2284,18 @@ export default function NodeChatWindow({
                 const savedList = propias ?? respaldo
                 for (let idx = 0; idx < parsed.length; idx++) {
                   const itemText   = parsed[idx]
-                  const saved      = savedList.find(s => s.index === idx)
+                  // Engine v1.10 — A1: por id del sobre cuando la lista los guarda; el índice es el respaldo
+                  const idItem     = entradas?.[idx]?.id ?? null
+                  const saved      = guardadaDelItem(savedList, idx, idItem)
                   const variations = saved?.variations ?? []
                   const key        = `${def.outputKey}:${idx}`
                   items.push({
                     itemKey:      key,
                     index:        idx,
                     text:         itemText,
+                    itemId:       idItem,
+                    titulo:       entradas?.[idx]?.titulo ?? null,
+                    outdated:     !!(saved as { outdated?: boolean } | undefined)?.outdated,
                     imageUrl:     [...variations].reverse().find(v => !(v as { deleted?: boolean }).deleted)?.url ?? null,
                     allVariations: variations,
                     onDelete:     onDeleteItemImage ? (url: string) => onDeleteItemImage(def.outputKey, idx, url, msg.id) : undefined,
@@ -2175,7 +2304,7 @@ export default function NodeChatWindow({
                     onGenerate:   async (condition?: string) => {
                       setGeneratingImgKeys(prev => new Set(prev).add(key))
                       try {
-                        const r = await onGenerateItemImage(def.outputKey, idx, itemText, condition, msg.id)
+                        const r = await onGenerateItemImage(def.outputKey, idx, itemText, condition, msg.id, idItem)
                         setOutputImages(r.output_images)
                         if (msg.id) setImgsPorMsg(prev => {
                           const mapa  = { ...(prev[msg.id!] ?? {}) }
@@ -2208,6 +2337,7 @@ export default function NodeChatWindow({
               <React.Fragment key={i}>
                 <MessageBubble
                   msg={msg}
+                  resumir={!targetOutputKey && !msg.aviso}
                   onExpand={() => setExpandedContent({ content: msg.content, imageItems: imageItems ?? buildItems(), pngImages: visibleOutputImages })}
                 />
                 {/* Cada respuesta pinta lo suyo. Atar esto al último turno era lo que hacía
@@ -2480,7 +2610,7 @@ export default function NodeChatWindow({
                 flex: '1 1 0', resize: 'none', overflow: 'auto',
                 background: 'var(--bg-1)', border: '1px solid var(--line-2)',
                 borderRadius: 8, padding: '8px 11px',
-                color: 'var(--text-0)', fontSize: 12, lineHeight: 1.5,
+                color: 'var(--text-0)', fontSize: 'var(--chat-font, 12px)', lineHeight: 1.5,
                 outline: 'none', fontFamily: 'inherit',
                 opacity: locked ? 0.4 : 1,
                 transition: 'border-color 120ms',
@@ -2508,6 +2638,24 @@ export default function NodeChatWindow({
                 >
                   <Paperclip size={15} strokeWidth={1.75} />
                 </button>
+              )}
+              {/* Engine v1.10 — Execute: corre el nodo entero sin escribir nada. Manda el mensaje implícito de «▶ Run»
+                  como un turno normal del chat (respuesta, post-pass de imágenes, Accept). Solo en el chat del nodo
+                  entero: con foco, el turno sería el de ese output. Deshabilitado mientras haya un turno en curso. */}
+              {!locked && !targetOutputKey && (
+                <button
+                  onClick={() => { void send(MENSAJE_EJECUTAR) }}
+                  disabled={sending}
+                  title={sending ? 'A turn is running' : 'Execute — run the whole node without typing (sends “Generate the output for this step”)'}
+                  style={{
+                    flex: '0 0 22%', width: '100%', borderRadius: 7,
+                    border: '1px solid color-mix(in srgb, #34D399 40%, var(--line-2))',
+                    background: 'color-mix(in srgb, #34D399 10%, var(--bg-3))',
+                    color: sending ? 'var(--text-4)' : '#34D399', fontSize: 12, fontWeight: 700,
+                    cursor: sending ? 'not-allowed' : 'pointer', opacity: sending ? 0.4 : 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >▶</button>
               )}
               {/* Mientras genera, el mismo botón es Stop. Abortarlo cierra la conexión y el back
                   corta la llamada al proveedor: se deja de gastar de verdad, no solo se suelta la
@@ -2739,9 +2887,10 @@ export default function NodeChatWindow({
       )}
 
       {/* Modal de lectura expandida */}
+      {/* Engine v1.10 — E: el overlay ya no cierra con clic. Al redimensionar desde la esquina y soltar fuera del panel,
+          el clic caía en el overlay y cerraba la ventana. Se cierra con la ✕, como el modal equivalente del canvas. */}
       {expandedContent && (
         <div
-          onClick={() => setExpandedContent(null)}
           style={{
             position: 'fixed', inset: 0, zIndex: 200,
             background: 'rgba(0,0,0,0.65)',

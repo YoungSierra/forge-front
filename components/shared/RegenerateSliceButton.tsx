@@ -2,8 +2,9 @@
 
 // ─── Engine v1.8 · «Regenerate slice breakdowns» (panel del 3.9) ─────────────────────────────
 // Llama a POST /api/projects/:id/canvas/nodes/:project_node_id/regenerate-slice: el motor rehace SOLO
-// los grupos del ADD que dependen del Vertical Slice (§7.3.1, §7.9.1, §7.10.1, §7.11.1) sobre el ADD
-// aprobado, con el VS Spec del 3.13 a la vista, y vuelve a extraer los 11 ADI. Visible solo cuando el
+// los grupos del ADD que dependen del Vertical Slice sobre el ADD aprobado, con el VS Spec del 3.13 a la
+// vista, y vuelve a extraer los ADI. Engine v1.11: qué § son lo dice la DNA del nodo (los grupos
+// `slice_dependent` de sus tandas por secciones), no este archivo — eran cuatro y desde el v2.9.56 son seis. Visible solo cuando el
 // proyecto tiene un 3.13 aprobado (lo decide quien lo monta). El 422 SLICE_SCOPE_MISSING y cualquier
 // otro error se muestran tal cual los manda el back (`request` lanza Error(body.error)).
 
@@ -13,12 +14,36 @@ import { regenerateSliceBreakdowns, type SliceRegeneration } from '@/lib/api'
 export type EstadoSlice = 'idle' | 'running' | 'done' | 'error'
 export const MENSAJE_SLICE_OK = 'Breakdowns regenerated and ADI re-extracted. Re-run 3.20 to use them.'
 
-/** El aviso del canvas tras aprobar el 3.13: qué pasó con la regeneración automática de los desgloses del ADD. */
-export function mensajeDeRegeneracion(d: SliceRegeneration[] | undefined | null): string | null {
+// Un output de la DNA, solo lo que se lee aquí: las tandas por secciones y sus grupos.
+type SalidaConTandas = { key?: string; name?: string; batches?: { groups?: Array<{ sections?: unknown[]; slice_dependent?: boolean } | null> } }
+
+/**
+ * Engine v1.11 — las § que rehace la regeneración por slice, leídas de la DNA: las secciones de los grupos
+ * `slice_dependent` de las tandas por secciones de los outputs del nodo (o solo de `outputKey`), sin repetir y
+ * en el orden de la DNA. Vacío si la DNA no las declara.
+ */
+export function seccionesDelSlice(outputs: unknown, outputKey?: string | null): string[] {
+  const outs = (Array.isArray(outputs) ? outputs : []) as SalidaConTandas[]
+  const elegidas = outputKey ? outs.filter(o => (o?.key || o?.name) === outputKey) : outs
+  return [...new Set(elegidas.flatMap(o => (o?.batches?.groups ?? [])
+    .filter(g => g?.slice_dependent)
+    .flatMap(g => (g?.sections ?? []).map(String))))]
+}
+const listaDeSecciones = (s?: string[] | null) => (s?.length ? ` (${s.map(n => `§${n}`).join(' · ')})` : '')
+
+/**
+ * El aviso del canvas tras aprobar el 3.13: qué pasó con la regeneración automática de los desgloses del ADD.
+ * `seccionesDe(node_key, output_key)` da las § de ese nodo según su DNA (`seccionesDelSlice`); sin ella, o si la DNA
+ * no las declara, el aviso no lista §.
+ */
+export function mensajeDeRegeneracion(
+  d: SliceRegeneration[] | undefined | null,
+  seccionesDe?: (nodeKey: string, outputKey: string) => string[] | null | undefined,
+): string | null {
   if (!d?.length) return null
   return d.map(x => {
     const doc = `${x.node_key} ${x.output_key}`
-    if (x.started) return `Regenerating the slice breakdowns of ${doc} in the background (§7.3.1 · §7.9.1 · §7.10.1 · §7.11.1), then re-extracting the ADI packages. Open ${x.node_key} to follow it; 3.20 unlocks when they are done.`
+    if (x.started) return `Regenerating the slice breakdowns of ${doc} in the background${listaDeSecciones(seccionesDe?.(x.node_key, x.output_key))}, then re-extracting the ADI packages. Open ${x.node_key} to follow it; 3.20 unlocks when they are done.`
     switch (x.skipped) {
       case 'NO_MASTER':   return `${doc} is not generated yet: when ${x.node_key} runs it will read the approved Vertical Slice directly.`
       case 'IN_PROGRESS': return `The slice breakdowns of ${doc} are already being regenerated.`
@@ -30,14 +55,14 @@ export function mensajeDeRegeneracion(d: SliceRegeneration[] | undefined | null)
 }
 
 /** La parte visual, sin estado: así se puede renderizar en cada estado en una prueba. */
-export function RegenerateSliceView({ estado, mensaje, onClick }: { estado: EstadoSlice; mensaje: string | null; onClick: () => void }) {
+export function RegenerateSliceView({ estado, mensaje, onClick, secciones }: { estado: EstadoSlice; mensaje: string | null; onClick: () => void; secciones?: string[] }) {
   const corriendo = estado === 'running'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <button
         onClick={onClick}
         disabled={corriendo}
-        title="Rewrite only the slice-dependent breakdowns of the Art Direction Document (§7.3.1 · §7.9.1 · §7.10.1 · §7.11.1) from the approved Vertical Slice Specification, then re-extract the ADI packages"
+        title={`Rewrite only the slice-dependent breakdowns of the Art Direction Document${listaDeSecciones(secciones)} from the approved Vertical Slice Specification, then re-extract the ADI packages`}
         style={{
           width: '100%', padding: '9px 12px', borderRadius: 6, cursor: corriendo ? 'default' : 'pointer',
           border: '1px solid color-mix(in srgb, #F59E0B 40%, var(--line-2))',
@@ -63,7 +88,7 @@ export function RegenerateSliceView({ estado, mensaje, onClick }: { estado: Esta
   )
 }
 
-export default function RegenerateSliceButton({ projectId, projectNodeId, onDone }: { projectId: string; projectNodeId: string; onDone?: () => void }) {
+export default function RegenerateSliceButton({ projectId, projectNodeId, onDone, secciones }: { projectId: string; projectNodeId: string; onDone?: () => void; secciones?: string[] }) {
   const [estado, setEstado] = useState<EstadoSlice>('idle')
   const [mensaje, setMensaje] = useState<string | null>(null)
   const correr = async () => {
@@ -78,5 +103,5 @@ export default function RegenerateSliceButton({ projectId, projectNodeId, onDone
       setEstado('error'); setMensaje(e instanceof Error ? e.message : String(e))
     }
   }
-  return <RegenerateSliceView estado={estado} mensaje={mensaje} onClick={correr} />
+  return <RegenerateSliceView estado={estado} mensaje={mensaje} onClick={correr} secciones={secciones} />
 }

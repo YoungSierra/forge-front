@@ -37,3 +37,18 @@ export function pestanaDe(outputs: OutputDef[] | undefined, key: string): string
   const o = (outputs ?? []).find(x => claveDe(x) === key)
   return o && esDeDatos(o) ? DATA_TAB : key
 }
+
+// Engine v1.10 — orden de PRESENTACIÓN de las pestañas del modal del nodo: primero los documentos (audience document),
+// después «Data» (los internos de datos) y al final las imágenes (internos con image_gen); dentro de cada grupo, el
+// orden de la DNA. No toca el orden de ejecución, que sigue siendo el de la DNA.
+export const esDocumento = (o: OutputDef | null | undefined): boolean => !!o && audienciaDe(o) === 'document'
+export function pestanasEnOrden<T extends OutputDef>(outputs: T[] | undefined): (T | typeof DATA_TAB)[] {
+  const outs = outputs ?? []
+  const datos: (typeof DATA_TAB)[] = outs.some(esDeDatos) ? [DATA_TAB] : []
+  return [...outs.filter(esDocumento), ...datos, ...outs.filter(o => !esDocumento(o) && !esDeDatos(o))]
+}
+/** La pestaña con la que abre el modal: el primer output document; si no hay, la primera del orden de arriba. */
+export function pestanaInicial(outputs: OutputDef[] | undefined): string {
+  const p = pestanasEnOrden(outputs)[0]
+  return p === undefined ? '' : p === DATA_TAB ? DATA_TAB : claveDe(p)
+}
