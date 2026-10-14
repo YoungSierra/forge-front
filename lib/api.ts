@@ -1678,9 +1678,9 @@ export async function acceptNodeOutput(
   docUrl?:   string,
   docFormat?: string,
   projectNodeId?: string | null,
-): Promise<{ asset_id: string }> {
+): Promise<{ asset_id: string; slice_regeneration?: SliceRegeneration[] }> {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
-  return request<{ success: boolean; asset_id: string }>(
+  return request<{ success: boolean; asset_id: string; slice_regeneration?: SliceRegeneration[] }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/accept`,
     { method: 'POST', body: JSON.stringify({ session_id: sessionId, content, member_id: memberId, doc_url: docUrl || undefined, doc_format: docFormat || undefined, project_node_id: projectNodeId || undefined }) },
   )
@@ -2006,10 +2006,35 @@ export async function autoRunNode(
   /** Corre SOLO ese output. La ruta ya lo aceptaba; sin esto el Run dispara todos los pendientes,
    *  que en un nodo de decks son decenas de imagenes. */
   targetOutputKey?: string,
-): Promise<{ ran?: string[]; skipped?: boolean; session_id?: string; reply?: string; doc_url?: string; doc_format?: string }> {
-  return request<{ success: boolean; ran?: string[]; skipped?: boolean; session_id?: string; reply?: string; doc_url?: string; doc_format?: string }>(
+): Promise<{ ran?: string[]; skipped?: boolean; session_id?: string; reply?: string; doc_url?: string; doc_format?: string; slice_regeneration?: SliceRegeneration[] }> {
+  return request<{ success: boolean; ran?: string[]; skipped?: boolean; session_id?: string; reply?: string; doc_url?: string; doc_format?: string; slice_regeneration?: SliceRegeneration[] }>(
     `/api/projects/${projectId}/canvas/nodes/${projectNodeId}/auto-run`,
     { method: 'POST', body: JSON.stringify({ member_id: memberId, target_output_key: targetOutputKey }) },
+  )
+}
+
+// Engine v1.8 — lo que el back devuelve en Accept / auto-run cuando lo aprobado es el alcance de un documento
+// por secciones (el VS Spec del 3.13 para el ADD del 3.9): la regeneración de los desgloses del slice arrancó
+// en segundo plano, o por qué no (sin ADD aún, ya en curso, fase sellada, sin crédito).
+export interface SliceRegeneration {
+  node_key:   string
+  output_key: string
+  started?:   boolean
+  skipped?:   'NO_MASTER' | 'IN_PROGRESS' | 'SEALED' | 'NO_CREDIT' | 'NOT_IN_PROJECT' | string
+  reason?:    string | null
+}
+
+// Engine v1.8 — regenera SOLO los grupos del documento que dependen del Vertical Slice (el ADD del 3.9:
+// §7.3.1 · §7.9.1 · §7.10.1 · §7.11.1) sobre la pieza aprobada y vuelve a extraer los ADI. Sin VS Spec
+// aprobado el back responde 422 SLICE_SCOPE_MISSING y `request` lanza su texto tal cual.
+export async function regenerateSliceBreakdowns(
+  projectId:     string,
+  projectNodeId: string,
+  memberId?:     string,
+): Promise<{ ran: string[]; regenerated: string[]; slice_source?: { node_key: string; output_key: string; chars: number }; failed?: Array<{ output_key: string; error_code: string; error: string }> }> {
+  return request<{ success: boolean; ran: string[]; regenerated: string[]; slice_source?: { node_key: string; output_key: string; chars: number }; failed?: Array<{ output_key: string; error_code: string; error: string }> }>(
+    `/api/projects/${projectId}/canvas/nodes/${projectNodeId}/regenerate-slice`,
+    { method: 'POST', body: JSON.stringify({ member_id: memberId }) },
   )
 }
 

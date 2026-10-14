@@ -28,6 +28,7 @@ import NodeChatWindow, { parseOutputItems, buildImageGenComponents, ImageThumbna
 import type { ImageOutputDef, InlineImageItem } from '@/components/shared/NodeChatWindow'
 import AssetCardDeck, { invalidateAssetDeckCache } from './AssetCardDeck'
 import ForgeToolbar, { type RunMenuItem } from './ForgeToolbar'
+import RegenerateSliceButton, { mensajeDeRegeneracion } from '@/components/shared/RegenerateSliceButton'
 import ExportModal from '@/components/shared/ExportModal'
 import { CopyButton } from '@/components/shared/CopyButton'
 import ReactMarkdown from 'react-markdown'
@@ -3824,6 +3825,14 @@ function ForgeNodePanel({ canvasNode, onClose, onRemove, onRun, onImportedAsOutp
               </button>
             )
           })()}
+          {/* Engine v1.8 — el 3.9 con un 3.13 APROBADO en el canvas: rehacer solo los desgloses del
+              Vertical Slice del ADD y reextraer los ADI. El 3.13 va después del 3.9 en el pipeline, así
+              que el ADD suele nacer con esos cuatro en N/A; este botón los completa sin rehacer el resto. */}
+          {node.node_key === '3.9' && !locked && canvasNodes.some(cn => cn.node?.node_key === '3.13'
+            && (cn.session?.status === 'approved' || cn.session?.status === 'auto_approved'
+              || Object.values(cn.output_sessions ?? {}).some(s => s.status === 'approved' || s.status === 'auto_approved'))) && (
+            <RegenerateSliceButton projectId={projectId} projectNodeId={canvasNode.project_node_id} onDone={onImportedAsOutput} />
+          )}
           {/* ── Limpiar: dejar el nodo, o algunas de sus salidas, en cero ──
               Va debajo del Run porque es su reverso, y plegado porque borra. Lo pidió el equipo:
               hasta hoy limpiar un nodo para volver a correrlo era pedirlo y que alguien lo hiciera
@@ -4243,6 +4252,8 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
   // Avisos de la última respuesta del chat (deck no generado, deck sin imágenes, tipos de slide
   // pintados como texto). El back los devolvía en `warnings` y aquí no se mostraban.
   const [chatAvisos,        setChatAvisos]        = useState<string[]>([])
+  // Engine v1.8 — aviso del canvas tras aprobar el 3.13: la regeneración automática de los desgloses del ADD
+  const [sliceAviso,        setSliceAviso]        = useState<string | null>(null)
   const [chatOutputImages,     setChatOutputImages]     = useState<OutputImagesMap>({})
   // Fuerza el recálculo de `imagesPending`, que se lee de localStorage en cada render
   const [tickDespacho,         setTickDespacho]         = useState(0)
@@ -5776,6 +5787,10 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
 
       setRunningNodeIds(new Set())
 
+      // Engine v1.8 — un Run que aprueba el VS Spec dispara en el back la regeneración de los desgloses del ADD
+      const disparos = results.flatMap(r => r.status === 'fulfilled' ? (r.value.slice_regeneration ?? []) : [])
+      if (disparos.length) setSliceAviso(mensajeDeRegeneracion(disparos))
+
       // Marcar nodos completados como auto_approved en el estado local — inmediato
       const succeeded = results
         .map((r, i) => ({ r, id: tier[i] }))
@@ -6065,6 +6080,15 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
         </div>
       )}
 
+      {/* Engine v1.8 — la regeneración automática de los desgloses del ADD tras aprobar el 3.13 */}
+      {sliceAviso && (
+        <div role="status" style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 10011, maxWidth: 420, background: '#2a1f0a', border: '1px solid #f59e0b', borderRadius: 8, padding: '10px 32px 10px 12px', color: '#fde68a', fontSize: 12, lineHeight: 1.45, boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Slice breakdowns</div>
+          <div>{sliceAviso}</div>
+          <button aria-label="Dismiss" onClick={() => setSliceAviso(null)} style={{ position: 'absolute', top: 6, right: 8, background: 'none', border: 'none', color: '#fde68a', cursor: 'pointer', fontSize: 14 }}>×</button>
+        </div>
+      )}
+
       {/* Ventana de chat con el nodo */}
       {chatNode && chatNode.node && !chatLoading && (() => {
         const chatForgeNode = chatNode.node
@@ -6159,7 +6183,9 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           }}
           onAccept={async (content) => {
             if (!chatSessionId) return
-            await acceptNodeOutput(project.id, chatForgeNode.id, chatSessionId, content, chatDocUrl ?? undefined, chatDocFormat ?? undefined, chatNode.project_node_id)
+            const aceptado = await acceptNodeOutput(project.id, chatForgeNode.id, chatSessionId, content, chatDocUrl ?? undefined, chatDocFormat ?? undefined, chatNode.project_node_id)
+            // Engine v1.8 — si lo aceptado era el VS Spec, el back ya está rehaciendo los desgloses del ADD
+            setSliceAviso(mensajeDeRegeneracion(aceptado.slice_regeneration))
             invalidateAssetDeckCache(project.id, chatForgeNode.id)
             setChatNode(null)
             setChatMessages([])
