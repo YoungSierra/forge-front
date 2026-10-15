@@ -2467,6 +2467,23 @@ export interface PlanDeInstancias {
   avisos?:         string[]
   /** De dónde salió la cuenta: el manifiesto de instancias del 3.20, o la prosa del VS Spec. */
   fuente?:         'manifest' | 'vs_spec' | null
+  /** La corrida que ya está produciendo hojas en este proyecto, si hay: el recuadro se engancha. */
+  corrida?:        CorridaDeInstancias | null
+}
+
+/** Una corrida de instanciar. Dura minutos, así que corre en el servidor y se le pregunta cómo va. */
+export interface CorridaDeInstancias {
+  id:        string
+  estado:    'corriendo' | 'terminada' | 'fallida'
+  total:     number
+  hechas:    number
+  /** «22_VFXSheet · VFX_FlyChain»: la que se está produciendo ahora. */
+  actual:    string | null
+  creados:   { id: string; name: string }[]
+  fallos:    { pagina: string; item: { nombre: string }; motivo: string }[]
+  error:     string | null
+  /** La respuesta trajo la corrida que YA estaba en marcha, no una nueva. */
+  ya_en_curso?: boolean
 }
 
 /** Qué hojas pide el alcance y cuántas corridas son. No despacha nada: es lo que el recuadro
@@ -2476,14 +2493,19 @@ export async function getPlanDeInstancias(projectId: string) {
     `/api/projects/${projectId}/canvas/alcance/plan`)
 }
 
-/** Y el que gasta. Las páginas las nombra quien llama, nunca por defecto. */
+/** Y el que gasta. Las páginas las nombra quien llama, nunca por defecto. Responde en cuanto la
+ *  corrida arranca: producir veinte hojas tarda más de lo que una petición aguanta abierta. */
 export async function instanciarHojas(projectId: string, paginas: PlanDeInstancias['paginas'], limite = 0) {
-  return request<{ success: boolean; creados: { id: string; name: string }[]
-                   fallos: { pagina: string; item: { nombre: string }; motivo: string }[]
-                   pedidos: number; de: number }>(
+  return request<{ success: boolean; corrida: CorridaDeInstancias }>(
     `/api/projects/${projectId}/canvas/alcance/instanciar`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paginas, limite }) })
+}
+
+/** Cómo va. Un 404 quiere decir que el servidor se reinició y la corrida murió con él. */
+export async function getCorridaDeInstancias(projectId: string, corridaId: string) {
+  return request<{ success: boolean; corrida: CorridaDeInstancias }>(
+    `/api/projects/${projectId}/canvas/alcance/instanciar/${corridaId}`)
 }
 
 export interface DestinoDeContexto {

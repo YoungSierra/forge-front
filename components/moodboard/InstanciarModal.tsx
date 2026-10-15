@@ -1,7 +1,14 @@
 'use client'
 
-import React, { useEffect, useMemo, useState } from 'react'
-import { getPlanDeInstancias, instanciarHojas, type PlanDeInstancias } from '@/lib/api'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { getCorridaDeInstancias, getPlanDeInstancias, instanciarHojas,
+         type CorridaDeInstancias, type PlanDeInstancias } from '@/lib/api'
+
+// Cada cuánto se pregunta cómo va. Una hoja tarda unos 35 s, así que más seguido no enseña nada.
+const SONDEO_MS = 4000
+// Cortes de red seguidos que se toleran antes de rendirse: el servidor sigue produciendo aunque
+// el navegador pierda la conexión un momento, y lo hecho queda publicado igual.
+const CORTES_TOLERADOS = 8
 
 // Crear una hoja por ítem del alcance.
 //
@@ -25,6 +32,43 @@ export default function InstanciarModal({ projectId, accent, onCerrar, onListo }
   const [busy,  setBusy]  = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hecho, setHecho] = useState<{ creados: number; fallos: { pagina: string; item: { nombre: string }; motivo: string }[] } | null>(null)
+  const [avance, setAvance] = useState<CorridaDeInstancias | null>(null)
+  const vivoRef = useRef(true)
+  // Se vuelve a poner en true al montar: en desarrollo React monta, desmonta y monta otra vez.
+  useEffect(() => { vivoRef.current = true; return () => { vivoRef.current = false } }, [])
+
+  // Antes esperaba la respuesta con la petición abierta los trece minutos que tardan veinte hojas,
+  // y el 15-10 se cortó: las 21 de Migue se pagaron y publicaron, pero el recuadro dijo «Failed to
+  // fetch» y el lienzo no se enteró. Ahora el servidor corre solo y acá se le pregunta.
+  async function seguir(c: CorridaDeInstancias) {
+    setBusy(true); setError(null); setAvance(c)
+    let cortes = 0
+    while (vivoRef.current) {
+      if (c.estado === 'terminada') { setHecho({ creados: c.creados.length, fallos: c.fallos }); break }
+      if (c.estado === 'fallida') {
+        if (c.creados.length) setHecho({ creados: c.creados.length, fallos: [...c.fallos,
+          { pagina: '', item: { nombre: 'the rest of the run' }, motivo: c.error || 'the run stopped' }] })
+        else setError(c.error || 'the run stopped')
+        break
+      }
+      await new Promise(r => setTimeout(r, SONDEO_MS))
+      if (!vivoRef.current) break
+      try {
+        c = (await getCorridaDeInstancias(projectId, c.id)).corrida
+        cortes = 0
+        setAvance(c)
+      } catch (e) {
+        // Un TypeError es la red (el «Failed to fetch»): se reintenta. Lo demás es el servidor
+        // diciendo algo —la corrida ya no existe— y se enseña tal cual.
+        if (e instanceof TypeError && ++cortes <= CORTES_TOLERADOS) continue
+        setError(e instanceof TypeError
+          ? 'Lost contact with the server. The run keeps going there and every finished sheet is published — reopen this window in a few minutes to see where it is.'
+          : e instanceof Error ? e.message : 'could not read the run')
+        break
+      }
+    }
+    if (vivoRef.current) setBusy(false)
+  }
 
   useEffect(() => {
     let vivo = true
@@ -41,9 +85,12 @@ export default function InstanciarModal({ projectId, accent, onCerrar, onListo }
           if (i.hecha) hechas.add(`${p.pagina}::${i.nombre}`)
         }
         if (hechas.size) setFuera(hechas)
+        // Ya hay una corrida en marcha (otra pestaña, o se recargó la página): se sigue esa.
+        if (r.corrida) seguir(r.corrida)
       })
       .catch(e => vivo && setError(e instanceof Error ? e.message : 'could not read the scope'))
     return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- se lee el plan una vez por proyecto
   }, [projectId])
 
   const clave = (pagina: string, item: string) => `${pagina}::${item}`
@@ -73,12 +120,15 @@ export default function InstanciarModal({ projectId, accent, onCerrar, onListo }
 
   async function correr() {
     setBusy(true); setError(null)
+    let c: CorridaDeInstancias
     try {
-      const r = await instanciarHojas(projectId, elegidas, limite)
-      setHecho({ creados: r.creados.length, fallos: r.fallos })
+      c = (await instanciarHojas(projectId, elegidas, limite)).corrida
     } catch (e) {
       setError(e instanceof Error ? e.message : 'the run failed')
-    } finally { setBusy(false) }
+      setBusy(false)
+      return
+    }
+    await seguir(c)
   }
 
   return (
@@ -229,21 +279,37 @@ export default function InstanciarModal({ projectId, accent, onCerrar, onListo }
               <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>— to look at one before committing the rest</span>
             </div>
 
+            {busy && avance && (
+              <div style={{ fontSize: 11.5, color: 'var(--text-2)', lineHeight: 1.6, marginTop: 10 }}>
+                {avance.ya_en_curso && <div style={{ color: 'var(--text-3)' }}>A run was already going in this project — following it instead of starting another.</div>}
+                <div>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: accent }}>{avance.hechas}/{avance.total || '…'}</span>
+                  {avance.actual ? ` — now ${avance.actual.replace(/^\d+_/, '')}` : ''}
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
+                  Each finished sheet is published as it comes out. Closing this window does not stop the run.
+                </div>
+              </div>
+            )}
             {error && <div style={{ fontSize: 11.5, color: '#e8736a', lineHeight: 1.6, marginTop: 10 }}>{error}</div>}
 
             <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-              <button onClick={onCerrar} disabled={busy} style={{
-                flex: 1, padding: '9px 0', borderRadius: 8, cursor: busy ? 'default' : 'pointer',
+              {/* Con la corrida en marcha, cerrar no la para —sigue en el servidor—: se cierra y se
+                  recarga el lienzo para que se vea lo que ya salió. */}
+              <button onClick={busy && avance
+                ? () => onListo({ creados: avance.creados.length, fallos: avance.fallos.length })
+                : onCerrar} disabled={busy && !avance} style={{
+                flex: 1, padding: '9px 0', borderRadius: 8, cursor: busy && !avance ? 'default' : 'pointer',
                 background: 'transparent', border: '1px solid var(--line-2)', color: 'var(--text-2)',
                 fontSize: 12, fontFamily: 'var(--font-sans)',
-              }}>Cancel</button>
+              }}>{busy && avance ? 'Close' : 'Cancel'}</button>
               <button onClick={correr} disabled={busy || !aDespachar} style={{
                 flex: 2, padding: '9px 0', borderRadius: 8,
                 cursor: busy || !aDespachar ? 'default' : 'pointer',
                 background: busy || !aDespachar ? 'var(--bg-2)' : accent,
                 border: 'none', color: busy || !aDespachar ? 'var(--text-3)' : '#0b0c0e',
                 fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-sans)',
-              }}>{busy ? `Producing ${aDespachar}…` : `Produce ${aDespachar} sheet${aDespachar === 1 ? '' : 's'}`}</button>
+              }}>{busy ? `Producing ${avance?.total || aDespachar}…` : `Produce ${aDespachar} sheet${aDespachar === 1 ? '' : 's'}`}</button>
             </div>
           </>
         )}
