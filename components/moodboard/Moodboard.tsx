@@ -6399,6 +6399,13 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
                     </div>
                   )
                 })}
+                {/* Lo que el documento nombra y el tope deja fuera: antes solo lo decía el log del
+                    servidor, y la lista parecía completa. */}
+                {!!paso.clips_descartados?.length && (
+                  <div style={{ fontSize: 10.5, color: 'var(--text-3)', lineHeight: 1.6, marginTop: 6 }}>
+                    {paso.clips_descartados.length} more clip{paso.clips_descartados.length === 1 ? '' : 's'} in the document {paso.clips_descartados.length === 1 ? 'is' : 'are'} left out of this run: {paso.clips_descartados.join(', ')}
+                  </div>
+                )}
               </div>
             )}
 

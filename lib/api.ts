@@ -2191,6 +2191,8 @@ export type PasoDeCadena = {
   /** Las animaciones que produciría este paso, para poder elegir cuáles correr (informe de JuanK,
    *  punto 1). Vacío = todavía no se han leído del ADI; el Run las lee al correr. */
   clips?: { nombre: string; etiqueta: string }[]
+  /** Clips que el documento nombra y el tope deja fuera de la corrida. */
+  clips_descartados?: string[]
   /** Si el paso pide el Brief y la descripción del efecto antes de correr (VFX Sheet). Viene del
    *  backend y no escrito acá: una condición contra el nombre del paso se queda muda en silencio
    *  el día que el paso cambia de nombre, que es exactamente lo que ya pasó una vez. */
