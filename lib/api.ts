@@ -402,6 +402,8 @@ export interface UnifiedAsset {
   /** Si la produjo una cadena de producción. Una parte de un entorno también cuelga del 3.20 y
    *  también es imagen; esto es lo que la separa de una página del deck. */
   de_cadena?: boolean
+  /** Textura tileable (cadena de Tile Textures): la tarjeta ofrece verla en mosaico 3×3. */
+  mosaico?: boolean
   /** Los renders del nivel montado, cuando esta pieza es uno. El visor los enseña como galería
    *  debajo del modelo: se subieron juntos y se miran juntos (informe v9, §5). */
   montaje_renders?: { nombre: string; url: string }[] | null
@@ -2206,6 +2208,9 @@ export type PasoDeCadena = {
    *  variante, la ventana se entera sola. Ausente = este paso no pregunta nada. */
   poses?: { clave: string; etiqueta: string; ayuda: string }[]
   por_cada_salida_de?: string | null
+  /** La cadena existe pero su workflow está por definir (Level Design, 19-10): el motivo que se
+   *  muestra con Run apagado. Con esto puesto el paso no trae índice ni etiqueta — no hay paso. */
+  pendiente?: string
   /** La cadena entera, para dibujarla antes de correr: solo pasos de producción, con sus
    *  nombres llanos. Las herramientas de edición no entran — no son pasos de la cadena. */
   pasos?: { clave: string; etiqueta: string; estado: 'hecho' | 'siguiente' | 'despues' }[]

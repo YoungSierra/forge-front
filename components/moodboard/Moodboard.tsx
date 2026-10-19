@@ -3671,6 +3671,13 @@ function BotonPila({ titulo, onClick, children }: { titulo: string; onClick: () 
 const esPaginaDelASG = (a: UnifiedAsset) =>
   /^\s*art style guide\s*[—–-]/i.test(String(a.name || '')) && kindOf(a) === 'image'
 
+// Hojas cuyo Run existe pero todavía no lanza nada. La Level Design Sheet (p.33, handoff de Migue
+// del 19-10): qué workflow corre lo define el Technical Artist, y hasta entonces el sector se ve
+// apagado con el motivo. Es comprobación de PANTALLA, como la de arriba: el backend la repite
+// (`pendiente` en la cadena) y rechaza la corrida con el mismo texto.
+const runPendiente = (a: UnifiedAsset): string | null =>
+  /level\s*design\s*sheet/i.test(String(a.name || '')) ? 'Workflow pending — Technical Artist' : null
+
 function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu, marca, escala, progreso }: {
   asset: UnifiedAsset; index: number; accent: string; colors: string[]
   selected: boolean; onOpen: (from: DOMRect) => void
@@ -3698,6 +3705,8 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
   const glb = g.data, vid = v.data, aud = a.data
   // Si esta tarjeta está mostrando el modelo vivo en vez de su silueta.
   const [vivo3d, setVivo3d] = useState(false)
+  // Y si una textura tileable se está viendo repetida 3×3: es como se juzgan las costuras.
+  const [mosaico, setMosaico] = useState(false)
   // El ícono es el marcador de posición mientras se calcula la miniatura; late para que se lea
   // como "trabajando" y no como resultado final, y la miniatura entra fundida en vez de saltar.
   const calculando = g.cargando || v.cargando || a.cargando
@@ -3817,7 +3826,35 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
         >{vivo3d ? 'STILL' : 'TURN'}</button>
       )}
 
-      {kind === 'image' && url ? (
+      {/* «Preview tiled 3×3» sobre una textura tileable. Obligatorio por decisión de Migue (19-10):
+          quien aprueba la base tiene que poder ver las costuras ANTES de pagar los cuatro mapas,
+          que las heredarían. Siempre visible —no solo al pasar— porque es la herramienta de
+          revisión de esta tarjeta, no un extra. */}
+      {asset.mosaico && kind === 'image' && url && (
+        <button
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); setMosaico(m => !m) }}
+          title={mosaico ? 'Back to the single tile' : 'Preview tiled 3×3 — check the seams before approving'}
+          style={{
+            position: 'absolute', right: 7, bottom: 7, zIndex: 3,
+            padding: '3px 8px', borderRadius: 999, cursor: 'pointer',
+            background: mosaico ? accent : 'rgba(6,7,9,0.72)',
+            border: `1px solid ${mosaico ? accent : 'rgba(255,255,255,0.18)'}`,
+            color: mosaico ? '#0b0c0e' : '#fff', backdropFilter: 'blur(3px)',
+            fontSize: 9.5, fontFamily: 'var(--font-mono)', letterSpacing: '.04em',
+          }}
+        >{mosaico ? '1×1' : 'TILED 3×3'}</button>
+      )}
+
+      {kind === 'image' && url && asset.mosaico && mosaico ? (
+        // La misma imagen nueve veces, sin hueco entre copias: cualquier costura se ve como una
+        // línea que cruza la tarjeta. Cuadrado y centrado para que las nueve celdas sean iguales.
+        <div style={{
+          position: 'absolute', inset: 0, margin: 'auto', aspectRatio: '1 / 1', maxWidth: '100%', maxHeight: '100%',
+          backgroundImage: `url("${miniaturaUrl(url, anchoMini)}")`,
+          backgroundSize: '33.3334% 33.3334%', backgroundRepeat: 'repeat',
+        }} />
+      ) : kind === 'image' && url ? (
         // `contain` y no `cover`: una hoja de guía de estilo recortada pierde justo lo que hay
         // que leer, y estas páginas tienen que verse enteras.
         //
@@ -6218,6 +6255,20 @@ function AvisoRun({ asset, projectId, accent, corrida, onCancel, onListo, onMont
               </div>
             </div>
           </div>
+        ) : paso?.pendiente ? (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 9 }}>
+              {paso.etiqueta_cadena} — Run not available yet
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 18 }}>
+              {paso.pendiente}. This sheet has a Run, but what it launches has not been registered yet.
+            </div>
+            <button onClick={onCancel} style={{
+              width: '100%', padding: '9px 0', borderRadius: 8, cursor: 'pointer',
+              background: 'transparent', border: `1px solid ${accent}66`, color: accent,
+              fontSize: 12, fontFamily: 'var(--font-sans)',
+            }}>Got it</button>
+          </>
         ) : paso === null ? (
           <>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', marginBottom: 9 }}>
@@ -7107,7 +7158,8 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
         // donde se lee qué falta. Un sector apagado dejaba el estado en un tooltip.
         // «New Art Style» solo sobre páginas del ASG: re-estiliza la página entera y fuera de
         // ellas no tiene sentido (§7 del documento de Miguel). El backend lo vuelve a comprobar.
-        const vivo = q.key === 'edit' || q.key === 'run' || q.key === 'library' || q.key === 'context'
+        const vivo = q.key === 'edit' || q.key === 'library' || q.key === 'context'
+                  || (q.key === 'run' && !runPendiente(asset))
                   || (q.key === 'style' && esPaginaDelASG(asset))
                   || (q.key === 'montaje' && Boolean(montaje?.aplica))
                   // El pack solo se enciende cuando está COMPLETO: a diferencia del montaje, acá
@@ -7122,7 +7174,7 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
             onMouseLeave={() => setHot(null)}
             onClick={e => {
               if (q.key === 'edit') { e.stopPropagation(); setSub(true) }
-              if (q.key === 'run')  { e.stopPropagation(); onRun(asset) }
+              if (q.key === 'run' && !runPendiente(asset)) { e.stopPropagation(); onRun(asset) }
               if (q.key === 'library') { e.stopPropagation(); onLibreria(asset) }
               if (q.key === 'montaje' && montaje?.aplica) { e.stopPropagation(); onMontaje(asset, montaje) }
               if (q.key === 'context') { e.stopPropagation(); onContexto(asset) }
@@ -7140,7 +7192,9 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
             }}
             title={
               q.key === 'edit' ? `${q.label} — open the editing menu`
-              : q.key === 'run' ? 'Run — execute this page’s workflow and publish the result to the right'
+              : q.key === 'run' ? (runPendiente(asset)
+                  ? `Run — ${runPendiente(asset)}`
+                  : 'Run — execute this page’s workflow and publish the result to the right')
               : q.key === 'library' ? 'Asset Library — this page and everything produced from it, as a list'
               : q.key === 'montaje' ? tituloMontaje(montaje)
               : q.key === 'pack' ? (armando ? 'Animation pack — packing…' : tituloPack(pack))
@@ -7163,7 +7217,9 @@ function RadialMenu({ x, y, asset, projectId, accent, colors, onDone, onIterar, 
             position: 'absolute', ...sectorAt(i, n, 0.66), transform: 'translate(-50%, -50%)',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7,
             width: 92, textAlign: 'center', pointerEvents: 'none',
-            opacity: hot === q.key ? 1 : 0.72,
+            // Run apagado se VE apagado (decisión de Migue, 19-10: visible y deshabilitado), con
+            // la misma opacidad que los ítems no disponibles del submenú de Edit.
+            opacity: q.key === 'run' && runPendiente(asset) ? 0.34 : hot === q.key ? 1 : 0.72,
             transition: 'opacity 160ms ease',
             // Cada uno sale del centro hacia su sector, con retardo entre ellos.
             ['--dx' as string]: `${(-46 * Math.cos(ang)).toFixed(1)}px`,
