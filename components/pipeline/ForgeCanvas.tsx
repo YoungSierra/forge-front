@@ -2961,6 +2961,15 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                       The reply has no section titled <span style={{ color: 'var(--text-1)' }}>{activeOutKey}</span>.
                       <br />Other outputs do have one, so the model folded this one into a sibling instead of emitting it apart. Check the neighbouring tabs before re-running.
                     </div>
+                  ) : outSession?.output_asset?.storage_url && /^(png|jpe?g|gif|webp|image)$/i.test(outSession.output_asset.format || '') ? (
+                    // Una imagen se enseña. Antes decía «use the download button above» y para
+                    // una png ese botón no existe: la semilla del 1.1 y el pitch del 2.1 se abrían
+                    // en blanco (Migue, 29-09).
+                    <a href={outSession.output_asset.storage_url} target="_blank" rel="noreferrer" style={{ display: 'block' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element -- R2, fuera de next/image (la cuota de Vercel) */}
+                      <img src={outSession.output_asset.storage_url} alt={outSession.output_asset.name}
+                           style={{ display: 'block', maxWidth: '100%', borderRadius: 6, border: '1px solid var(--line-2)' }} />
+                    </a>
                   ) : outSession?.output_asset?.storage_url ? (
                     <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
                       This asset is stored as a file. Use the download button above to view it.
@@ -6355,6 +6364,7 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
                   // viñetas de «Numbers That Matter» — datos de mercado como si fueran arte.
                   declaradasPor: (o.uses?.siblings_if_present ?? o.uses?.siblings ?? [])
                     .find(k => /plan$/i.test(k)) ?? null,
+                  techo: techoDeclarado((out as { image_count?: CuentaDeclarada }).image_count),
                 })
               }
             }

@@ -1266,6 +1266,9 @@ export interface ImageOutputDef {
    *  las elige `pitch_image_plan`, con una entrada por imagen y su título. Sin esto, el documento
    *  sacaba los sujetos de su propia prosa y mandaba a ComfyUI las viñetas de mercado. */
   declaradasPor?: string | null
+  /** Cuántas imágenes declara el output como máximo (0 = no lo dice). Más huecos que esto no se
+   *  pueden producir: el servidor rechaza la imagen sobrante. */
+  techo?: number
 }
 
 // Deriva el doc_url del último mensaje del asistente con un doc_gen tool_call. Necesario para
@@ -2262,7 +2265,11 @@ export default function NodeChatWindow({
                   fuente = after.slice(0, cortes.length ? Math.min(...cortes) : after.length).trim() || section
                 }
 
-                const parsed = parseOutputItems(fuente, def.format, def.declaradasPor || def.outputKey, true)
+                // No más huecos que imágenes declara el output. El 2.5 de JM (09-10) declara UNA
+                // —`visual_pitch`— y el chat dibujaba siete, sacadas del plan que escribió el
+                // modelo; los seis de más respondían «already has its 1 image(s)» al pulsarlos.
+                const todos  = parseOutputItems(fuente, def.format, def.declaradasPor || def.outputKey, true)
+                const parsed = def.techo && def.techo > 0 ? todos.slice(0, def.techo) : todos
                 // Engine v1.10 — A1: el id (y un título) de cada posición del sobre, para emparejar la imagen por id
                 const entradas = entradasDelSobre(fuente, def.declaradasPor || def.outputKey, true)
 
