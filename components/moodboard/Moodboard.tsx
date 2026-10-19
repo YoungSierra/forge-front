@@ -11,7 +11,7 @@
 // Iteración 1: grid, filtros, transición y detalle. El menú radial (clic derecho) y las
 // herramientas de edición son Iteración 2 y 3.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { guardarLocal } from '@/lib/local-store'
 import ModelViewer from '@/components/shared/ModelViewer'
 import { glbThumb, glbThumbCached, type Rampa } from '@/lib/glb-thumb'
@@ -26,6 +26,17 @@ import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type 
 
 import HerramientaModal from './HerramientaModal'
 import InstanciarModal from './InstanciarModal'
+
+// El Moodboard es oscuro en los dos modos: su ventana tiene el fondo oscuro FIJO, igual que los
+// menús de zona, los popovers del marco y el radial. Pero todo lo de adentro escribe con las
+// variables del tema, y en modo claro esas pasan a gris oscuro: texto oscuro sobre oscuro, los
+// títulos que JM no podía leer (09-10). Así que la ventana y esos paneles llevan la paleta del
+// modo oscuro, que es la que su fondo pide. Mismos valores que `:root` en globals.css.
+const TEXTO_OSCURO = {
+  '--bg-0': '#0e0f12', '--bg-1': '#15171c', '--bg-2': '#1c1f25', '--bg-3': '#242831', '--bg-4': '#2e333d',
+  '--text-0': '#f4f5f8', '--text-1': '#d4d8e1', '--text-2': '#a8aebb', '--text-3': '#7d8493',
+  '--line': 'rgba(255,255,255,0.06)', '--line-2': 'rgba(255,255,255,0.10)',
+} as CSSProperties
 import SubirEdicionModal from './SubirEdicionModal'
 import SubirMontajeModal from './SubirMontajeModal'
 import VerticalSliceScope from './VerticalSliceScope'
@@ -1858,6 +1869,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
         }}
         style={{
         width: '100%', height: '100%', maxWidth: maximizado ? 'none' : 1720,
+        ...TEXTO_OSCURO,
         background: 'linear-gradient(160deg, rgba(30,33,42,0.96) 0%, rgba(16,18,24,0.98) 55%, rgba(12,14,19,0.99) 100%)',
         border: maximizado ? 'none' : '1px solid rgba(255,255,255,0.10)', borderRadius: maximizado ? 0 : 16,
         display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative',
@@ -2511,7 +2523,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                           position: 'absolute', left: -1, top: -1, pointerEvents: 'auto',
                           display: 'flex', alignItems: 'center', gap: 7, cursor: 'grab',
                           padding: '5px 10px 6px', borderRadius: '13px 13px 0 0',
-                          background: `color-mix(in srgb, ${theme.accent} 20%, rgba(10,12,16,0.92))`,
+                          ...TEXTO_OSCURO, background: `color-mix(in srgb, ${theme.accent} 20%, rgba(10,12,16,0.92))`,
                           border: `1px solid ${theme.accent}55`, borderBottom: 'none',
                         }}
                       >
@@ -2590,7 +2602,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                         transformOrigin: 'bottom center',
                         display: 'flex', alignItems: 'center', gap: 2, padding: 3,
                         borderRadius: 9, whiteSpace: 'nowrap',
-                        background: 'rgba(10,12,16,0.94)', border: '1px solid rgba(255,255,255,0.16)',
+                        ...TEXTO_OSCURO, background: 'rgba(10,12,16,0.94)', border: '1px solid rgba(255,255,255,0.16)',
                         boxShadow: '0 8px 22px rgba(0,0,0,0.5)',
                       }}
                     >
@@ -2787,7 +2799,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             <span key={k} style={{
                               fontSize: 9, fontFamily: 'var(--font-mono)', letterSpacing: '.02em',
                               padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap',
-                              background: 'rgba(10,12,16,0.92)', border: '1px solid rgba(255,255,255,0.14)',
+                              ...TEXTO_OSCURO, background: 'rgba(10,12,16,0.92)', border: '1px solid rgba(255,255,255,0.14)',
                               color: 'var(--text-2)',
                             }}>
                               {k.split('.').pop()} <b style={{ color: 'var(--text-0)' }}>{String(v)}</b>
@@ -2811,7 +2823,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             transformOrigin: 'bottom center',
                             display: 'flex', alignItems: 'center', gap: 2, padding: 3,
                             borderRadius: 9, whiteSpace: 'nowrap',
-                            background: 'rgba(10,12,16,0.94)', border: '1px solid rgba(255,255,255,0.16)',
+                            ...TEXTO_OSCURO, background: 'rgba(10,12,16,0.94)', border: '1px solid rgba(255,255,255,0.16)',
                             boxShadow: '0 8px 22px rgba(0,0,0,0.5)',
                           }}
                         >
@@ -2869,7 +2881,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                     style={{
                       position: 'absolute', right: 14, bottom: 14, width: MW, height: MH,
                       borderRadius: 8, cursor: 'pointer',
-                      background: 'rgba(6,7,9,0.82)', border: '1px solid rgba(255,255,255,0.14)',
+                      ...TEXTO_OSCURO, background: 'rgba(6,7,9,0.82)', border: '1px solid rgba(255,255,255,0.14)',
                       boxShadow: '0 8px 24px rgba(0,0,0,0.45)', overflow: 'hidden',
                     }}
                   >
@@ -3201,7 +3213,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
             onClick={e => e.stopPropagation()}
             style={{
               position: 'fixed', left: menuZona.x, top: menuZona.y,
-              background: 'rgba(10,12,16,0.97)', border: '1px solid rgba(255,255,255,0.16)',
+              ...TEXTO_OSCURO, background: 'rgba(10,12,16,0.97)', border: '1px solid rgba(255,255,255,0.16)',
               borderRadius: 10, padding: 5, minWidth: 232,
               boxShadow: '0 14px 40px rgba(0,0,0,0.6)',
             }}
@@ -3304,7 +3316,7 @@ function CargandoLienzo({ theme }: { theme: MoodboardTheme }) {
       <div style={{
         position: 'relative', display: 'flex', alignItems: 'center', gap: 9,
         padding: '9px 16px', borderRadius: 999,
-        background: 'rgba(6,7,9,0.8)', border: '1px solid rgba(255,255,255,0.12)',
+        ...TEXTO_OSCURO, background: 'rgba(6,7,9,0.8)', border: '1px solid rgba(255,255,255,0.12)',
       }}>
         <span style={{
           width: 9, height: 9, borderRadius: '50%', background: theme.accent,
@@ -4165,7 +4177,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
         <div style={{
           position: 'fixed', left: box.left + 12, top: box.top + 12,
           padding: '4px 9px', borderRadius: 7, fontSize: 11, fontFamily: 'var(--font-mono)',
-          background: 'rgba(8,9,12,0.7)', border: '1px solid rgba(255,255,255,0.14)',
+          ...TEXTO_OSCURO, background: 'rgba(8,9,12,0.7)', border: '1px solid rgba(255,255,255,0.14)',
           color: 'var(--text-1)', pointerEvents: 'none',
         }}>{zoom.toFixed(1)}× · double-click to reset</div>
       )}
@@ -4364,7 +4376,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
             left: box.left, top: box.top + box.height + 10,
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '6px 12px 6px 8px', borderRadius: 999,
-            background: 'rgba(6,7,9,0.82)',
+            ...TEXTO_OSCURO, background: 'rgba(6,7,9,0.82)',
             border: `1px solid ${verSel.is_current ? accent + '66' : 'rgba(255,255,255,0.16)'}`,
             boxShadow: '0 6px 18px rgba(0,0,0,0.45)',
             backdropFilter: 'blur(6px)',
@@ -4441,7 +4453,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
         style={{
           position: 'fixed', left: box.left, top: box.top - 40,
           display: 'flex', alignItems: 'center', gap: 2, padding: 3, borderRadius: 9,
-          background: 'rgba(10,12,16,0.94)', border: '1px solid rgba(255,255,255,0.16)',
+          ...TEXTO_OSCURO, background: 'rgba(10,12,16,0.94)', border: '1px solid rgba(255,255,255,0.16)',
           boxShadow: '0 8px 22px rgba(0,0,0,0.5)',
           opacity: open ? 1 : 0,
           transition: `${FLIGHT}, opacity 220ms ease 140ms`,
@@ -6770,7 +6782,7 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
       }} />
       <div style={{
         position: 'absolute', inset: 3, borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(14,17,22,0.97) 62%, rgba(14,17,22,0.9) 100%)',
+        ...TEXTO_OSCURO, background: 'radial-gradient(circle, rgba(14,17,22,0.97) 62%, rgba(14,17,22,0.9) 100%)',
         backdropFilter: 'blur(4px)',
       }} />
 
@@ -7142,7 +7154,7 @@ function UploadBar({ accent, uploading, hasContext, onFiles }: {
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10,
       padding: 7, borderRadius: 14, width: '100%', maxWidth: 780,
-      background: 'rgba(10,12,16,0.72)', border: '1px solid var(--line-2)',
+      ...TEXTO_OSCURO, background: 'rgba(10,12,16,0.72)', border: '1px solid var(--line-2)',
     }}>
       <label
         title="Upload images, video, audio, 3D or documents to the project library"
