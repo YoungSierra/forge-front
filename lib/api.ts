@@ -404,6 +404,11 @@ export interface UnifiedAsset {
   de_cadena?: boolean
   /** Textura tileable (cadena de Tile Textures): la tarjeta ofrece verla en mosaico 3×3. */
   mosaico?: boolean
+  /** Mapas PBR de Tile Textures: el job que los agrupa en UNA tarjeta, qué mapa es éste y, para
+   *  MetallicSmoothness, sus dos canales como vistas aparte (RGB = metal, A = suavidad). */
+  mapas_de?: string | null
+  mapa?: string | null
+  canales?: { rgb: string; alfa: string } | null
   /** Los renders del nivel montado, cuando esta pieza es uno. El visor los enseña como galería
    *  debajo del modelo: se subieron juntos y se miran juntos (informe v9, §5). */
   montaje_renders?: { nombre: string; url: string }[] | null

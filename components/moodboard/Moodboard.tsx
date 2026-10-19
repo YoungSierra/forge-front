@@ -1464,6 +1464,21 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     return s
   })()
 
+  // Los mapas PBR de una misma corrida de Tile Textures, juntos: se dibujan en UNA tarjeta (§4 del
+  // handoff de Migue, 19-10) y no en cuatro. La portada es el Normal; las otras tres no se dibujan
+  // sueltas en el lienzo, pero siguen en la tabla y en la Asset Library, como lo apilado.
+  const mapasPorJob = useMemo(() => {
+    const m = new Map<string, UnifiedAsset[]>()
+    for (const a of assets) if (a.mapas_de) m.set(a.mapas_de, [...(m.get(a.mapas_de) ?? []), a])
+    return m
+  }, [assets])
+  const mapaEscondido = (a: UnifiedAsset) => {
+    if (!a.mapas_de) return false
+    const grupo = mapasPorJob.get(a.mapas_de) ?? []
+    const portada = grupo.find(x => x.mapa === 'normal') ?? grupo[0]
+    return portada ? portada.id !== a.id : false
+  }
+
   const porFechaYPagina = (a: UnifiedAsset, b: UnifiedAsset) => {
     const ga = grupoDe(a), gb = grupoDe(b)
     if (ga !== gb) return (fechaGrupo.get(gb) ?? 0) - (fechaGrupo.get(ga) ?? 0)
@@ -1490,7 +1505,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     // desplegándola, y de lo escondido hay que ir a buscarlo.
     const enLienzo = view === 'table' || tab === 'docs' || familia
       ? base
-      : base.filter(a => !esArchivoDeTrabajo(a) && !apiladas.has(a.id))
+      : base.filter(a => !esArchivoDeTrabajo(a) && !apiladas.has(a.id) && !mapaEscondido(a))
 
     if (view === 'table') {
       const key = (a: UnifiedAsset) =>
@@ -1509,7 +1524,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
     // `ocultos` FALTABA acá, y por eso «Remove from canvas» parecía no hacer nada: la hoja se
     // marcaba, el acomodo se guardaba —al recargar ya no estaba—, pero esta lista no se volvía a
     // calcular y la tarjeta seguía dibujada hasta que cambiara cualquier otra cosa.
-  }, [shownSet, tab, view, sort, fechaGrupo, familia, conDescendientes, ocultos])
+  }, [shownSet, tab, view, sort, fechaGrupo, familia, conDescendientes, ocultos, mapasPorJob])
 
   // La página es exactamente lo que entra en pantalla: 3 filas de `cols`. Así nunca hay que
   // scrollear dentro de una página — se pasa a la siguiente.
@@ -2832,7 +2847,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             onHover={dentro => (dentro ? entrarHoja(a.id) : salirHoja(a.id))}
                             onOpen={(from) => { setSel(a.id); setDetail({ asset: a, from }) }}
                             onMenu={(x, y) => setMenu({ x, y, asset: a })}
-                            marca={marcas[a.id] ?? null} escala={vista.z} />
+                            marca={marcas[a.id] ?? null} escala={vista.z}
+                            mapas={a.mapas_de ? mapasPorJob.get(a.mapas_de) ?? null : null} />
 
                       {/* Con qué opciones se generó la pieza, DEBAJO de ella (informe v4, punto 8).
                           La vista ampliada ya las mostraba; en el lienzo no, y ahí es donde uno
@@ -3678,7 +3694,7 @@ const esPaginaDelASG = (a: UnifiedAsset) =>
 const runPendiente = (a: UnifiedAsset): string | null =>
   /level\s*design\s*sheet/i.test(String(a.name || '')) ? 'Workflow pending — Technical Artist' : null
 
-function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu, marca, escala, progreso }: {
+function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHover, onMenu, marca, escala, progreso, mapas }: {
   asset: UnifiedAsset; index: number; accent: string; colors: string[]
   selected: boolean; onOpen: (from: DOMRect) => void
   onSelect?: () => void; onHover?: (dentro: boolean) => void
@@ -3690,6 +3706,8 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
   /** Cuánto lleva la categoría del alcance que produce esta página, de 0 a 1. `null` en las
    *  hojas que no son una de las nueve páginas del alcance. */
   progreso?: number | null
+  /** Los mapas PBR de la misma corrida, cuando esta tarjeta es su portada. */
+  mapas?: UnifiedAsset[] | null
 }) {
   const [hover, setHover] = useState(false)
   const t    = tabOf(asset)
@@ -3830,7 +3848,7 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
           quien aprueba la base tiene que poder ver las costuras ANTES de pagar los cuatro mapas,
           que las heredarían. Siempre visible —no solo al pasar— porque es la herramienta de
           revisión de esta tarjeta, no un extra. */}
-      {asset.mosaico && kind === 'image' && url && (
+      {asset.mosaico && !mapas?.length && kind === 'image' && url && (
         <button
           onPointerDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); setMosaico(m => !m) }}
@@ -3846,7 +3864,37 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
         >{mosaico ? '1×1' : 'TILED 3×3'}</button>
       )}
 
-      {kind === 'image' && url && asset.mosaico && mosaico ? (
+      {mapas?.length ? (
+        // Los mapas de la corrida en una sola tarjeta. MetallicSmoothness va partido en sus dos
+        // canales: compuesto, el navegador pinta el metal transparentado por la suavidad y no se
+        // lee ninguno. Sin vistas por canal (falló al separarlos) cae al mapa entero.
+        <div style={{
+          position: 'absolute', inset: 0, padding: 6,
+          display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)', gap: 5,
+        }}>
+          {(['normal', 'ao', 'height', 'metallic_smoothness'] as const).flatMap(rol => {
+            const m = mapas.find(x => x.mapa === rol)
+            if (!m?.storage_url) return []
+            if (rol === 'metallic_smoothness' && m.canales) {
+              return [{ k: 'metal', label: 'Metallic · RGB', src: m.canales.rgb }, { k: 'smooth', label: 'Smoothness · A', src: m.canales.alfa }]
+            }
+            const label = rol === 'normal' ? 'Normal' : rol === 'ao' ? 'AO' : rol === 'height' ? 'Height' : 'MetallicSmoothness'
+            return [{ k: rol, label, src: m.storage_url }]
+          }).map(c => (
+            <div key={c.k} style={{ position: 'relative', minHeight: 0, borderRadius: 6, overflow: 'hidden', background: 'rgba(0,0,0,0.25)' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={miniaturaUrl(c.src, 400)} alt={c.label} loading="lazy" decoding="async"
+                   onError={e => { if (e.currentTarget.src !== c.src) e.currentTarget.src = c.src }}
+                   style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <span style={{
+                position: 'absolute', left: 4, bottom: 3, padding: '1px 5px', borderRadius: 4,
+                background: 'rgba(6,7,9,0.72)', color: '#fff',
+                fontSize: 8.5, fontFamily: 'var(--font-mono)', letterSpacing: '.03em',
+              }}>{c.label}</span>
+            </div>
+          ))}
+        </div>
+      ) : kind === 'image' && url && asset.mosaico && mosaico ? (
         // La misma imagen nueve veces, sin hueco entre copias: cualquier costura se ve como una
         // línea que cruza la tarjeta. Cuadrado y centrado para que las nueve celdas sean iguales.
         <div style={{
