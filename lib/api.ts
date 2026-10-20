@@ -394,6 +394,8 @@ export interface UnifiedAsset {
   opciones?: Record<string, unknown> | null
   /** Edit 3D · Retopo en quads: el FBX de Tripo, aparte del GLB que se ve. */
   fbx_url?: string | null
+  /** Export FBX: los presets ya exportados de este modelo ({ blender: url, … }). */
+  fbx?: Record<string, string> | null
   /** De qué página del deck es esta hoja, cuando está instanciada («18_CharacterSheet»). El
    *  nombre no sirve: termina con el personaje, no con la página. */
   instancia_pagina?: string | null
@@ -2707,6 +2709,18 @@ export async function runEdit3D(projectId: string, assetId: string, herramienta:
     {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ herramienta, opciones, member_id: memberId ?? null }),
+    },
+  )
+}
+
+/** Export FBX de un modelo con un preset de Tripo. Si ese preset ya se exportó, vuelve el mismo
+ *  archivo sin otra corrida. */
+export async function exportFBX(projectId: string, assetId: string, preset: string, memberId?: string | null) {
+  return request<{ success: boolean; preset: string; url: string; reusado: boolean }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/export-fbx`,
+    {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset, member_id: memberId ?? null }),
     },
   )
 }

@@ -22,7 +22,7 @@ import { MD_COMPONENTS } from '@/lib/md-components'
 import DataAccordion, { DocumentFiles } from '@/components/shared/DataAccordion'
 import type { DocumentData, DocumentFile } from '@/lib/api'
 import ContextoModal from './ContextoModal'
-import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias, vfxBrief } from '@/lib/api'
+import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias, vfxBrief, exportFBX } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import Edit3DModal from './Edit3DModal'
@@ -309,19 +309,74 @@ const HOJA_GAP = 26
 
 // Bajar el activo a la máquina del usuario. Pasa por el proxy del servidor: el bucket es otro
 // origen y un <a download> directo termina abriendo el archivo en vez de bajarlo.
-async function bajarActivo(asset: UnifiedAsset) {
-  if (!asset.storage_url) return
+// `url` baja otro formato del mismo activo (el FBX de un modelo) con su nombre.
+async function bajarActivo(asset: UnifiedAsset, url: string | null = asset.storage_url) {
+  if (!url) return
   try {
-    const res  = await fetch(`/api/proxy-image?url=${encodeURIComponent(asset.storage_url)}`)
+    const res  = await fetch(`/api/proxy-image?url=${encodeURIComponent(url)}`)
     const blob = await res.blob()
     const href = URL.createObjectURL(blob)
     const a    = document.createElement('a')
-    const ext  = asset.storage_url.match(/\.[a-z0-9]{2,5}(?=$|\?)/i)?.[0] ?? ''
+    const ext  = url.match(/\.[a-z0-9]{2,5}(?=$|\?)/i)?.[0] ?? ''
     a.href = href
     a.download = (outputOf(asset) ?? asset.name).replace(/[^\w.\- ]+/g, '_') + ext
     document.body.appendChild(a); a.click(); a.remove()
     URL.revokeObjectURL(href)
   } catch (e) { console.error('[moodboard] descarga', e) }
+}
+
+// Export FBX (Miguel León, 20-10): cada modelo se baja en GLB y en FBX con los tres presets de
+// Tripo. El ↓ de un modelo abre la lista; de cualquier otra pieza baja directo, como siempre. Un
+// preset ya exportado baja al instante; uno nuevo pasa por Tripo (se paga una vez) y queda guardado.
+const PRESETS_FBX: [string, string][] = [['blender', 'Blender'], ['mixamo', 'Mixamo'], ['3dsmax', '3ds Max']]
+
+function BotonBajar({ asset, projectId, onExportado }: {
+  asset: UnifiedAsset; projectId: string; onExportado: () => void
+}) {
+  const [abierto, setAbierto]   = useState(false)
+  const [haciendo, setHaciendo] = useState<string | null>(null)
+  const [error, setError]       = useState<string | null>(null)
+  if (kindOf(asset) !== '3d') return <BarraBtn titulo="Save to my computer" onClick={() => bajarActivo(asset)}>↓</BarraBtn>
+
+  const fbx = async (preset: string) => {
+    const listo = asset.fbx?.[preset]
+    if (listo) { bajarActivo(asset, listo); setAbierto(false); return }
+    setError(null); setHaciendo(preset)
+    try {
+      const r = await exportFBX(projectId, asset.id, preset)
+      await bajarActivo(asset, r.url)
+      setAbierto(false)
+      onExportado()
+    } catch (e) {
+      // No se reintenta solo: cada exportación de Tripo se paga.
+      setError(e instanceof Error ? e.message : String(e))
+    } finally { setHaciendo(null) }
+  }
+  const item = (clave: string, texto: string, nota: string, onClick: () => void) => (
+    <button key={clave} onClick={e => { e.stopPropagation(); if (!haciendo) onClick() }} disabled={!!haciendo}
+            style={{ display: 'flex', justifyContent: 'space-between', gap: 14, width: '100%', padding: '6px 9px',
+                     borderRadius: 6, border: 'none', background: haciendo === clave ? 'rgba(255,255,255,0.08)' : 'transparent',
+                     color: '#e8eef7', fontSize: 11.5, textAlign: 'left', cursor: haciendo ? 'default' : 'pointer' }}>
+      <span>{texto}</span><span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#8a92a3' }}>{nota}</span>
+    </button>
+  )
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <BarraBtn titulo="Save to my computer — GLB or FBX" activo={abierto} onClick={() => { setAbierto(v => !v); setError(null) }}>↓</BarraBtn>
+      {abierto && (
+        <div data-mb-menu onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}
+             style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 20, width: 230, padding: 4,
+                      borderRadius: 8, background: 'rgba(10,12,16,0.97)', border: '1px solid rgba(255,255,255,0.16)',
+                      boxShadow: '0 10px 28px rgba(0,0,0,0.55)', whiteSpace: 'normal' }}>
+          {item('glb', 'GLB', '', () => { bajarActivo(asset); setAbierto(false) })}
+          {PRESETS_FBX.map(([p, etq]) => item(p, `FBX · ${etq}`,
+            haciendo === p ? 'Tripo, 1–3 min…' : asset.fbx?.[p] ? 'ready' : 'export', () => fbx(p)))}
+          {asset.fbx_url && item('quad', 'FBX · quads (Retopo)', 'ready', () => { bajarActivo(asset, asset.fbx_url!); setAbierto(false) })}
+          {error && <div style={{ padding: '6px 9px', fontSize: 11, color: '#ff8080', lineHeight: 1.4 }}>{error}</div>}
+        </div>
+      )}
+    </span>
+  )
 }
 
 function BarraBtn({ children, titulo, activo, onClick }: {
@@ -2833,7 +2888,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                             if (caja) { setSel(a.id); setDetail({ asset: a, from: caja }) }
                           }}>⛶</BarraBtn>
                           <BarraBtn titulo={(notasPorHoja[a.id]?.length ?? 0) > 0 ? `Notes (${notasPorHoja[a.id].length})` : 'Notes'} activo={(notasPorHoja[a.id]?.length ?? 0) > 0} onClick={() => setNotando(a)}>✎</BarraBtn>
-                          <BarraBtn titulo="Save to my computer" onClick={() => bajarActivo(a)}>↓</BarraBtn>
+                          <BotonBajar asset={a} projectId={projectId} onExportado={reload} />
                           <BarraBtn titulo="Remove from canvas — it stays in the library" onClick={() => esconder([a.id])}>⊘</BarraBtn>
                           {marcoDe(a.id) && (
                             <BarraBtn titulo={`Take it out of "${marcoDe(a.id)!.nombre}"`} onClick={() => quitarDelMarco(a.id)}>⇱</BarraBtn>
@@ -3270,6 +3325,8 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
                          }}
                          notas={notasPorHoja[detail.asset.id] ?? []}
                          onNota={() => setNotando(detail.asset)}
+                         projectId={projectId}
+                         onExportado={reload}
                          onDesignEdit={() => pedirDesignEdit(detail.asset)}
                          // Quitar del lienzo cierra la vista: dejarla abierta mostraría en grande
                          // una hoja que acaba de dejar de estar ahí.
@@ -3946,8 +4003,10 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
 // grilla, como en la referencia. La grilla sigue visible detrás, atenuada, así no se pierde
 // el contexto de dónde estaba la imagen. Al cerrar vuelve exactamente a su celda.
 function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNota, onDesignEdit,
-                 onQuitar, escondidas, onDevolver, marca, onRevalidar }: {
+                 onQuitar, escondidas, onDevolver, marca, onRevalidar, projectId, onExportado }: {
   asset: UnifiedAsset; from: DOMRect; accent: string
+  // Para el ↓ de un modelo: Export FBX corre sobre el proyecto y al terminar se recargan las piezas.
+  projectId: string; onExportado: () => void
   onMenu: (x: number, y: number) => void; onClose: () => void; onAprobado: () => void
   // Las mismas acciones que en el lienzo. Al abrir la hoja no se pierden: es la misma pieza,
   // vista más grande, y tener que cerrarla para poder anotarla era el camino largo.
@@ -4487,7 +4546,7 @@ function Detail({ asset, from, accent, onMenu, onClose, onAprobado, notas, onNot
         }}
       >
         <BarraBtn titulo={notas.length ? `Notes (${notas.length})` : 'Notes'} activo={notas.length > 0} onClick={onNota}>✎</BarraBtn>
-        <BarraBtn titulo="Save to my computer" onClick={() => bajarActivo(asset)}>↓</BarraBtn>
+        <BotonBajar asset={asset} projectId={projectId} onExportado={onExportado} />
         <BarraBtn titulo="Remove from canvas — it stays in the library" onClick={onQuitar}>⊘</BarraBtn>
         <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.14)', margin: '0 3px' }} />
         <BarraBtn titulo="Design edits" onClick={onDesignEdit}>✦</BarraBtn>
