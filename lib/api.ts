@@ -392,6 +392,8 @@ export interface UnifiedAsset {
    *  reusa al rehacerla: el workflow ya cambió de valores para entonces, así que leerlo de ahí
    *  diría con qué se generaría hoy, no con qué se generó esto. */
   opciones?: Record<string, unknown> | null
+  /** Edit 3D · Retopo en quads: el FBX de Tripo, aparte del GLB que se ve. */
+  fbx_url?: string | null
   /** De qué página del deck es esta hoja, cuando está instanciada («18_CharacterSheet»). El
    *  nombre no sirve: termina con el personaje, no con la página. */
   instancia_pagina?: string | null
@@ -2688,6 +2690,24 @@ export async function armarPackDeAnimacion(projectId: string, assetId: string, m
 export async function getAssetTools(projectId: string, assetId: string) {
   return request<{ success: boolean; herramientas: HerramientaDeAsset[] }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/tools`,
+  )
+}
+
+/** Edit 3D: las herramientas de Tripo sobre un modelo, en el orden de la web, con sus opciones
+ *  descubiertas de ComfyUI. Sobre una pieza que no es modelo la lista viene vacía. */
+export interface Herramienta3D { clave: string; etiqueta: string; ayuda: string; opciones: OpcionWorkflow[] }
+export async function getEdit3D(projectId: string, assetId: string) {
+  return request<{ success: boolean; herramientas: Herramienta3D[]; partes: string[] }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/edit3d`,
+  )
+}
+export async function runEdit3D(projectId: string, assetId: string, herramienta: string, opciones: Record<string, unknown> | null, memberId?: string | null) {
+  return request<{ success: boolean; herramienta: string; creados: { id: string; name: string; storage_url: string; format: string }[] }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/edit3d`,
+    {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ herramienta, opciones, member_id: memberId ?? null }),
+    },
   )
 }
 

@@ -25,6 +25,7 @@ import ContextoModal from './ContextoModal'
 import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias, vfxBrief } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
+import Edit3DModal from './Edit3DModal'
 import InstanciarModal from './InstanciarModal'
 
 // El Moodboard es oscuro en los dos modos: su ventana tiene el fondo oscuro FIJO, igual que los
@@ -3115,7 +3116,23 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
         />
       )}
 
-      {herram && (
+      {herram && herram.h.clave.startsWith('edit3d:') && (
+        <Edit3DModal
+          asset={{ id: herram.asset.id, name: outputOf(herram.asset) ?? herram.asset.name }}
+          projectId={projectId}
+          clave={herram.h.clave.slice('edit3d:'.length)}
+          accent={theme.accent}
+          onCancel={() => setHerram(null)}
+          onListo={ids => {
+            const origen = herram.asset.id
+            setHerram(null)
+            if (ids.length) publicarALaDerecha(origen, ids)
+            reload()
+          }}
+        />
+      )}
+
+      {herram && !herram.h.clave.startsWith('edit3d:') && (
         <HerramientaModal
           asset={{ id: herram.asset.id, name: outputOf(herram.asset) ?? herram.asset.name, url: herram.asset.storage_url ?? null }}
           projectId={projectId}
@@ -3812,11 +3829,21 @@ function Card({ asset, index, accent, colors, selected, onOpen, onSelect, onHove
           <div
             onPointerDown={e => e.stopPropagation()}
             onDoubleClick={e => e.stopPropagation()}
-            style={{ width: '100%', height: '100%' }}
+            style={{ width: '100%', height: '100%', position: 'relative' }}
           >
             {/* `ruedaSoloZoom`: con el cursor encima del modelo la rueda solo acerca y aleja la
                 pieza. Sin eso el mismo giro llegaba al lienzo y además desplazaba la hoja. */}
             <ModelViewer url={url} ruedaSoloZoom style={{ width: '100%', height: '100%' }} />
+            {/* Retopo en quads (Edit 3D): lo que se ve es la vista GLB; el entregable es el FBX. */}
+            {asset.fbx_url && (
+              <a href={asset.fbx_url} download onClick={e => e.stopPropagation()}
+                 title="Download the quad mesh as FBX"
+                 style={{ position: 'absolute', right: 8, bottom: 8, fontFamily: 'var(--font-mono)', fontSize: 10,
+                          padding: '4px 9px', borderRadius: 6, background: 'rgba(14,17,22,0.85)',
+                          border: '1px solid rgba(255,255,255,0.18)', color: '#fff', textDecoration: 'none' }}>
+                FBX ↓
+              </a>
+            )}
           </div>
         </>
       ) : kind === '3d' && glb ? (
@@ -4636,7 +4663,9 @@ function tituloMontaje(e: EstadoDeMontaje | null): string {
 const SUBMENU: Record<string, { label: string; items: string[] }> = {
   text:  { label: 'Edit Text',  items: ['New Iteration', 'Crop & extract', 'Format settings', 'Coherence & length review', 'Upload manual edits'] },
   image: { label: 'Edit 2D',    items: ['New Iteration', 'Design edits', 'New angle', 'Segmentation (masking)', 'Upload manual edits'] },
-  '3d':  { label: 'Edit 3D',    items: ['New Iteration', '3D viewer (layers & maps)', 'Retexture', 'Download FBX or GLB', 'Upload manual edits'] },
+  // Las herramientas de Tripo en el orden de su web (Miguel León, W43 #7). Reemplazan a «3D viewer»,
+  // «Retexture» y «Download FBX or GLB», que nunca tuvieron camino; Retexture es ahora Texture.
+  '3d':  { label: 'Edit 3D',    items: ['New Iteration', 'Segment', 'Retopo', 'Smart UV', 'Texture', 'Rig', 'Upload manual edits'] },
   video: { label: 'Edit Video', items: ['New Iteration', 'Trim', 'Replace assets', 'Extract frames', 'Upload manual edits'] },
   audio: { label: 'Edit Audio', items: ['New Iteration', 'Trim', 'Transcribe', 'Replace track', 'Upload manual edits'] },
 }
@@ -4680,6 +4709,14 @@ const HERRAMIENTA_DE: Record<string, string> = {
   'New angle': 'multiangle',
   'Segmentation (masking)': 'segmentation',
 }
+
+// Edit 3D: qué sector corre qué herramienta de Tripo. No preguntan al backend si aplican: sobre un
+// modelo aplican las cinco, y el submenú «Edit 3D» solo se abre sobre modelos.
+const EDIT3D_DE: Record<string, string> = {
+  'Segment': 'segment', 'Retopo': 'retopo', 'Smart UV': 'smart_uv', 'Texture': 'texture', 'Rig': 'rig',
+}
+const herramienta3D = (clave: string, etiqueta: string): HerramientaDeAsset =>
+  ({ clave: `edit3d:${clave}`, workflow: '', etiqueta, pide_mascara: false, disponible: true, controles: null })
 
 // El radial principal son cuatro cuadrantes fijos; el submenú son cinco. Se calculan: un sector
 // es el centro más un arco, y el arco se aproxima con puntos porque `clip-path` no traza curvas.
@@ -6792,7 +6829,9 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
         // posición 1 era «Design edits» solo en Edit 2D — en Edit 3D es «3D viewer», en Audio y
         // Video es «Trim», en Text es «Crop & extract»— y las cuatro abrían Design Edits.
         // «Subir ajustes manuales» sigue sin camino, en los cinco.
-        const herr   = (tools || []).find(h => h.clave === HERRAMIENTA_DE[label])
+        const herr   = kindOf(asset) === '3d' && EDIT3D_DE[label]
+          ? herramienta3D(EDIT3D_DE[label], label)
+          : (tools || []).find(h => h.clave === HERRAMIENTA_DE[label])
         const esIterar = label === 'New Iteration'
         const esDesign = label === 'Design edits'
         // «Upload manual edits» vale en los CINCO tipos y no depende de ningún workflow: es traer
@@ -6817,6 +6856,7 @@ function RadialSubmenu({ x, y, asset, projectId, accent, colors, onBack, onDone,
               title={esIterar ? 'Re-run this page through its workflow'
                    : esDesign ? 'Describe a design change and re-generate the image'
                    : esSubir ? 'Replace this page with a file you edited outside Forge — it keeps its place and its connections'
+                   : herr?.clave.startsWith('edit3d:') ? `${label} with Tripo — the result is a new model to the right`
                    : herr ? (herr.pide_mascara
                        ? 'Paint the part to isolate — it is published as a new piece to the right'
                        : 'A new view of this asset — published as a new piece to the right')
