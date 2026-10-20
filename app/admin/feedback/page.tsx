@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getFeedback, updateFeedback, getMemberByAuth, summarizeFeedback } from '@/lib/api'
 import type { Feedback, FeedbackCategory, FeedbackSeverity, FeedbackStatus } from '@/lib/types'
 import { useAuth } from '@/lib/auth-context'
@@ -25,6 +25,74 @@ const STATUS_LABEL: Record<FeedbackStatus, string> = {
   resolved: 'Resolved',
 }
 
+// La captura a pantalla completa: rueda para acercar donde está el cursor, arrastrar para moverse,
+// doble clic para volver a encajarla y Esc o clic fuera para cerrar. En la ficha se ve a 600 px de
+// ancho y una captura de pantalla entera no se lee a ese tamaño.
+function VisorCaptura({ url, onClose }: { url: string; onClose: () => void }) {
+  const [vista, setVista] = useState({ z: 1, x: 0, y: 0 })
+  const arrastre = useRef<{ x: number; y: number; vx: number; vy: number; movio: boolean } | null>(null)
+  const [moviendo, setMoviendo] = useState(false)
+
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+
+  const rueda = (e: React.WheelEvent) => {
+    const caja = e.currentTarget.getBoundingClientRect()
+    // El punto bajo el cursor se queda quieto: se mide respecto al centro, que es el origen del transform.
+    const px = e.clientX - caja.left - caja.width / 2, py = e.clientY - caja.top - caja.height / 2
+    setVista(v => {
+      const z = Math.min(8, Math.max(1, v.z * (e.deltaY < 0 ? 1.2 : 1 / 1.2)))
+      if (z === 1) return { z: 1, x: 0, y: 0 }
+      const f = z / v.z
+      return { z, x: px - (px - v.x) * f, y: py - (py - v.y) * f }
+    })
+  }
+
+  return (
+    <div
+      onClick={() => { if (!arrastre.current?.movio) onClose() }}
+      onWheel={rueda}
+      onPointerDown={e => { arrastre.current = { x: e.clientX, y: e.clientY, vx: vista.x, vy: vista.y, movio: false }; setMoviendo(true) }}
+      onPointerMove={e => {
+        const a = arrastre.current
+        if (!a || vista.z === 1) return
+        const dx = e.clientX - a.x, dy = e.clientY - a.y
+        if (Math.abs(dx) + Math.abs(dy) > 3) a.movio = true
+        setVista(v => ({ ...v, x: a.vx + dx, y: a.vy + dy }))
+      }}
+      onPointerUp={() => { setMoviendo(false); setTimeout(() => { arrastre.current = null }, 0) }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(6,8,11,0.92)', overflow: 'hidden',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: vista.z > 1 ? (moviendo ? 'grabbing' : 'grab') : 'zoom-out', userSelect: 'none', touchAction: 'none',
+      }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url} alt="screenshot" draggable={false}
+        onClick={e => e.stopPropagation()}
+        onDoubleClick={() => setVista(v => v.z > 1 ? { z: 1, x: 0, y: 0 } : { z: 2.5, x: 0, y: 0 })}
+        style={{
+          maxWidth: '94vw', maxHeight: '90vh', borderRadius: 6,
+          transform: `translate(${vista.x}px, ${vista.y}px) scale(${vista.z})`,
+          transition: moviendo ? 'none' : 'transform 90ms ease-out',
+        }}
+      />
+      <div onClick={e => e.stopPropagation()} style={{
+        position: 'fixed', top: 14, right: 16, display: 'flex', gap: 8, alignItems: 'center',
+        fontSize: 11, fontFamily: 'monospace', color: '#c9d1dc',
+      }}>
+        <span style={{ opacity: 0.7 }}>{Math.round(vista.z * 100)}% · wheel to zoom · drag to move · double-click to reset</span>
+        <a href={url} target="_blank" rel="noreferrer" style={{ color: '#c9d1dc', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '4px 9px', textDecoration: 'none' }}>Open original ↗</a>
+        <button onClick={onClose} style={{ background: 'transparent', color: '#c9d1dc', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '4px 9px', cursor: 'pointer' }}>✕</button>
+      </div>
+    </div>
+  )
+}
+
 export default function FeedbackAdminPage() {
   const { user } = useAuth()
   const [items, setItems]           = useState<Feedback[]>([])
@@ -33,6 +101,7 @@ export default function FeedbackAdminPage() {
   const [catFilter, setCat]         = useState<FeedbackCategory | ''>('')
   const [sevFilter, setSev]         = useState<FeedbackSeverity | ''>('')
   const [selected, setSelected]     = useState<Feedback | null>(null)
+  const [ampliada, setAmpliada]     = useState<string | null>(null)
   const [resNote, setResNote]       = useState('')
   const [saving, setSaving]         = useState(false)
   const [currentMemberId, setMemberId] = useState<string | null>(null)
@@ -241,7 +310,9 @@ export default function FeedbackAdminPage() {
               {/* Screenshot */}
               {selected.screenshot_url && (
                 <div style={{ marginBottom: 16 }}>
-                  <img src={selected.screenshot_url} alt="screenshot" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line-2)' }} />
+                  <img src={selected.screenshot_url} alt="screenshot" title="Click to enlarge"
+                       onClick={() => setAmpliada(selected.screenshot_url!)}
+                       style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line-2)', cursor: 'zoom-in' }} />
                 </div>
               )}
 
@@ -332,6 +403,7 @@ export default function FeedbackAdminPage() {
           </div>
         </div>
       )}
+      {ampliada && <VisorCaptura url={ampliada} onClose={() => setAmpliada(null)} />}
     </div>
   )
 }
