@@ -59,13 +59,15 @@ export default function ContextoModal({ projectId, paginas, accent, onCerrar, on
   const formato: 'imagen' | 'texto' = archivo ? 'imagen' : 'texto'
   const hayEntrada = Boolean(archivo || texto.trim())
 
-  // El nombre de página tal como lo lleva la hoja: «19_EnvironmentSheet». Se saca del último tramo
-  // del nombre, que es como el resto del moodboard identifica una página.
+  // El nombre de página tal como lo lleva la hoja: «19_EnvironmentSheet». Es el tramo del nombre que
+  // empieza con su número. No siempre el último: en una hoja instanciada —«Art Style Guide —
+  // 18_CharacterSheet — Professor Wort»— el último es el ítem, y la Character Sheet de un proyecto
+  // que solo la tiene instanciada no aparecía en la lista (Miguel León, 21-10).
   const nombresDePagina = useMemo(() => {
     const vistos = new Set<string>()
     for (const a of paginas) {
-      const cola = String(a.name).split(/\s+[—–]\s+/).pop()?.trim()
-      if (cola && /^\d{2}_/.test(cola)) vistos.add(cola)
+      const tramo = String(a.name).split(/\s+[—–]\s+/).map(t => t.trim()).find(t => /^\d{2}_\S+$/.test(t))
+      if (tramo) vistos.add(tramo)
     }
     return [...vistos].sort()
   }, [paginas])
