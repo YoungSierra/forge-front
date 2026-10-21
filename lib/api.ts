@@ -110,8 +110,10 @@ async function request<T>(path: string, options?: RequestInit, reintento = false
   if (!res.ok) {
     let message = `Request failed: ${res.status} ${res.statusText}`
     let code = ''
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let body: any = null
     try {
-      const body = await res.json()
+      body = await res.json()
       code = body.code || ''
       if (body.detail) message = body.detail
       else if (body.message) message = body.message
@@ -127,7 +129,8 @@ async function request<T>(path: string, options?: RequestInit, reintento = false
     if (res.status === 401) {
       message = 'Your session is not loaded in this tab. Reload the page — if it keeps happening, sign in again.'
     }
-    throw new Error(message)
+    // El código y el cuerpo viajan con el error para quien tenga que decidir según el caso (el Accept con marcas).
+    throw Object.assign(new Error(message), { code, body })
   }
   return res.json()
 }
@@ -1691,10 +1694,29 @@ export async function acceptNodeOutput(
   projectNodeId?: string | null,
 ): Promise<{ asset_id: string; slice_regeneration?: SliceRegeneration[] }> {
   const memberId = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
-  return request<{ success: boolean; asset_id: string; slice_regeneration?: SliceRegeneration[] }>(
+  const enviar = (aprobarMarcas: boolean) => request<{ success: boolean; asset_id: string; slice_regeneration?: SliceRegeneration[] }>(
     `/api/projects/${projectId}/canvas/nodes/${nodeId}/accept`,
-    { method: 'POST', body: JSON.stringify({ session_id: sessionId, content, member_id: memberId, doc_url: docUrl || undefined, doc_format: docFormat || undefined, project_node_id: projectNodeId || undefined }) },
+    { method: 'POST', body: JSON.stringify({ session_id: sessionId, content, member_id: memberId, doc_url: docUrl || undefined, doc_format: docFormat || undefined, project_node_id: projectNodeId || undefined, ...(aprobarMarcas ? { aprobar_marcas: true } : {}) }) },
   )
+  try {
+    return await enviar(false)
+  } catch (e) {
+    // Un maestro con marcas [DRAFT]/[REPLACE]: el back no lo aprueba sin preguntar (pedido de Pedro, 20-10).
+    // Confirmado, las [DRAFT] se quitan y queda registrado quién y en qué secciones; las [REPLACE] se quedan.
+    const err = e as Error & { code?: string; body?: { marcas?: { seccion: string | null; tipo: string }[] } }
+    if (err.code !== 'MARKS_PENDING' || typeof window === 'undefined') throw e
+    const marcas = err.body?.marcas ?? []
+    const secc = (tipo: string) => [...new Set(marcas.filter(m => m.tipo === tipo).map(m => (m.seccion ? `§${m.seccion}` : 'preamble')))]
+    const drafts = secc('DRAFT'), replaces = secc('REPLACE')
+    const texto = [
+      `This master has ${marcas.length} marked section(s): ${[...new Set([...drafts, ...replaces])].join(', ')}.`,
+      drafts.length ? `\n[DRAFT] in ${drafts.join(', ')}: approving removes the marks and records who approved them and when.` : '',
+      replaces.length ? `\n[REPLACE] in ${replaces.join(', ')}: these are NOT removed — that text still has to be written. Edit those sections; until then, the documents extracted from this master will refuse them.` : '',
+      '\n\nDo you approve them?',
+    ].join('')
+    if (!window.confirm(texto)) throw new Error('Accept cancelled: the marked sections were not approved.')
+    return enviar(true)
+  }
 }
 
 // Deshace una aprobación: devuelve esa sesión a `active` para poder seguir escribiendo en ella.

@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ALCANCE_VS, calcularGuia, claveDe, esProducible, estadoDe, progresoCategoria, progresoGlobal, unidadesDe,
+  ALCANCE_VS, categoriasVisibles, calcularGuia, claveDe, esProducible, estadoDe, progresoCategoria, progresoGlobal, unidadesDe,
   type CategoriaAlcance, type EstadoElemento, type Estados,
 } from './vs-scope'
 
@@ -158,7 +158,7 @@ export default function VerticalSliceScope ({
 
   // Las nueve páginas, en orden de producción. Ya no hay dos familias: lo que no es una página
   // del ASG no se rastrea acá (spec §11.3).
-  const paginas = [...ALCANCE_VS].sort((a, b) => a.orden - b.orden)
+  const paginas = categoriasVisibles(instancias).sort((a, b) => a.orden - b.orden)
 
   return (
     <div

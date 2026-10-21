@@ -31,6 +31,10 @@ export type CategoriaAlcance = {
   pagina: string
   /** Orden de producción. Es lo único que ordena la guía. */
   orden:  number
+  /** Solo aparece si el proyecto declara instancias de esa página. Las hojas que no existen en todos los
+   *  maestros (Skybox, Level Design, Tile Textures): en un proyecto del maestro de 25 serían una
+   *  categoría que nunca puede avanzar y bajarían el anillo para siempre. */
+  soloConInstancias?: boolean
   elementos: ElementoAlcance[]
 }
 
@@ -89,6 +93,32 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
       { id: 'tipos_mapa', nombre: 'Map types',
         regla: 'whichever the slice uses',
         minimo: '1 map type working start to finish.' },
+    ],
+  },
+  // Las tres hojas que la spec del menú (§4) añadió entre Environment y Prop: Skybox, y las dos del maestro de
+  // 34 (handoff de Migue 19-10). `regla` y `minimo`, traducción literal de su tabla.
+  {
+    id: 'skybox', nombre: 'Skybox Sheet', pagina: '25_SkyboxSheet', orden: 3.1, soloConInstancias: true,
+    elementos: [
+      { id: 'skyboxes', nombre: 'Skyboxes',
+        regla: 'whatever the VS Scope defines',
+        minimo: 'Whatever the VS Scope defines; each skybox linked to its parent environment and produced with the Skybox.json Run.' },
+    ],
+  },
+  {
+    id: 'level', nombre: 'Level Design Sheet', pagina: '33_LevelDesignSheet', orden: 3.2, soloConInstancias: true,
+    elementos: [
+      { id: 'niveles_ld', nombre: 'Levels',
+        regla: 'a share of the game (max. 25%), named',
+        minimo: 'The levels that happen INSIDE the chosen environment; each level linked to its parent environment. Run: workflow to be defined by the Technical Artist.' },
+    ],
+  },
+  {
+    id: 'tile', nombre: 'Tile Textures Sheet', pagina: '34_TileTexturesSheet', orden: 3.3, soloConInstancias: true,
+    elementos: [
+      { id: 'texturas_tileables', nombre: 'Tileable textures',
+        regla: 'counted by listing, with a name',
+        minimo: 'The large surfaces of the playable stretch (walkable floor + walls / terrain), produced with the 2D_Tile_Texture_Creator → 2D_Seamless_PBR Textures Run.' },
     ],
   },
   {
@@ -174,7 +204,8 @@ export const ALCANCE_VS: CategoriaAlcance[] = [
  *  una página nueva al alcance vuelve a hacer falta. */
 export const CATEGORIAS_PRODUCIBLES = new Set([
   'paleta', 'character', 'environment', 'prop', 'audio',
-  'ui', 'vfx', 'video_marketing', 'animation',
+  'ui', 'vfx', 'video_marketing', 'animation', 'skybox', 'tile',
+  // Sin 'level': su Run espera el workflow del Technical Artist.
 ])
 
 export const esProducible = (c: CategoriaAlcance) => CATEGORIAS_PRODUCIBLES.has(c.id)
@@ -218,6 +249,15 @@ export function unidadesDe (cat: CategoriaAlcance, instancias?: Instancias): str
   return cat.elementos.map(e => e.id)
 }
 
+/** Las categorías que cuentan en este proyecto: las de siempre, y las `soloConInstancias` si declara alguna. */
+export function categoriasVisibles (instancias?: Instancias): CategoriaAlcance[] {
+  return ALCANCE_VS.filter(c => {
+    if (!c.soloConInstancias) return true
+    const k = instancias ? Object.keys(instancias).find(x => sinNumero(x) === sinNumero(c.pagina)) : null
+    return !!(k && instancias?.[k]?.length)
+  })
+}
+
 /** Promedio del avance de una categoría, de 0 a 1. Sobre instancias cuando las hay. */
 export function progresoCategoria (cat: CategoriaAlcance, estados: Estados, instancias?: Instancias): number {
   const u = unidadesDe(cat, instancias)
@@ -229,7 +269,7 @@ export function progresoCategoria (cat: CategoriaAlcance, estados: Estados, inst
  *  promedios. Promediar categorías le daría a «Color System» —una— el mismo peso que a Character
  *  Sheet, que puede tener seis personajes. */
 export function progresoGlobal (estados: Estados, instancias?: Instancias): number {
-  const todos = ALCANCE_VS.flatMap(c => unidadesDe(c, instancias).map(x => estadoDe(estados, c.id, x)))
+  const todos = categoriasVisibles(instancias).flatMap(c => unidadesDe(c, instancias).map(x => estadoDe(estados, c.id, x)))
   if (!todos.length) return 0
   return todos.reduce((s, e) => s + PESO[e], 0) / todos.length
 }
@@ -259,7 +299,7 @@ export type Guia = {
  * Devuelve `null` cuando todo está aprobado.
  */
 export function calcularGuia (estados: Estados, instancias?: Instancias): Guia | null {
-  const incompletas = [...ALCANCE_VS]
+  const incompletas = categoriasVisibles(instancias)
     .sort((a, b) => a.orden - b.orden)
     .filter(c => progresoCategoria(c, estados, instancias) < 1)
   if (!incompletas.length) return null
