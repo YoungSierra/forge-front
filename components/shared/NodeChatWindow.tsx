@@ -958,6 +958,22 @@ function ThumbnailCard({ item }: { item: InlineImageItem }) {
       }}>
         {item.text.replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1').split('\n')[0].slice(0, 70)}
       </span>
+      {/* El prompt de arriba es el del documento; la imagen rehecha con ↺ se pidió con un cambio
+          encima. JM, 21-10: «los prompts siguen siendo los originales y los de las imágenes nuevas
+          no se ven en ninguna parte». Se muestra el cambio que produjo la imagen que se ve. */}
+      {(() => {
+        const cambio = item.allVariations.find(v => v.url === item.imageUrl)?.condition?.trim()
+        return cambio ? (
+          <span title={cambio} style={{
+            fontSize: 9, color: 'var(--action)', lineHeight: 1.35,
+            overflow: 'hidden', display: '-webkit-box',
+            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const,
+            maxWidth: Math.max(item.allVariations.length, 1) * (S + 4),
+          }}>
+            ✎ {cambio}
+          </span>
+        ) : null
+      })()}
       {showPanel && <VariationPanel item={item} onClose={() => setShowPanel(false)} />}
     </div>
   )
