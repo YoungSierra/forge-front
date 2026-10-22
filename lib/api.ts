@@ -2578,7 +2578,7 @@ export interface ReferenciaAD {
 /** La referencia vigente de la página (o instancia) que es este activo, y su historial. `aplica` = false fuera
  *  de las páginas del ASG: ahí Design Edits no ofrece referencia. */
 export async function getReferenciaDeAsset(projectId: string, assetId: string) {
-  return request<{ success: boolean; aplica: boolean; pagina?: string; instancia?: InstanciaDeHoja | null
+  return request<{ success: boolean; aplica: boolean; workflow?: string; pagina?: string; instancia?: InstanciaDeHoja | null
                    vigente: ReferenciaAD | null; historial: ReferenciaAD[] }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/referencia`)
 }

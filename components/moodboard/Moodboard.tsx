@@ -5030,14 +5030,17 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
   // La referencia de Dirección de Arte (Design Edits V2). Solo en las páginas del ASG y sus instancias: el
   // servidor dice si aplica. Se abre con la vigente de la página, la misma que ve Add Context (spec §4).
   const [registro, setRegistro] = useState<{ aplica: boolean; vigente: ReferenciaAD | null; historial: ReferenciaAD[] } | null>(null)
+  // Qué fila correría este Design Edit: la V2 (con referencia) en las páginas del ASG de un proyecto nuevo, la V1 en el
+  // resto (v2.9.61). Lo dice el servidor; de ahí salen también las Generation options, que no son las mismas en las dos.
+  const [wfDelEdit, setWfDelEdit] = useState<string | null>(esEstilo ? 'V57_STUDIO_Moodboard_Iteration' : null)
   const [refElegida, setRefElegida] = useState<ReferenciaElegida>({ modo: 'vigente' })
   const [verHistorial, setVerHistorial] = useState(false)
   const [refOcupada, setRefOcupada] = useState(false)
   const cargarRegistro = useCallback(() => {
     if (esEstilo) return
     getReferenciaDeAsset(projectId, asset.id)
-      .then(r => setRegistro({ aplica: r.aplica, vigente: r.vigente, historial: r.historial || [] }))
-      .catch(() => setRegistro(null))   // sin registro se edita igual, sin referencia
+      .then(r => { setRegistro({ aplica: r.aplica, vigente: r.vigente, historial: r.historial || [] }); setWfDelEdit(r.workflow || 'V57_STUDIO_Moodboard_Iteration') })
+      .catch(() => { setRegistro(null); setWfDelEdit('V57_STUDIO_Moodboard_Iteration') })   // sin registro se edita igual, sin referencia
   }, [projectId, asset.id, esEstilo])
   useEffect(() => { cargarRegistro() }, [cargarRegistro])
   const vistaNueva = useMemo(() => refElegida.modo === 'nueva' ? URL.createObjectURL(refElegida.archivo) : null, [refElegida])
@@ -5057,12 +5060,13 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
   const [elegidas, setElegidas] = useState<Record<string, unknown>>({})
   const [abierto,  setAbierto]  = useState(false)
   useEffect(() => {
+    if (!wfDelEdit) return
     let vivo = true
-    getWorkflowOptions(projectId, 'V57_STUDIO_Moodboard_Iteration')
+    getWorkflowOptions(projectId, wfDelEdit)
       .then(r => { if (vivo) { setOps(r.opciones); setElegidas({ ...(asset.opciones || {}) }) } })
       .catch(() => { if (vivo) setOps([]) })   // sin catálogo se edita igual, con los valores de siempre
     return () => { vivo = false }
-  }, [projectId, asset.opciones])
+  }, [projectId, asset.opciones, wfDelEdit])
 
   // Solo lo que difiere de lo que ya traía la pieza: mandar el resto reescribiría cada nodo con
   // el mismo valor y convertiría en letra muerta cualquier cambio futuro del workflow.
