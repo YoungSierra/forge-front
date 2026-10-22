@@ -22,7 +22,7 @@ import { MD_COMPONENTS } from '@/lib/md-components'
 import DataAccordion, { DocumentFiles } from '@/components/shared/DataAccordion'
 import type { DocumentData, DocumentFile } from '@/lib/api'
 import ContextoModal from './ContextoModal'
-import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias, vfxBrief, exportFBX } from '@/lib/api'
+import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias, vfxBrief, exportFBX, getReferenciaDeAsset, restaurarReferencia, quitarReferenciaDeAsset, type ReferenciaAD } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import Edit3DModal from './Edit3DModal'
@@ -588,7 +588,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
   // La iteracion vive ACA y no en el radial: el menu se cierra al elegir, y el modal tiene que
   // sobrevivirlo. `aviso` es el caso de lo que todavia no se puede iterar.
   // `pagina` solo existe cuando se rehace una hoja de un deck; en Design Edits va `pedido`.
-  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string; opciones?: Record<string, unknown> | null; cambio?: ClaseDeCambio; estilo?: boolean } | null>(null)
+  const [iterando, setIterando] = useState<{ asset: UnifiedAsset; pagina: { n: number; nombre: string } | null; pedido?: string; opciones?: Record<string, unknown> | null; cambio?: ClaseDeCambio; estilo?: boolean; referencia?: ReferenciaElegida } | null>(null)
   // §8: la hoja sobre la que se pidió Run, esperando el recuadro de confirmación. Run avanza UN
   // paso y nada más — correr los dos de la cadena es apretarlo dos veces, no hay encadenado.
   const [corriendo, setCorriendo] = useState<UnifiedAsset | null>(null)
@@ -3260,7 +3260,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           projectId={projectId}
           accent={theme.accent}
           onClose={() => setEditando(null)}
-          onSubmit={(texto, opciones, cambio) => { const a = editando; setEditando(null); setIterando({ asset: a, pagina: null, pedido: texto, opciones, cambio }) }}
+          onSubmit={(texto, opciones, cambio, referencia) => { const a = editando; setEditando(null); setIterando({ asset: a, pagina: null, pedido: texto, opciones, cambio, referencia }) }}
         />
       )}
       {iterando && (
@@ -3281,6 +3281,7 @@ export default function Moodboard({ projectId, projectName, nodeKey, origin, onC
           // etiqueta «regenerate» que pide el informe v9. La pregunta estaba de adorno.
           cambio={iterando.cambio}
           estilo={iterando.estilo}
+          referencia={iterando.referencia}
           accent={theme.accent}
           onClose={() => setIterando(null)}
           onListo={recargarYPublicar}
@@ -4997,13 +4998,17 @@ function NotaModal({ asset, valor, otras, accent, onClose, onGuardar }: {
   )
 }
 
+/** Con qué referencia de Dirección de Arte va un Design Edit (spec de Miguel León §2.1): la vigente de la página,
+ *  ninguna en esta corrida, o una que se acaba de elegir y se sube al pulsar Generate. */
+type ReferenciaElegida = { modo: 'vigente' } | { modo: 'ninguna' } | { modo: 'nueva'; archivo: File }
+
 // ── Design Edits: la caja donde se pide el cambio ────────────────────────────
 // Es un paso aparte y no un campo dentro del modal de progreso: acá todavía no se gastó nada, y
 // el texto que se escriba es lo único que decide el resultado. Se avisa qué NO va a cambiar,
 // porque el workflow conserva la plantilla a propósito y sin decirlo se pide lo imposible.
 function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 'design' }: {
   asset: UnifiedAsset; projectId: string; accent: string; onClose: () => void
-  onSubmit: (texto: string, opciones: Record<string, unknown> | null, cambio: ClaseDeCambio) => void
+  onSubmit: (texto: string, opciones: Record<string, unknown> | null, cambio: ClaseDeCambio, referencia?: ReferenciaElegida) => void
   /** «estilo» = New Art Style: mismo recuadro, otro encargo. No pregunta qué clase de cambio es
    *  porque re-estilizar SIEMPRE es tratamiento — lo fija el servidor (informe v9, punto 2). */
   modo?: 'design' | 'estilo'
@@ -5017,7 +5022,34 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
   // Lo elige quien edita y no se deduce del texto: «change the spider for a lion» es fácil,
   // «make it warmer and add a fireplace» no, y equivocarse manda a alguien a pagar una
   // regeneración que no hacía falta. Arranca en «tratamiento», que es lo que no cuesta.
-  const [cambio, setCambio] = useState<ClaseDeCambio>('tratamiento')
+  //
+  // Con una referencia cargada no arranca en ninguno: ahí el chip decide además QUÉ se toma de la referencia (el
+  // look o el diseño) y no hay respuesta por defecto — Generate espera a que se elija (decisión de Pedro, 21-10).
+  const [cambioElegido, setCambio] = useState<ClaseDeCambio | null>(null)
+
+  // La referencia de Dirección de Arte (Design Edits V2). Solo en las páginas del ASG y sus instancias: el
+  // servidor dice si aplica. Se abre con la vigente de la página, la misma que ve Add Context (spec §4).
+  const [registro, setRegistro] = useState<{ aplica: boolean; vigente: ReferenciaAD | null; historial: ReferenciaAD[] } | null>(null)
+  const [refElegida, setRefElegida] = useState<ReferenciaElegida>({ modo: 'vigente' })
+  const [verHistorial, setVerHistorial] = useState(false)
+  const [refOcupada, setRefOcupada] = useState(false)
+  const cargarRegistro = useCallback(() => {
+    if (esEstilo) return
+    getReferenciaDeAsset(projectId, asset.id)
+      .then(r => setRegistro({ aplica: r.aplica, vigente: r.vigente, historial: r.historial || [] }))
+      .catch(() => setRegistro(null))   // sin registro se edita igual, sin referencia
+  }, [projectId, asset.id, esEstilo])
+  useEffect(() => { cargarRegistro() }, [cargarRegistro])
+  const vistaNueva = useMemo(() => refElegida.modo === 'nueva' ? URL.createObjectURL(refElegida.archivo) : null, [refElegida])
+  useEffect(() => () => { if (vistaNueva) URL.revokeObjectURL(vistaNueva) }, [vistaNueva])
+  const conReferencia = !esEstilo && !!registro?.aplica
+    && ((refElegida.modo === 'vigente' && !!registro.vigente) || refElegida.modo === 'nueva')
+  const cambio: ClaseDeCambio | null = cambioElegido ?? (conReferencia ? null : 'tratamiento')
+  const puedeGenerar = !!texto.trim() && (!conReferencia || !!cambio)
+  const enviar = () => {
+    if (!puedeGenerar) return
+    onSubmit(texto.trim(), cambiadas, (cambio ?? 'tratamiento'), registro?.aplica ? refElegida : undefined)
+  }
   // Rehacer ESTA imagen con otras opciones (informe v3, punto 12, paso 3). Se parte de las que
   // produjeron la pieza, no de los valores del workflow: el workflow ya cambió para entonces y
   // arrancar de ahí le cambiaría al usuario cosas que no tocó.
@@ -5133,7 +5165,7 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
           autoFocus
           value={texto}
           onChange={e => setTexto(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && texto.trim()) onSubmit(texto.trim(), cambiadas, cambio) }}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) enviar() }}
           placeholder={esEstilo
             ? "Describe the art style — cel-shaded anime, clean linework, pastel palette, matte finish…"
             : "Describe the design change — a character, an environment, a prop…"}
@@ -5144,6 +5176,18 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
             fontSize: 13, lineHeight: 1.5, fontFamily: 'var(--font-sans)', outline: 'none',
           }}
         />
+
+        {/* La referencia de Dirección de Arte (spec de Miguel León §2.1), entre el pedido y la ayuda. Opcional:
+            la referencia sola no alcanza, el pedido dice qué cambiar. */}
+        {!esEstilo && registro?.aplica && (
+          <BloqueDeReferencia
+            accent={accent} registro={registro} elegida={refElegida} vistaNueva={vistaNueva}
+            ocupada={refOcupada} verHistorial={verHistorial}
+            onElegir={setRefElegida} onVerHistorial={() => setVerHistorial(v => !v)}
+            onRestaurar={id => { setRefOcupada(true); restaurarReferencia(projectId, id).then(() => { setRefElegida({ modo: 'vigente' }); cargarRegistro() }).finally(() => setRefOcupada(false)) }}
+            onQuitarDeLaPagina={() => { setRefOcupada(true); quitarReferenciaDeAsset(projectId, asset.id).then(cargarRegistro).finally(() => setRefOcupada(false)) }}
+          />
+        )}
 
         <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
           {esEstilo
@@ -5163,7 +5207,9 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
             se sabe es una decisión más que tomar por nada. */}
         {!esEstilo && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>What are you changing?</span>
+          <span style={{ fontSize: 11, color: conReferencia && !cambio ? accent : 'var(--text-3)' }}>
+            What are you changing?{conReferencia && !cambio ? ' (required with a reference)' : ''}
+          </span>
           {([
             ['tratamiento', 'How it looks', 'Light, palette, materials — what came out of this page probably still holds.'],
             ['sujeto',      'What it shows', 'A different subject — what came out of this page will need redoing.'],
@@ -5197,14 +5243,15 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
             color: 'var(--text-2)', fontSize: 12, fontFamily: 'var(--font-mono)',
           }}>Cancel</button>
           <button
-            onClick={() => texto.trim() && onSubmit(texto.trim(), cambiadas, cambio)}
-            disabled={!texto.trim()}
+            onClick={enviar}
+            disabled={!puedeGenerar}
+            title={conReferencia && !cambio ? 'Choose what you are changing: with a reference it decides what is taken from it' : undefined}
             style={{
               padding: '7px 16px', borderRadius: 8,
-              cursor: texto.trim() ? 'pointer' : 'default',
-              background: texto.trim() ? `${accent}22` : 'transparent',
-              border: `1px solid ${texto.trim() ? accent + '88' : 'var(--line-2)'}`,
-              color: texto.trim() ? accent : 'var(--text-4)',
+              cursor: puedeGenerar ? 'pointer' : 'default',
+              background: puedeGenerar ? `${accent}22` : 'transparent',
+              border: `1px solid ${puedeGenerar ? accent + '88' : 'var(--line-2)'}`,
+              color: puedeGenerar ? accent : 'var(--text-4)',
               fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)',
             }}>{esEstilo ? 'Re-style this page' : 'Generate'}</button>
         </div>
@@ -5213,7 +5260,98 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
   )
 }
 
-function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pedido, opciones, cambio, estilo }: {
+// El bloque «Reference image (optional)» del modal de Design Edits. Se abre con la referencia vigente de la página
+// o instancia —venga de Add Context o de Design Edits—, y deja conservarla, reemplazarla o apagarla para esta
+// corrida. El historial es el mismo que ve Add Context: restaurar una anterior o quitar la de la página escribe en
+// el registro en el acto (no espera a Generate), y lo dice.
+function BloqueDeReferencia({ accent, registro, elegida, vistaNueva, ocupada, verHistorial, onElegir, onVerHistorial, onRestaurar, onQuitarDeLaPagina }: {
+  accent: string
+  registro: { vigente: ReferenciaAD | null; historial: ReferenciaAD[] }
+  elegida: ReferenciaElegida; vistaNueva: string | null; ocupada: boolean; verHistorial: boolean
+  onElegir: (r: ReferenciaElegida) => void; onVerHistorial: () => void
+  onRestaurar: (id: string) => void; onQuitarDeLaPagina: () => void
+}) {
+  const canal = (c: string) => c === 'design_edits' ? 'Design Edits' : 'Add Context'
+  const fecha = (f: string) => { const d = new Date(f); return isNaN(+d) ? '' : d.toLocaleDateString() }
+  const v = registro.vigente
+  const mostrando = elegida.modo === 'nueva'
+    ? { url: vistaNueva, nombre: elegida.archivo.name, nota: 'New reference · it becomes the current one when the edit finishes' }
+    : elegida.modo === 'vigente' && v
+      ? { url: v.url, nombre: v.nombre, nota: `Current reference · added via ${canal(v.canal)} · ${fecha(v.fecha)}` }
+      : null
+  const elegirArchivo = (f: File | undefined) => { if (f) onElegir({ modo: 'nueva', archivo: f }) }
+  const boton: CSSProperties = {
+    padding: '3px 9px', borderRadius: 6, cursor: 'pointer', fontSize: 10.5, fontFamily: 'var(--font-sans)',
+    background: 'transparent', border: '1px solid var(--line-2)', color: 'var(--text-2)',
+  }
+  return (
+    <div style={{ padding: '10px 11px', borderRadius: 9, background: 'var(--bg-2)', border: '1px solid var(--line-2)' }}>
+      <div style={{ fontSize: 11.5, color: 'var(--text-1)', marginBottom: 7 }}>
+        Reference image <span style={{ color: 'var(--text-3)' }}>(optional)</span>
+      </div>
+      {mostrando ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {mostrando.url && <img src={mostrando.url} alt="" style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--line-2)' }} />}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mostrando.nombre}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 2 }}>{mostrando.nota}</div>
+          </div>
+          <label style={{ ...boton, display: 'inline-block' }}>
+            Replace
+            <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} onChange={e => elegirArchivo(e.target.files?.[0])} />
+          </label>
+          <button style={boton} onClick={() => onElegir({ modo: 'ninguna' })}
+                  title="This edit runs without a reference. The page keeps its current reference.">Remove</button>
+        </div>
+      ) : (
+        <label style={{
+          display: 'block', padding: '11px 10px', borderRadius: 8, cursor: 'pointer', textAlign: 'center',
+          border: '1px dashed var(--line-2)', fontSize: 11.5, color: 'var(--text-3)',
+        }}>
+          Add a reference image — the design change will use it as a guide.
+          <span style={{ display: 'block', fontSize: 10, marginTop: 3 }}>PNG / JPG / WEBP · one reference</span>
+          <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} onChange={e => elegirArchivo(e.target.files?.[0])} />
+        </label>
+      )}
+      {elegida.modo === 'ninguna' && v && (
+        <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 6 }}>
+          This edit runs without a reference.{' '}
+          <button style={{ ...boton, padding: '1px 7px' }} onClick={() => onElegir({ modo: 'vigente' })}>Use the current one</button>
+        </div>
+      )}
+      {registro.historial.length > 0 && (
+        <div style={{ marginTop: 7 }}>
+          <button onClick={onVerHistorial} style={{ ...boton, border: 'none', padding: 0, color: 'var(--text-3)' }}>
+            {verHistorial ? '▾' : '▸'} Reference history ({registro.historial.length})
+          </button>
+          {verHistorial && (
+            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {registro.historial.map(h => (
+                <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: h.retirada ? 0.6 : 1 }}>
+                  <img src={h.url} alt="" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4 }} />
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {h.nombre} · {canal(h.canal)} · {fecha(h.fecha)}
+                  </span>
+                  {h.vigente
+                    ? <span style={{ fontSize: 10, color: accent }}>current</span>
+                    : <button style={boton} disabled={ocupada} onClick={() => onRestaurar(h.id)}>Restore</button>}
+                </div>
+              ))}
+              {v && (
+                <button style={{ ...boton, alignSelf: 'flex-start' }} disabled={ocupada} onClick={onQuitarDeLaPagina}
+                        title="The page goes back to having no reference, for every channel. The history is kept.">
+                  Clear the current reference of this page
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pedido, opciones, cambio, estilo, referencia }: {
   asset: UnifiedAsset; projectId: string; pagina: { n: number; nombre: string } | null; accent: string
   onClose: () => void; onListo: () => void
   /** Design Edits: el cambio pedido en palabras. Sin esto, se rehace la página desde su documento. */
@@ -5225,6 +5363,8 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
   /** Las opciones de generación para ESTA imagen. Valen solo para ella: en Run valen para toda
    *  la corrida, acá para la pieza que se está rehaciendo. */
   opciones?: Record<string, unknown> | null
+  /** Design Edits V2: con qué referencia de Dirección de Arte va. Una nueva se sube acá, justo antes de pedir. */
+  referencia?: ReferenciaElegida
 }) {
   const [pct, setPct] = useState(0)
   const [listo, setListo] = useState(false)
@@ -5265,6 +5405,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
 
   // La iteracion real. Se dispara una sola vez al abrir.
   const lanzada = useRef(false)
+  const subidaRef = useRef<{ modo: 'nueva'; url: string; nombre: string } | null>(null)
   useEffect(() => {
     if (lanzada.current) return
     lanzada.current = true
@@ -5274,10 +5415,20 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
     // Tres encargos con la misma cara: re-estilizar, editar el diseño, o rehacer la página desde
     // su documento. Los tres reemplazan la página en su sitio y dejan la anterior en la librería,
     // así que comparten esta ventana; lo único que cambia es a quién se le pide.
+    // La referencia nueva sube por el mismo camino que Add Context (la librería) y viaja como URL. Se sube una sola
+    // vez: un reintento reusa la URL en vez de dejar otra copia en la librería.
+    const conReferencia = async () => {
+      if (referencia?.modo !== 'nueva') return referencia ?? null
+      if (!subidaRef.current) {
+        const s = await uploadLibraryAsset(projectId, referencia.archivo, referencia.archivo.name)
+        subidaRef.current = { modo: 'nueva', url: s.storage_url, nombre: referencia.archivo.name }
+      }
+      return subidaRef.current
+    }
     const trabajo = estilo && pedido
       ? newArtStyleAsset(projectId, asset.id, pedido, miembro)
       : pedido
-        ? designEditAsset(projectId, asset.id, pedido, miembro, opciones ?? null, cambio ?? null)
+        ? conReferencia().then(ref => designEditAsset(projectId, asset.id, pedido, miembro, opciones ?? null, cambio ?? null, ref))
         : iterateAssetPage(projectId, asset.id, miembro)
     trabajo
       .then(r => {

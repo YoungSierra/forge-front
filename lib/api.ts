@@ -402,6 +402,9 @@ export interface UnifiedAsset {
   /** De qué página del deck es esta hoja, cuando está instanciada («18_CharacterSheet»). El
    *  nombre no sirve: termina con el personaje, no con la página. */
   instancia_pagina?: string | null
+  /** Y de qué ítem es la instancia, con su id estable si lo tiene: Add Context ofrece la referencia por instancia. */
+  instancia_item?: string | null
+  instancia_id?: string | null
   /** Si la produjo una cadena de producción. Una parte de un entorno también cuelga del 3.20 y
    *  también es imagen; esto es lo que la separa de una página del deck. */
   de_cadena?: boolean
@@ -1894,12 +1897,16 @@ export type ClaseDeCambio = 'sujeto' | 'tratamiento'
 export async function designEditAsset(
   projectId: string, assetId: string, prompt: string, memberId?: string | null,
   opciones?: Record<string, unknown> | null, cambio?: ClaseDeCambio | null,
+  /** La referencia de Dirección de Arte (Design Edits V2): la vigente, ninguna en esta corrida, o una recién subida. */
+  referencia?: { modo: 'vigente' | 'ninguna' } | { modo: 'nueva'; url: string; nombre: string } | null,
 ) {
-  return request<{ success: boolean; version: { id: string; version_number: number; storage_url: string } }>(
+  return request<{ success: boolean; version: { id: string; version_number: number; storage_url: string }
+                   referencia?: { id: string | null; alcance: 'look' | 'design'; canal: string; aviso?: string } | null }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/design-edit`,
     {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, member_id: memberId ?? null, opciones: opciones ?? null, cambio: cambio ?? null }),
+      body: JSON.stringify({ prompt, member_id: memberId ?? null, opciones: opciones ?? null, cambio: cambio ?? null,
+                             ...(referencia ? { referencia } : {}) }),
     },
   )
 }
@@ -2551,19 +2558,53 @@ export interface DestinoDeContexto {
   titulo:     string
   adi?:       string | null
   pagina?:    string | null
-  /** `directa` = entra en el hueco REF_* de la página · `indirecta` = influye vía su §ADI. */
+  /** `directa` = entra en el hueco REF_* (o USERREF) de la página · `indirecta` = influye vía su §ADI. */
   inyeccion:  'directa' | 'indirecta' | 'ninguna'
   porque?:    string
+  /** Con `clave: 'userref'` y una hoja instanciada: de qué instancia es la referencia. */
+  instancia?: InstanciaDeHoja | null
+}
+
+/** Una instancia de hoja del ASG: la página y el ítem («23_CharacterSheet» · «Lumen-Vael (CHAR-02)»). */
+export interface InstanciaDeHoja { pagina: string | null; item: string | null; id?: string }
+
+/** Una pieza del registro de referencias de Dirección de Arte de una página o instancia (spec §4). */
+export interface ReferenciaAD {
+  id: string; nombre: string; url: string
+  canal: 'add_context' | 'design_edits' | string
+  fecha: string; vigente: boolean; retirada: boolean
+}
+
+/** La referencia vigente de la página (o instancia) que es este activo, y su historial. `aplica` = false fuera
+ *  de las páginas del ASG: ahí Design Edits no ofrece referencia. */
+export async function getReferenciaDeAsset(projectId: string, assetId: string) {
+  return request<{ success: boolean; aplica: boolean; pagina?: string; instancia?: InstanciaDeHoja | null
+                   vigente: ReferenciaAD | null; historial: ReferenciaAD[] }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/referencia`)
+}
+
+/** Vuelve vigente una referencia del historial. */
+export async function restaurarReferencia(projectId: string, refId: string) {
+  return request<{ success: boolean }>(`/api/projects/${projectId}/canvas/referencias/${refId}/restaurar`, { method: 'POST' })
+}
+
+/** Quita la referencia de la página o instancia de este activo: vuelve a ir sin referencia; el historial queda. */
+export async function quitarReferenciaDeAsset(projectId: string, assetId: string) {
+  return request<{ success: boolean; retiradas: number }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/referencia/quitar`, { method: 'POST' })
 }
 
 /** Paso 3 de «Agregar contexto»: a dónde iría esto. No escribe nada — el destino lo confirma una
  *  persona, que es lo que pide el handoff. */
 export async function destinoDeContexto(projectId: string, body: {
   rol: string; ambito: string; cual?: string | null; formato?: 'imagen' | 'texto'
+  instancia?: InstanciaDeHoja | null
 }) {
   return request<{
     success: boolean; rol: string; ambito: string; estado: string; formato: string
     principal: DestinoDeContexto; alternativas: DestinoDeContexto[]; avisos: string[]
+    /** La referencia que ya tiene esa página o instancia, si el destino es su USERREF. */
+    actual?: ReferenciaAD | null
     roles: { clave: string; etiqueta: string }[]
   }>(`/api/projects/${projectId}/canvas/contexto/destino`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })

@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   destinoDeContexto, guardarContexto, uploadLibraryAsset,
-  type DestinoDeContexto, type UnifiedAsset,
+  type DestinoDeContexto, type UnifiedAsset, type InstanciaDeHoja, type ReferenciaAD,
 } from '@/lib/api'
 
 // «Agregar contexto» — la ventana de cuatro pasos del handoff de Miguel (§2).
@@ -53,6 +53,7 @@ export default function ContextoModal({ projectId, paginas, accent, onCerrar, on
   const [error,   setError]   = useState<string | null>(null)
   const [propuesta, setPropuesta] = useState<{
     principal: DestinoDeContexto; alternativas: DestinoDeContexto[]; avisos: string[]; estado: string
+    actual: ReferenciaAD | null
   } | null>(null)
   const [elegido, setElegido] = useState<DestinoDeContexto | null>(null)
 
@@ -63,29 +64,43 @@ export default function ContextoModal({ projectId, paginas, accent, onCerrar, on
   // empieza con su número. No siempre el último: en una hoja instanciada —«Art Style Guide —
   // 18_CharacterSheet — Professor Wort»— el último es el ítem, y la Character Sheet de un proyecto
   // que solo la tiene instanciada no aparecía en la lista (Miguel León, 21-10).
-  const nombresDePagina = useMemo(() => {
-    const vistos = new Set<string>()
+  //
+  // Y cada hoja instanciada, aparte: «23_CharacterSheet — Lumen-Vael (CHAR-02)». La referencia de Dirección de Arte
+  // es de UNA instancia y nunca carga en otra del mismo tipo de hoja (spec de Miguel León §3.2.3).
+  const opciones = useMemo(() => {
+    const porEtiqueta = new Map<string, { etiqueta: string; pagina: string; instancia: InstanciaDeHoja | null }>()
     for (const a of paginas) {
       const tramo = String(a.name).split(/\s+[—–]\s+/).map(t => t.trim()).find(t => /^\d{2}_\S+$/.test(t))
-      if (tramo) vistos.add(tramo)
+      if (!tramo) continue
+      if (!porEtiqueta.has(tramo)) porEtiqueta.set(tramo, { etiqueta: tramo, pagina: tramo, instancia: null })
+      if (a.instancia_item) {
+        const pagina = a.instancia_pagina || tramo
+        const etiqueta = `${pagina} — ${a.instancia_item}`
+        porEtiqueta.set(etiqueta, { etiqueta, pagina, instancia: { pagina, item: a.instancia_item, ...(a.instancia_id ? { id: a.instancia_id } : {}) } })
+      }
     }
-    return [...vistos].sort()
+    return [...porEtiqueta.values()].sort((x, y) => x.etiqueta.localeCompare(y.etiqueta))
   }, [paginas])
+  const opcionElegida = opciones.find(o => o.etiqueta === cual.trim()) || null
+  const paginaCual = opcionElegida?.pagina ?? cual
+  const instancia = opcionElegida?.instancia ?? null
 
   // El paso 3 lo resuelve el servidor en cuanto hay rol y ámbito.
   useEffect(() => {
     if (paso !== 3 || !rol || !ambito) return
     let vivo = true
     setBusy(true); setError(null)
-    destinoDeContexto(projectId, { rol, ambito, cual: cual || null, formato })
+    destinoDeContexto(projectId, { rol, ambito, cual: paginaCual || null, formato, instancia })
       .then(r => {
         if (!vivo) return
-        setPropuesta({ principal: r.principal, alternativas: r.alternativas, avisos: r.avisos, estado: r.estado })
+        setPropuesta({ principal: r.principal, alternativas: r.alternativas, avisos: r.avisos, estado: r.estado, actual: r.actual ?? null })
         setElegido(r.principal)
       })
       .catch(e => vivo && setError(e instanceof Error ? e.message : 'could not resolve a destination'))
       .finally(() => vivo && setBusy(false))
     return () => { vivo = false }
+    // `instancia` sale de `cual`, que ya está en la lista.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paso, rol, ambito, cual, formato, projectId])
 
   async function aprobar() {
@@ -219,7 +234,7 @@ export default function ContextoModal({ projectId, paginas, accent, onCerrar, on
                   }}
                 />
                 <datalist id="paginas-del-asg">
-                  {nombresDePagina.map(n => <option key={n} value={n} />)}
+                  {opciones.map(o => <option key={o.etiqueta} value={o.etiqueta} />)}
                 </datalist>
               </>
             )}
@@ -249,6 +264,16 @@ export default function ContextoModal({ projectId, paginas, accent, onCerrar, on
                 {d.porque && <span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-3)', marginTop: 2 }}>{d.porque}</span>}
               </button>
             ))}
+            {/* «This page already has a reference — replace it?» (spec §4.3): la misma que ve Design Edits. */}
+            {propuesta?.actual && elegido?.clave === 'userref' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--line-2)' }}>
+                <img src={propuesta.actual.url} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 5 }} />
+                <span style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
+                  This {instancia ? 'sheet' : 'page'} already has a reference — «{propuesta.actual.nombre}», added via {propuesta.actual.canal === 'design_edits' ? 'Design Edits' : 'Add Context'}.
+                  Approving makes the new one current; the previous one stays in the history and can be restored.
+                </span>
+              </div>
+            )}
             {propuesta?.avisos?.map((a, i) => (
               <div key={i} style={{ fontSize: 11, color: '#e8b562', lineHeight: 1.6, marginTop: 8 }}>{a}</div>
             ))}
