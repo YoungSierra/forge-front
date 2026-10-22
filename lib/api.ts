@@ -1900,7 +1900,9 @@ export async function designEditAsset(
   /** La referencia de Dirección de Arte (Design Edits V2): la vigente, ninguna en esta corrida, o una recién subida. */
   referencia?: { modo: 'vigente' | 'ninguna' } | { modo: 'nueva'; url: string; nombre: string } | null,
 ) {
-  return request<{ success: boolean; version: { id: string; version_number: number; storage_url: string }
+  // Con `n` > 1 (Design Edits V2) no hay versión vigente nueva: vienen `candidatos` y el usuario elige con `elegirCandidato`.
+  return request<{ success: boolean; version: { id: string; version_number: number; storage_url: string } | null
+                   candidatos?: { id: string; version_number: number; storage_url: string }[]
                    referencia?: { id: string | null; alcance: 'look' | 'design'; canal: string; aviso?: string } | null }>(
     `/api/projects/${projectId}/canvas/assets/${assetId}/design-edit`,
     {
@@ -1908,6 +1910,14 @@ export async function designEditAsset(
       body: JSON.stringify({ prompt, member_id: memberId ?? null, opciones: opciones ?? null, cambio: cambio ?? null,
                              ...(referencia ? { referencia } : {}) }),
     },
+  )
+}
+
+/** De las n imágenes de un Design Edit, la que reemplaza la página. Las demás quedan en el historial como «no elegidas». */
+export async function elegirCandidato(projectId: string, assetId: string, versionId: string, memberId?: string | null) {
+  return request<{ success: boolean; version: { id: string; version_number: number; storage_url: string } }>(
+    `/api/projects/${projectId}/canvas/assets/${assetId}/design-edit/elegir`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version_id: versionId, member_id: memberId ?? null }) },
   )
 }
 
@@ -2379,6 +2389,9 @@ export interface OpcionWorkflow {
   padre: string | null
   /** Qué valores encarecen la corrida del lado del proveedor. */
   sube_costo: string[]
+  /** El rango de un número, como lo declara ComfyUI (`n` de 1 a 8). */
+  min?: number
+  max?: number
 }
 
 export async function getWorkflowOptions(projectId: string, workflow: string) {

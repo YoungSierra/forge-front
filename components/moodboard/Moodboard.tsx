@@ -22,7 +22,7 @@ import { MD_COMPONENTS } from '@/lib/md-components'
 import DataAccordion, { DocumentFiles } from '@/components/shared/DataAccordion'
 import type { DocumentData, DocumentFile } from '@/lib/api'
 import ContextoModal from './ContextoModal'
-import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias, vfxBrief, exportFBX, getReferenciaDeAsset, restaurarReferencia, quitarReferenciaDeAsset, type ReferenciaAD } from '@/lib/api'
+import { getInstanciasDelAlcance, type ClaseDeCambio, getCorridasEnMarcha, type CorridaEnMarcha, miniaturaUrl, getProjectMedia, getAssetContent, uploadLibraryAsset, NEUTRAL_THEME, type MoodboardTheme, type UnifiedAsset, iterateAssetPage, approveAssetVersion, designEditAsset, getAssetNotes, saveAssetNote, getMoodboardLayout, saveMoodboardLayout, getNextChainStep, advanceAsset, promptsDeClips, newArtStyleAsset, type PasoDeCadena, type AssetNote, type MoodboardMarco, getWorkflowOptions, type OpcionWorkflow, getAssetTools, type HerramientaDeAsset, getMontajeDeAsset, type EstadoDeMontaje, getPackDeAnimacion, armarPackDeAnimacion, type EstadoDePack, marcarPapelDeMontaje, montarNivel, type ResultadoDeMontaje, getElementosDeMontaje, marcarInclusionDeMontaje, type ElementoDeMontaje, getPendientesActualizacion, revalidarAsset, type MarcaDeActualizacion, getEstadosDelAlcance, getPlanDeInstancias, vfxBrief, exportFBX, getReferenciaDeAsset, restaurarReferencia, quitarReferenciaDeAsset, type ReferenciaAD, elegirCandidato } from '@/lib/api'
 
 import HerramientaModal from './HerramientaModal'
 import Edit3DModal from './Edit3DModal'
@@ -5059,11 +5059,13 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
   const [ops,      setOps]      = useState<OpcionWorkflow[]>([])
   const [elegidas, setElegidas] = useState<Record<string, unknown>>({})
   const [abierto,  setAbierto]  = useState(false)
+  // El precio por imagen que imputa el sistema, para la línea de costo: con n > 1 se multiplica (rev. 4 de Art Direction).
+  const [usdPorImagen, setUsdPorImagen] = useState<number | null>(null)
   useEffect(() => {
     if (!wfDelEdit) return
     let vivo = true
     getWorkflowOptions(projectId, wfDelEdit)
-      .then(r => { if (vivo) { setOps(r.opciones); setElegidas({ ...(asset.opciones || {}) }) } })
+      .then(r => { if (vivo) { setOps(r.opciones); setElegidas({ ...(asset.opciones || {}) }); setUsdPorImagen(r.costo_por_imagen_usd ?? null) } })
       .catch(() => { if (vivo) setOps([]) })   // sin catálogo se edita igual, con los valores de siempre
     return () => { vivo = false }
   }, [projectId, asset.opciones, wfDelEdit])
@@ -5150,7 +5152,7 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
                           ))}
                         </select>
                       ) : (
-                        <input type="number" value={Number(valor)} onChange={e => set(Number(e.target.value))}
+                        <input type="number" value={Number(valor)} min={o.min} max={o.max} onChange={e => set(Number(e.target.value))}
                                style={{
                                  width: 168, padding: '5px 8px', borderRadius: 6,
                                  background: 'var(--bg-3)', border: '1px solid var(--line-2)',
@@ -5240,7 +5242,17 @@ function DesignEditPrompt({ asset, projectId, accent, onClose, onSubmit, modo = 
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+          {/* La línea de costo: n imágenes al precio por imagen. Con más de una, se avisa que hay que elegir. */}
+          {usdPorImagen != null && (() => {
+            const opN = ops.find(o => o.clave === 'n')
+            const n = Math.max(1, Number(elegidas.n ?? opN?.valor ?? 1) || 1)
+            return (
+              <span style={{ marginRight: 'auto', fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
+                {n} image{n === 1 ? '' : 's'} · ≈ ${(n * usdPorImagen).toFixed(2)} estimated{n > 1 ? ' · you choose which one replaces the page' : ''}
+              </span>
+            )
+          })()}
           <button onClick={onClose} style={{
             padding: '7px 16px', borderRadius: 8, cursor: 'pointer',
             background: 'transparent', border: '1px solid var(--line-2)',
@@ -5379,7 +5391,14 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
     const hist = (asset.versions ?? []).map(v => ({ id: v.id, n: v.version_number, url: v.storage_url }))
     return hist.length ? hist : [{ id: null, n: 1, url: asset.storage_url }]
   })
-  const version = Math.max(...vers.map(v => v.n))
+  // La vigente. Casi siempre es la más nueva; con n > 1 (Design Edits V2) no: las n nuevas son CANDIDATAS y la
+  // página sigue con la anterior hasta que el usuario elige una (`candidatas`).
+  const [vigenteN, setVigenteN] = useState<number | null>(null)
+  const [candidatas, setCandidatas] = useState<number[] | null>(null)
+  const [eligiendo, setEligiendo] = useState(false)
+  // Un fallo al ELEGIR no es un fallo de la generación: no ofrece «Try again», que volvería a pagar las n.
+  const [errorEleccion, setErrorEleccion] = useState<string | null>(null)
+  const version = vigenteN ?? Math.max(...vers.map(v => v.n))
   // Que version se esta mirando. Arranca en la recien generada, que es lo que uno viene a ver.
   const [viendo, setViendo] = useState(version)
   useEffect(() => { setViendo(version) }, [version])
@@ -5436,9 +5455,20 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
         : iterateAssetPage(projectId, asset.id, miembro)
     trabajo
       .then(r => {
-        setVers(v => [...v.filter(x => x.n !== r.version.version_number),
-                      { id: r.version.id, n: r.version.version_number, url: r.version.storage_url }]
+        const nuevas = 'candidatos' in r && r.candidatos?.length
+          ? r.candidatos
+          : r.version ? [r.version] : []
+        setVers(v => [...v.filter(x => !nuevas.some(n => n.version_number === x.n)),
+                      ...nuevas.map(n => ({ id: n.id, n: n.version_number, url: n.storage_url }))]
                      .sort((a, b) => a.n - b.n))
+        if (nuevas.length > 1) {
+          // La página no cambió: sigue vigente la que había, y se abre la primera candidata para mirarla.
+          setVigenteN(Math.max(...vers.map(v => v.n)))
+          setCandidatas(nuevas.map(n => n.version_number))
+          setViendo(nuevas[0].version_number)
+        } else if (nuevas[0]) {
+          setVigenteN(nuevas[0].version_number)
+        }
         setPct(100); setListo(true); onListo()
       })
       .catch(e => { setError(e?.message || 'The iteration could not be completed'); setPct(100) })
@@ -5536,7 +5566,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
                       cursor: 'move', userSelect: 'none' }}>
           <img src="/forgy/forgyi.png" alt="" width={18} height={18} style={{ objectFit: 'contain' }} />
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>
-            {error ? 'Iteration failed' : listo ? 'Iteration ready' : 'Processing iteration'}
+            {error ? 'Iteration failed' : candidatas ? `Choose one of the ${candidatas.length} images` : listo ? 'Iteration ready' : 'Processing iteration'}
           </span>
           <div style={{ flex: 1 }} />
           <button
@@ -5720,8 +5750,8 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
                     <span style={{
                       position: 'absolute', left: 0, right: 0, bottom: 0,
                       fontSize: 8.5, fontFamily: 'var(--font-mono)', lineHeight: '13px',
-                      background: 'rgba(6,7,9,0.78)', color: v === version ? accent : '#fff',
-                    }}>v{v}</span>
+                      background: 'rgba(6,7,9,0.78)', color: v === version || candidatas?.includes(v) ? accent : '#fff',
+                    }}>v{v}{candidatas?.includes(v) ? ` · ${candidatas.indexOf(v) + 1}/${candidatas.length}` : ''}</span>
                   </button>
                 ))}
               </div>
@@ -5738,7 +5768,14 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
                 background: `${accent}1c`, color: accent, border: `1px solid ${accent}44`,
               }}>v{viendo}</span>
 
-              {viendo === version
+              {candidatas
+                ? <span style={{ fontSize: 11, color: 'var(--text-2)', minWidth: 0 }}>
+                    {candidatas.includes(viendo)
+                      ? `Image ${candidatas.indexOf(viendo) + 1} of ${candidatas.length}. The page keeps v${version} until you choose; the others stay in its history.`
+                      : `Pick one of the ${candidatas.length} new images on the right.`}
+                    {errorEleccion && <span style={{ display: 'block', color: '#e8736a' }}>{errorEleccion}</span>}
+                  </span>
+                : viendo === version
                 ? <>
                     <span style={{ fontSize: 11, color: 'var(--text-2)', flexShrink: 0 }}>current</span>
                     <span style={{
@@ -5751,6 +5788,31 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
 
               <div style={{ flex: 1 }} />
 
+              {/* Con n > 1: elegir cuál reemplaza la página. Aprobar viene después, como siempre. */}
+              {candidatas ? (
+                <button
+                  disabled={!candidatas.includes(viendo) || eligiendo}
+                  onClick={async () => {
+                    const v = vers.find(x => x.n === viendo)
+                    if (!v?.id) return
+                    setEligiendo(true); setErrorEleccion(null)
+                    try {
+                      const miembro = typeof window !== 'undefined' ? localStorage.getItem('forge_member_id') : null
+                      await elegirCandidato(projectId, asset.id, v.id, miembro)
+                      setVigenteN(viendo); setCandidatas(null); onListo()
+                    } catch (e) {
+                      setErrorEleccion(e instanceof Error ? e.message : 'Could not use that image')
+                    } finally { setEligiendo(false) }
+                  }}
+                  style={{
+                    padding: '8px 20px', borderRadius: 8, flexShrink: 0,
+                    cursor: candidatas.includes(viendo) && !eligiendo ? 'pointer' : 'default',
+                    background: `${accent}1c`, border: `1px solid ${accent}88`, color: accent,
+                    fontSize: 12.5, fontWeight: 600, fontFamily: 'var(--font-sans)',
+                    opacity: candidatas.includes(viendo) ? 1 : 0.5,
+                  }}
+                >{eligiendo ? 'Applying…' : 'Use this one'}</button>
+              ) : (
               <button
                 onClick={async () => {
                   const v = vers.find(x => x.n === viendo)
@@ -5765,6 +5827,7 @@ function IteracionModal({ asset, projectId, pagina, accent, onClose, onListo, pe
                   fontSize: 12.5, fontWeight: 600, fontFamily: 'var(--font-sans)',
                 }}
               >Approve v{viendo}</button>
+              )}
             </div>
           </div>
         )}
