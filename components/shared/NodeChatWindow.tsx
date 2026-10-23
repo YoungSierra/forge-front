@@ -493,6 +493,14 @@ function outputHeaderPat(outputKey: string): string {
 function outputHeaderRx(outputKey: string): RegExp {
   return new RegExp(`^(?:#{1,4}\\s+)?${outputHeaderPat(outputKey)}\\b`, 'im')
 }
+// Dónde empieza la sección de un output. Manda el encabezado EXACTO (`## development_images`), que
+// es el que escribe el SECTION CONTRACT; el tolerante queda solo para respuestas sin él. Al revés,
+// en el 2.2 del QA del 21-10 la línea «Development image plan…» del plan casaba antes que la
+// sección de verdad, y el chat ofreció —y pagó— un hueco sacado de la prosa del plan (T07).
+function inicioDeSeccion(content: string, outputKey: string): RegExpExecArray | null {
+  const esc = outputKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`^#{1,4}[ \\t]+\\**\\s*${esc}\\**[ \\t]*$`, 'im').exec(content) ?? outputHeaderRx(outputKey).exec(content)
+}
 
 // ─── Typing dots ──────────────────────────────────────────────────────────────
 
@@ -1147,7 +1155,8 @@ const MENSAJE_EJECUTAR = 'Generate the output for this step'
  * bloques de datos (```json…) contados en vez de pegados. El documento completo no cambia: se ve con «Show full».
  * null si la respuesta no tiene al menos dos secciones o ya es corta.
  */
-function resumenPorSecciones(texto: string, lineas = 6): { texto: string; secciones: number } | null {
+interface SeccionResumida { titulo: string; recorte: string; completo: string }
+function resumenPorSecciones(texto: string, lineas = 6): { cabeza: string; partes: SeccionResumida[]; secciones: number } | null {
   if (!texto || texto.length < 1500) return null
   const partes = texto.split(/^(?=##[ \t]+\S)/m)
   const secciones = partes.filter(p => /^##[ \t]+\S/.test(p))
@@ -1164,18 +1173,50 @@ function resumenPorSecciones(texto: string, lineas = 6): { texto: string; seccio
     }
     const total = resto.filter(l => l.trim()).length
     const nota = [datos ? `_${datos} data block${datos > 1 ? 's' : ''}_` : '', total > visibles.length ? '_…_' : ''].filter(Boolean).join(' · ')
-    return [titulo, ...visibles, nota].filter(Boolean).join('\n')
+    return { titulo, recorte: [...visibles, nota].filter(Boolean).join('\n'), completo: resto.join('\n').trim() }
   })
-  return { texto: [cabeza, ...cuerpo].filter(Boolean).join('\n\n'), secciones: secciones.length }
+  return { cabeza, partes: cuerpo, secciones: secciones.length }
+}
+
+// T12 (QA del 21-10): cada sección del resumen se abre sola, sin tener que abrir la respuesta entera.
+// `abierta` es el estado inicial: con `plegarSolo`, solo las secciones que casan arrancan plegadas (T01).
+function SeccionPlegable({ seccion, abierta }: { seccion: SeccionResumida; abierta: boolean }) {
+  const [abierto, setAbierto] = useState(abierta)
+  const titulo = seccion.titulo.replace(/^##[ \t]+/, '')
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button
+        onClick={() => setAbierto(a => !a)}
+        title={abierto ? 'Collapse this section' : 'Expand this section'}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left',
+          border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
+          color: 'var(--text-0)', fontSize: 'calc(var(--chat-font, 12px) + 1px)', fontWeight: 700,
+        }}
+      >
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-3)', width: 10, flexShrink: 0 }}>{abierto ? '▾' : '▸'}</span>
+        <span>{titulo}</span>
+      </button>
+      {(abierto ? seccion.completo : seccion.recorte) && (
+        <div style={{ paddingLeft: 16 }}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+            {abierto ? seccion.completo : seccion.recorte}
+          </ReactMarkdown>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ─── Burbuja ──────────────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, onExpand, resumir = false }: {
+function MessageBubble({ msg, onExpand, resumir = false, plegarSolo }: {
   msg:       ChatMessage
   onExpand?: () => void
   /** Engine v1.10 — nodo entero: el chat enseña el documento recortado (secciones + primeras líneas) */
   resumir?:  boolean
+  /** Si viene, solo las secciones cuyo título casa arrancan plegadas; el resto, abiertas (T01: Convergence del 1.1) */
+  plegarSolo?: RegExp
 }) {
   const isUser = msg.role === 'user'
   const resumen = resumir && !isUser ? resumenPorSecciones(forDisplay(msg.content)) : null
@@ -1215,9 +1256,20 @@ function MessageBubble({ msg, onExpand, resumir = false }: {
               <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
             ) : (
               <div style={{ fontSize: 'var(--chat-font, 12px)', color: 'var(--text-0)', lineHeight: 1.65 }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-                  {resumen ? resumen.texto : forDisplay(msg.content)}
-                </ReactMarkdown>
+                {resumen ? (
+                  <>
+                    {resumen.cabeza && (
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>{resumen.cabeza}</ReactMarkdown>
+                    )}
+                    {resumen.partes.map((s, j) => (
+                      <SeccionPlegable key={j} seccion={s} abierta={!!plegarSolo && !plegarSolo.test(s.titulo)} />
+                    ))}
+                  </>
+                ) : (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                    {forDisplay(msg.content)}
+                  </ReactMarkdown>
+                )}
                 {resumen && onExpand && (
                   <button
                     onClick={onExpand}
@@ -1337,6 +1389,8 @@ export interface NodeChatWindowProps {
   docFormat?:       string
   /** Hay imágenes de este nodo renderizándose: el documento todavía no las tiene. */
   imagesPending?:   boolean
+  /** Con foco: el Execute corre ESE output, igual que «Run output» del modal (T11, QA del 21-10). */
+  onRunOutput?:     () => Promise<void>
   approvedAsset?:       ApprovedAsset
   // Image gen por item
   imageGenOutputs?:     ImageOutputDef[]
@@ -1377,7 +1431,7 @@ function esConexionCaida (err: unknown): boolean {
 
 export default function NodeChatWindow({
   stepKey, stepLabel, currentOutput, project, locked, modelName,
-  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, onStop, onRunStatus, docUrl, docFormat, imagesPending,
+  initialMessages, onMessagesChange, onApply, validateOutput, onClose, onSend, onAccept, onStop, onRunStatus, docUrl, docFormat, imagesPending, onRunOutput,
   approvedAsset, imageGenOutputs, outputImages: outputImagesProp, onGenerateItemImage,
   targetOutputKey, targetOutputLabel, systemPrompt, siblingContent, missingSourceNote, onReopen, onDeleteItemImage,
   isGate, projectNodeId, onOpenOutput,
@@ -1387,6 +1441,8 @@ export default function NodeChatWindow({
   const [moodOpen,        setMoodOpen]        = useState(false)   // moodboard filtrado a este nodo
   const [input,           setInput]           = useState('')
   const [sending,         setSending]         = useState(false)
+  // El Execute con foco corre por la ruta del Run output, no por un turno del chat: su propio ocupado.
+  const [corriendoOutput, setCorriendoOutput] = useState(false)
   // El controlador del turno en vuelo, para que el botón Stop pueda abortarlo.
   const abortRef = useRef<AbortController | null>(null)
   const [applying,        setApplying]        = useState(false)
@@ -1586,7 +1642,7 @@ export default function NodeChatWindow({
   const textoItemsPrevios = (outputKey: string, format: string): string[] => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role !== 'assistant') continue
-      const m = outputHeaderRx(outputKey).exec(messages[i].content)
+      const m = inicioDeSeccion(messages[i].content, outputKey)
       const sec = m ? messages[i].content.slice(m.index + m[0].length) : messages[i].content
       const items = parseOutputItems(sec.trim() || messages[i].content, format, outputKey, true)
       if (items.length) return items
@@ -1602,7 +1658,7 @@ export default function NodeChatWindow({
     // fallback-al-contenido-completo cuando hay varios outputs de imagen y solo algunos traen sección.
     const anySectionFound = imageGenOutputs.some(def => {
       if (!(def.format === 'png' || def.format === 'image')) return false
-      return outputHeaderRx(def.outputKey).test(content)
+      return inicioDeSeccion(content, def.outputKey) !== null
     })
 
     for (const def of imageGenOutputs) {
@@ -1618,8 +1674,7 @@ export default function NodeChatWindow({
       // cuando no hay sobre, y eso mandó a ComfyUI párrafos de análisis de mercado como si fueran
       // arte — medido: 3 renders, $0.12, ninguna imagen utilizable.
       if (!targetOutputKey) continue
-      const startRx = outputHeaderRx(def.outputKey)
-      const sectionMatch = startRx.exec(content)
+      const sectionMatch = inicioDeSeccion(content, def.outputKey)
 
       // PNG sin sección explícita y sin ser el foco: no usar el fallback al contenido completo si
       // otro output de imagen sí trae sección (evita generar la imagen del documento entero duplicada).
@@ -1832,8 +1887,7 @@ export default function NodeChatWindow({
     let fullMsgUsed = false
     for (const def of defs) {
       const isPng = def.format === 'png' || def.format === 'image'
-      const startRx = outputHeaderRx(def.outputKey)
-      const sectionMatch = startRx.exec(content)
+      const sectionMatch = inicioDeSeccion(content, def.outputKey)
       if (!sectionMatch && fullMsgUsed && !isPng) continue
       const otherEscaped = defs.filter(d => d.outputKey !== def.outputKey)
         .map(d => outputHeaderPat(d.outputKey))
@@ -1864,7 +1918,9 @@ export default function NodeChatWindow({
           imageUrl: [...variations].reverse().find(v => !(v as { deleted?: boolean }).deleted)?.url ?? null,
           allVariations: variations,
           onDelete: onDeleteItemImage ? (url: string) => onDeleteItemImage(def.outputKey, idx, url) : undefined,
-          isGenerating: generatingImgKeys.has(key),
+          // Con el motor renderizando, un hueco vacío está «en camino», no por generar: el clic pagaba otro
+          // render (QA del 21-10: cinco en el 1.1, cuatro en el 2.4).
+          isGenerating: generatingImgKeys.has(key) || (!!imagesPending && !variations.some(v => !(v as { deleted?: boolean }).deleted)),
           onZoom: url => setZoomImageUrl(url),
           onGenerate: async (condition?: string) => {
             setGeneratingImgKeys(prev => new Set(prev).add(key))
@@ -2208,8 +2264,7 @@ export default function NodeChatWindow({
 
               for (const def of defs) {
                 const isPng = def.format === 'png' || def.format === 'image'
-                const startRx     = outputHeaderRx(def.outputKey)
-                const sectionMatch = startRx.exec(msg.content)
+                const sectionMatch = inicioDeSeccion(msg.content, def.outputKey)
 
                 // PNG outputs nunca se saltan: cada output imagen genera su propia imagen independientemente
                 if (!sectionMatch && fullMsgUsed && !isPng) continue
@@ -2247,8 +2302,7 @@ export default function NodeChatWindow({
                 // hay imágenes declaradas: mejor decirlo que inventar sujetos.
                 let fuente = section
                 if (def.declaradasPor) {
-                  const planRx = outputHeaderRx(def.declaradasPor)
-                  let m = planRx.exec(msg.content)
+                  let m = inicioDeSeccion(msg.content, def.declaradasPor)
                   let texto = msg.content
 
                   // Corriendo output por output, el hermano NO está en esta respuesta: vive en su
@@ -2259,7 +2313,7 @@ export default function NodeChatWindow({
                   if (!m) {
                     const guardado = siblingContent?.[def.declaradasPor]
                     if (guardado) {
-                      const m2 = outputHeaderRx(def.declaradasPor).exec(guardado)
+                      const m2 = inicioDeSeccion(guardado, def.declaradasPor)
                       // El asset del hermano puede venir con su encabezado o sin él —depende de
                       // si se aceptó el nodo entero o ese output suelto—; los dos casos sirven.
                       texto = guardado
@@ -2322,7 +2376,7 @@ export default function NodeChatWindow({
                     imageUrl:     [...variations].reverse().find(v => !(v as { deleted?: boolean }).deleted)?.url ?? null,
                     allVariations: variations,
                     onDelete:     onDeleteItemImage ? (url: string) => onDeleteItemImage(def.outputKey, idx, url, msg.id) : undefined,
-                    isGenerating: generatingImgKeys.has(key),
+                    isGenerating: generatingImgKeys.has(key) || (!!imagesPending && !variations.some(v => !(v as { deleted?: boolean }).deleted)),
                     onZoom:       url => setZoomImageUrl(url),
                     onGenerate:   async (condition?: string) => {
                       setGeneratingImgKeys(prev => new Set(prev).add(key))
@@ -2361,6 +2415,8 @@ export default function NodeChatWindow({
                 <MessageBubble
                   msg={msg}
                   resumir={!targetOutputKey && !msg.aviso}
+                  // T01: en el 1.1 la galería ya enseña las semillas; de la respuesta solo se pliega la Convergence.
+                  plegarSolo={stepKey === '1.1' ? /convergence/i : undefined}
                   onExpand={() => setExpandedContent({ content: msg.content, imageItems: imageItems ?? buildItems(), pngImages: visibleOutputImages })}
                 />
                 {/* Cada respuesta pinta lo suyo. Atar esto al último turno era lo que hacía
@@ -2664,22 +2720,36 @@ export default function NodeChatWindow({
               )}
               {/* Engine v1.10 — Execute: corre el nodo entero sin escribir nada. Manda el mensaje implícito de «▶ Run»
                   como un turno normal del chat (respuesta, post-pass de imágenes, Accept). Solo en el chat del nodo
-                  entero: con foco, el turno sería el de ese output. Deshabilitado mientras haya un turno en curso. */}
-              {!locked && !targetOutputKey && (
-                <button
-                  onClick={() => { void send(MENSAJE_EJECUTAR) }}
-                  disabled={sending}
-                  title={sending ? 'A turn is running' : 'Execute — run the whole node without typing (sends “Generate the output for this step”)'}
-                  style={{
-                    flex: '0 0 22%', width: '100%', borderRadius: 7,
-                    border: '1px solid color-mix(in srgb, #34D399 40%, var(--line-2))',
-                    background: 'color-mix(in srgb, #34D399 10%, var(--bg-3))',
-                    color: sending ? 'var(--text-4)' : '#34D399', fontSize: 12, fontWeight: 700,
-                    cursor: sending ? 'not-allowed' : 'pointer', opacity: sending ? 0.4 : 1,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >▶</button>
-              )}
+                  entero: con foco, el turno sería el de ese output. Deshabilitado mientras haya un turno en curso.
+                  T11 (QA del 21-10): con foco también, y ahí equivale a «Run output» de ese output. */}
+              {!locked && (!targetOutputKey || !!onRunOutput) && (() => {
+                const ocupado = sending || corriendoOutput || (!!targetOutputKey && !!imagesPending)
+                return (
+                  <button
+                    onClick={() => {
+                      if (!targetOutputKey) { void send(MENSAJE_EJECUTAR); return }
+                      if (!onRunOutput) return
+                      setCorriendoOutput(true)
+                      setError(null)
+                      onRunOutput()
+                        .catch(e => setError(e instanceof Error ? e.message : 'Run output failed'))
+                        .finally(() => setCorriendoOutput(false))
+                    }}
+                    disabled={ocupado}
+                    title={ocupado ? 'A run is in progress'
+                      : targetOutputKey ? `Execute — run “${targetOutputLabel || targetOutputKey}” (same as Run output)`
+                      : 'Execute — run the whole node without typing (sends “Generate the output for this step”)'}
+                    style={{
+                      flex: '0 0 22%', width: '100%', borderRadius: 7,
+                      border: '1px solid color-mix(in srgb, #34D399 40%, var(--line-2))',
+                      background: 'color-mix(in srgb, #34D399 10%, var(--bg-3))',
+                      color: ocupado ? 'var(--text-4)' : '#34D399', fontSize: 12, fontWeight: 700,
+                      cursor: ocupado ? 'not-allowed' : 'pointer', opacity: ocupado ? 0.4 : 1,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >{corriendoOutput ? '…' : '▶'}</button>
+                )
+              })()}
               {/* Mientras genera, el mismo botón es Stop. Abortarlo cierra la conexión y el back
                   corta la llamada al proveedor: se deja de gastar de verdad, no solo se suelta la
                   ventana. */}

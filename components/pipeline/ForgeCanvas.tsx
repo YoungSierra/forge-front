@@ -1404,6 +1404,13 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
   const { canvasNode, onClick, locked, projectId, onImagesUpdate, isRunning, isStale, isError, onOpenChat } = data
   const { node, session } = canvasNode
   const outputSessions = canvasNode.output_sessions ?? {}
+  // T10 (QA del 21-10): sin ningún output de documento en la DNA no hay PDF que ofrecer. El del 2.4 era
+  // su sobre de imágenes pintado como viñetas. Mismo criterio que `nodoTieneDocumento` del back.
+  const tieneDocumento = (node?.outputs ?? []).some(o => {
+    const { format, type } = o as { format?: string; type?: string }
+    const f = String(format || '').toLowerCase()
+    return ['document', 'pdf', 'doc', 'docx', 'pptx'].includes(f) || (type === 'asset' && ['md', 'markdown'].includes(f))
+  })
   const scale      = useContext(CanvasScaleContext)
   const isDragging = useContext(DraggingContext)
   const { nodeId: pendingOutputId, outputKey: pendingOutputKey, clear: clearPendingOutput } = useContext(PendingOutputModalContext)
@@ -2111,7 +2118,7 @@ const ForgeNodeCard = React.memo(function ForgeNodeCard({ data }: { data: ForgeN
                     )}
                     {/* Engine v1.10 — C: rehacer el PDF siempre a mano junto al enlace. El enlace guardado puede ser el PDF que
                         salió con la respuesta, antes de las imágenes; antes solo se podía rehacer desaprobando. */}
-                    {session.output_asset.content ? (
+                    {session.output_asset.content && tieneDocumento ? (
                       <button
                         onClick={e => handleGeneratePdf(e, '', !!effectivePdfUrl)}
                         title={pdfLoading ? 'Generating PDF…' : effectivePdfUrl ? 'Rebuild the PDF with the current images' : 'Generate & Download PDF'}
@@ -6253,6 +6260,30 @@ function ForgeCanvasInner({ project, onRefresh }: { project: Project; onRefresh:
           // entrega el PDF con los marcadores impresos como texto.
           imagesPending={!!chatNode.project_node_id && Object.keys(leerDespachos())
             .some(k => k.startsWith(chatNode.project_node_id + ':'))}
+          // T11 (QA del 21-10): el Execute con foco corre ESE output por la misma ruta que «Run output»
+          // del modal, y el chat se recarga con la sesión que deja.
+          onRunOutput={chatTargetOutputKey && chatNode.project_node_id ? async () => {
+            const clave = chatTargetOutputKey
+            const pn = chatNode.project_node_id
+            const def = (chatForgeNode.outputs ?? []).find(o => (o.key || o.name) === clave) as unknown as { image_gen?: boolean } | undefined
+            // Un render cuesta crédito y no se deshace: mismo cuidado que el Run output del modal.
+            if (def?.image_gen && !window.confirm(`Render the images of “${chatTargetOutputLabel || clave}”? Each render spends credit.`)) return
+            const r = await autoRunNode(project.id, pn, undefined, clave)
+            const esperadas = (r as { expected?: number }).expected
+            if (esperadas) {
+              const t = leerDespachos()
+              t[`${pn}:${clave}`] = { esperadas, desde: Date.now() }
+              guardarDespachos(t)
+              setTickDespacho(x => x + 1)
+            }
+            const g = await getNodeSession(project.id, chatForgeNode.id, clave, pn)
+            chatSessionIdRef.current = g.session?.id ?? null
+            setChatSessionId(g.session?.id ?? null)
+            setChatMessages(g.messages)
+            if (g.session?.output_images) setChatOutputImages(prev => unirOutputImages(prev, g.session!.output_images as OutputImagesMap))
+            if (r.doc_url) { setChatDocUrl(r.doc_url); setChatDocFormat(r.doc_format ?? 'pdf') }
+            void loadCanvas(true)
+          } : undefined}
           // Lo aprobado de los OTROS outputs del nodo. El pitch document declara sus imágenes en
           // su plan, y corriendo output por output ese plan no viene en la respuesta — está en su
           // propio asset. Sin esto el chat avisaba «no hay imágenes que ofrecer» con el plan
